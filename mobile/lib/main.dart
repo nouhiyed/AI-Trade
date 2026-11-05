@@ -349,7 +349,28 @@ class _MarketChartCardState extends State<MarketChartCard> {
       const SizedBox(height: 3),
       const Row(children: [Text('+2.41%', style: TextStyle(color: green, fontWeight: FontWeight.bold, fontSize: 11)), SizedBox(width: 6), Text('24h illustrative change', style: TextStyle(color: muted, fontSize: 9))]),
       const SizedBox(height: 12),
-      Row(children: ['15m','1H','4H','1D'].map((s) => Expanded(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 3), child: InkWell(onTap: () => setState(() => tf = s), child: Container(padding: const EdgeInsets.symmetric(vertical: 7), decoration: BoxDecoration(color: tf == s ? cyan.withOpacity(.14) : panel2, borderRadius: BorderRadius.circular(9), border: Border.all(color: tf == s ? cyan.withOpacity(.5) : Colors.transparent)), child: Text(s, textAlign: TextAlign.center, style: TextStyle(color: tf == s ? cyan : muted, fontSize: 10, fontWeight: FontWeight.bold)))))).toList()),
+      Row(
+        children: ['15m', '1H', '4H', '1D'].map((s) {
+          return Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 3),
+              child: InkWell(
+                onTap: () => setState(() => tf = s),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 7),
+                  decoration: BoxDecoration(
+                    color: tf == s ? cyan.withOpacity(.14) : panel2,
+                    borderRadius: BorderRadius.circular(9),
+                    border: Border.all(color: tf == s ? cyan.withOpacity(.5) : Colors.transparent),
+                  ),
+                  child: Text(s, textAlign: TextAlign.center,
+                    style: TextStyle(color: tf == s ? cyan : muted, fontSize: 10, fontWeight: FontWeight.bold)),
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
       const SizedBox(height: 8),
       SizedBox(height: widget.compact ? 175 : 255, child: GestureDetector(
         onScaleUpdate: (d) => setState(() { zoom = (zoom * d.scale).clamp(.75, 2.4); drag += d.focalPointDelta.dx * .15; }),
@@ -461,8 +482,8 @@ class OrbPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final center=Offset(size.width*.53,size.height*.52);
     final r=size.width*.29;
-    canvas.drawCircle(center,r*1.8,Paint()..shader=RadialGradient(colors:[cyan.withOpacity(.22),blue.withOpacity(.07),Colors.transparent]).createShader(Rect.fromCircle(center:center,r:r*1.8)));
-    canvas.drawCircle(center,r,Paint()..shader=const RadialGradient(colors:[Color(0xFF65FFF0),Color(0xFF00BFAF),Color(0xFF126B91),Color(0xFF101D42)],center: Alignment(-.35,-.4),radius:.95).createShader(Rect.fromCircle(center:center,r:r)));
+    canvas.drawCircle(center,r*1.8,Paint()..shader=RadialGradient(colors:[cyan.withOpacity(.22),blue.withOpacity(.07),Colors.transparent]).createShader(Rect.fromCircle(center:center,radius:r*1.8)));
+    canvas.drawCircle(center,r,Paint()..shader=const RadialGradient(colors:[Color(0xFF65FFF0),Color(0xFF00BFAF),Color(0xFF126B91),Color(0xFF101D42)],center: Alignment(-.35,-.4),radius:.95).createShader(Rect.fromCircle(center:center,radius:r)));
     final orbit=Paint()..style=PaintingStyle.stroke..strokeWidth=1.5;
     for(int i=0;i<3;i++){
       canvas.save(); canvas.translate(center.dx,center.dy); canvas.rotate(t*math.pi*2+i*math.pi/3);
