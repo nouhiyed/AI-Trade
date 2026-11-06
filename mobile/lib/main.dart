@@ -1591,6 +1591,8 @@ class _TradeShellState extends State<TradeShell>
     );
 }
 
+}
+
 class GridPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
