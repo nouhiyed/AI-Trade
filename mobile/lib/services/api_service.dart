@@ -1,0 +1,129 @@
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+
+class ApiService {
+  static const String baseUrl = 'http://127.0.0.1:8000';
+  static const Duration timeout = Duration(seconds: 30);
+
+  static Future<Map<String, dynamic>> _request(
+    String method,
+    String path, {
+    Map<String, dynamic>? body,
+  }) async {
+    final uri = Uri.parse('$baseUrl$path');
+    late http.Response response;
+
+    try {
+      if (method == 'GET') {
+        response = await http.get(uri).timeout(timeout);
+      } else {
+        response = await http.post(
+          uri,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode(body ?? {}),
+        ).timeout(timeout);
+      }
+
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map<String, dynamic>) {
+        throw Exception('Invalid server response');
+      }
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Exception(
+          decoded['reason'] ??
+          decoded['error'] ??
+          'HTTP ${response.statusCode}',
+        );
+      }
+      return decoded;
+    } catch (e) {
+      throw Exception('API request failed ($path): $e');
+    }
+  }
+
+  static Future<bool> health() async {
+    final result = await _request('GET', '/health');
+    return result['ok'] == true;
+  }
+
+  static Future<Map<String, dynamic>> status() =>
+      _request('GET', '/status');
+
+  static Future<Map<String, dynamic>> setMode(String mode) =>
+      _request('POST', '/mode', body: {'mode': mode});
+
+  static Future<Map<String, dynamic>> analyze(String symbol) =>
+      _request('POST', '/analyze', body: {'symbol': symbol});
+
+  static Future<Map<String, dynamic>> scanFutures() =>
+      _request('POST', '/scan/futures');
+
+  static Future<Map<String, dynamic>> demoPositions() =>
+      _request('GET', '/demo/positions');
+
+  static Future<Map<String, dynamic>> openDemoTrade({
+    required String symbol,
+    required String direction,
+    double riskPct = 0.5,
+    int leverage = 1,
+  }) =>
+      _request('POST', '/demo/open', body: {
+        'symbol': symbol,
+        'direction': direction,
+        'risk_pct': riskPct,
+        'leverage': leverage,
+      });
+
+  static Future<Map<String, dynamic>> closeDemoTrade({
+    required String positionId,
+  }) =>
+      _request('POST', '/demo/close', body: {
+        'position_id': positionId,
+      });
+
+  static Future<Map<String, dynamic>> stopAgent(String domain) =>
+      _request('POST', '/agents/$domain/stop');
+
+  static Future<Map<String, dynamic>> resumeAgent(String domain) =>
+      _request('POST', '/agents/$domain/resume');
+
+  static Future<Map<String, dynamic>> emergencyStop() =>
+      _request('POST', '/emergency-stop');
+
+  static Future<Map<String, dynamic>> resumeAll() =>
+      _request('POST', '/resume-all');
+
+  static Future<Map<String, dynamic>> openPaperTrade({
+    required String domain,
+    required String symbol,
+    required String direction,
+    required double entry,
+    required double quantity,
+    double leverage = 1,
+    double? stopLoss,
+    double? takeProfit,
+  }) =>
+      _request('POST', '/paper/open', body: {
+        'domain': domain,
+        'symbol': symbol,
+        'direction': direction,
+        'entry': entry,
+        'quantity': quantity,
+        'leverage': leverage,
+        'stop_loss': stopLoss,
+        'take_profit': takeProfit,
+      });
+
+  static Future<Map<String, dynamic>> closePaperTrade({
+    required String positionId,
+    double? quantity,
+  }) =>
+      _request('POST', '/paper/close', body: {
+        'position_id': positionId,
+        if (quantity != null) 'quantity': quantity,
+      });
+
+  static Future<Map<String, dynamic>> paperHistory() =>
+      _request('GET', '/paper/history');
+}

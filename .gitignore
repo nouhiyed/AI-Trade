@@ -10,3 +10,19 @@ config/risk_state.json
 config/*secret*
 config/*key*
 *.log
+
+# Local trading state and credentials
+config/paper_state.json
+config/alpha_tokens.json
+config/risk_state.json
+
+# Local backups and generated APKs
+backup/
+apk/
+*.backup
+*.pre_*
+*.empty
+
+# Python cache
+__pycache__/
+*.py[cod]

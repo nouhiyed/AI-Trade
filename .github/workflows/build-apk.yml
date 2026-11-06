@@ -34,6 +34,33 @@ jobs:
         working-directory: mobile
         run: flutter create --platforms=android --project-name ai_trade .
 
+
+      - name: Configure Android network access
+        working-directory: mobile
+        run: |
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          import re
+
+          p = Path("android/app/src/main/AndroidManifest.xml")
+          s = p.read_text()
+
+          permission = '<uses-permission android:name="android.permission.INTERNET" />'
+          if permission not in s:
+              s = s.replace("<application", permission + "\n    <application", 1)
+
+          match = re.search(r'<application\b[^>]*', s)
+          if not match:
+              raise SystemExit("ERROR: application tag not found")
+
+          tag = match.group(0)
+          if "android:usesCleartextTraffic=" not in tag:
+              s = s[:match.end()] + ' android:usesCleartextTraffic="true"' + s[match.end():]
+
+          p.write_text(s)
+          print("Android network permissions configured")
+          PYTHON
+
       - name: Install dependencies
         working-directory: mobile
         run: flutter pub get
