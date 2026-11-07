@@ -148,32 +148,6 @@ class _TradeShellState extends State<TradeShell>
     }
   }
 
-  void _applyStatus(Map<String, dynamic> data) {
-    final demo = data['demo'];
-    final controls = data['controls'];
-    paperData = demo is Map
-        ? Map<String, dynamic>.from(demo)
-        : <String, dynamic>{};
-    final raw = paperData['open_positions'] ??
-        paperData['positions'] ??
-        paperData['items'];
-    final positions = raw is List
-        ? raw.whereType<Map>().map((item) {
-            final position = Map<String, dynamic>.from(item);
-            position['id'] = position['id'] ??
-                position['position_id'] ??
-                position['trade_id'] ??
-                '';
-            return position;
-          }).where((item) => item['id'].toString().isNotEmpty).toList()
-        : <Map<String, dynamic>>[];
-    paperData['open_positions'] = positions;
-    paperData['open_count'] = positions.length;
-    agentControls = controls is Map
-        ? Map<String, dynamic>.from(controls)
-        : {};
-  }
-
   List<Map<String, double>> _normalizeCandles(dynamic raw) {
     if (raw is! List) return [];
     final result = <Map<String, double>>[];
