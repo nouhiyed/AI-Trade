@@ -2,6 +2,7 @@
 from decimal import Decimal
 import json
 from pathlib import Path
+from uuid import uuid4
 
 from agents.futures.agent import FuturesAgent
 from agents.spot.agent import SpotAgent
@@ -167,6 +168,27 @@ class TradingCoordinator:
             )
         return result
 
+
+    def deposit_demo_balance(self, amount):
+        if self.mode != "DEMO":
+            return {"success": False, "reason": "DEMO mode is not active"}
+
+        value = Decimal(str(amount))
+        if not value.is_finite() or value <= 0:
+            return {"success": False, "reason": "Amount must be greater than zero"}
+
+        balance = self.demo_ledger.deposit(
+            self.demo_account_id,
+            value,
+            f"api-deposit:{uuid4().hex}",
+        )
+        return {
+            "success": True,
+            "balance": str(balance),
+            "account_summary": self.demo_execution.get_account_summary(
+                self.demo_account_id
+            ),
+        }
 
     def _demo_market_price(self, symbol, market="futures"):
         quote = self.paper_price_feed.fetch_book_ticker(market, symbol)
@@ -434,6 +456,13 @@ class TradingCoordinator:
             return {"approved": True, "mode": "DEMO", **record}
 
         except Exception as error:
+            if trade_id and "Insufficient DEMO cash for margin and fee" in str(error):
+                self.risk.release_reservation(trade_id)
+                return {
+                    "approved": False,
+                    "mode": "DEMO",
+                    "reason": str(error),
+                }
             if trade_id:
                 self.risk.update_reservation_status(
                     trade_id, "DEMO_UNPROTECTED",

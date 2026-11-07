@@ -76,6 +76,7 @@ class DemoDatabase:
         self.connection = sqlite3.connect(
             str(self.db_path),
             timeout=30,
+            check_same_thread=False,
         )
         self.connection.row_factory = sqlite3.Row
         self.connection.create_function(

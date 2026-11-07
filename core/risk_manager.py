@@ -295,6 +295,18 @@ class RiskManager:
             self.save_state()
             return {"success": True, "trade": dict(trade)}
 
+    def release_reservation(self, trade_id):
+        """Release a reservation only when execution is confirmed not to have opened."""
+        with self.lock:
+            trade = self.reservations.get(str(trade_id))
+            if trade is None:
+                return {"success": False, "reason": "Trade not found"}
+            if trade.get("status") != "DEMO_PENDING":
+                return {"success": False, "reason": "Reservation is not pending"}
+            self.reservations.pop(str(trade_id))
+            self.save_state()
+            return {"success": True, "trade_id": str(trade_id)}
+
     # -------------------------
     # CLOSE TRADE
     # -------------------------

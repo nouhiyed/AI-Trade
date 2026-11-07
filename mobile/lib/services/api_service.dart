@@ -102,6 +102,9 @@ class ApiService {
         'position_id': positionId,
       });
 
+  static Future<Map<String, dynamic>> depositDemoBalance(double amount) =>
+      _request('POST', '/demo/deposit', body: {'amount': amount});
+
   static Future<Map<String, dynamic>> stopAgent(String domain) =>
       _request('POST', '/agents/$domain/stop');
 

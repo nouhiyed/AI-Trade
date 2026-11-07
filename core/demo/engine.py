@@ -621,6 +621,29 @@ class DemoEngine:
             release = total_locked * close_qty / remaining
             new_remaining = remaining - close_qty
 
+            # Force a full position close if available DEMO cash cannot
+            # cover the realized loss and closing fee.
+            available_cash = max(
+                Decimal("0"), self._cash(account_id) + release
+            )
+            if pnl < 0 and abs(pnl) + fee > available_cash:
+                close_qty = remaining
+                pnl = calculate_futures_pnl(
+                    entry_price, fill_price, close_qty, direction
+                )
+                fee = calculate_fee(
+                    fill_price, close_qty, self.fee_rate
+                )
+                release = total_locked
+                new_remaining = Decimal("0")
+                available_cash = max(
+                    Decimal("0"), self._cash(account_id) + release
+                )
+                if abs(pnl) + fee > available_cash:
+                    fee = min(fee, available_cash)
+                    pnl = -(available_cash - fee)
+                reason = "LIQUIDATION"
+
             if release > 0:
                 self._post(
                     account_id, "MARGIN_RELEASE",
@@ -749,12 +772,65 @@ class DemoEngine:
                 (symbol, market_type, str(price), source, timestamp),
             )
 
+        liquidated = []
+
+        if market_type == "FUTURES":
+            positions = self.connection.execute(
+                """
+                SELECT * FROM positions
+                WHERE symbol = ? AND market_type = 'FUTURES'
+                  AND status IN ('OPEN', 'PARTIALLY_CLOSED')
+                """,
+                (symbol,),
+            ).fetchall()
+
+            for position in positions:
+                qty = Decimal(position["remaining_quantity"])
+                entry = Decimal(position["average_entry_price"])
+                direction = position["direction"]
+
+                reservations = self.connection.execute(
+                    """
+                    SELECT amount, released_amount
+                    FROM margin_reservations
+                    WHERE position_id = ? AND status != 'RELEASED'
+                    """,
+                    (position["position_id"],),
+                ).fetchall()
+
+                locked = sum(
+                    (Decimal(r["amount"]) - Decimal(r["released_amount"])
+                     for r in reservations),
+                    Decimal("0"),
+                )
+
+                unrealized = calculate_futures_pnl(
+                    entry, price, qty, direction
+                )
+                maintenance = qty * price * Decimal("0.005")
+                closing_fee = calculate_fee(
+                    price, qty, self.fee_rate
+                )
+
+                if locked + unrealized <= maintenance + closing_fee:
+                    try:
+                        result = self.close_futures_position(
+                            position["account_id"],
+                            position["position_id"],
+                            market_price=price,
+                            reason="LIQUIDATION",
+                        )
+                        liquidated.append(result)
+                    except ValueError:
+                        continue
+
         return {
             "symbol": symbol,
             "market_type": market_type,
             "price": price,
             "source": source,
             "timestamp": timestamp,
+            "liquidated_positions": liquidated,
         }
 
     def get_open_positions(self, account_id, agent_id=None):

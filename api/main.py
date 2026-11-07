@@ -1,11 +1,16 @@
 import json
+import os
+import math
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 from core.coordinator import TradingCoordinator
 
-coordinator = TradingCoordinator(initial_balance=1000)
+initial_balance = float(os.environ.get("DEMO_INITIAL_BALANCE", "1000"))
+if not math.isfinite(initial_balance) or initial_balance <= 0:
+    raise ValueError("DEMO_INITIAL_BALANCE must be a finite positive number")
+coordinator = TradingCoordinator(initial_balance=initial_balance)
 
 class APIHandler(BaseHTTPRequestHandler):
     def send_json(self, data, code=200):
@@ -142,6 +147,12 @@ class APIHandler(BaseHTTPRequestHandler):
 
             if path == "/mode":
                 result = coordinator.set_mode(data.get("mode", "DEMO"))
+                return self.send_json(result, 200 if result.get("success") else 400)
+
+            if path == "/demo/deposit":
+                if "amount" not in data:
+                    return self.send_json({"success": False, "error": "Missing field: amount"}, 400)
+                result = coordinator.deposit_demo_balance(data["amount"])
                 return self.send_json(result, 200 if result.get("success") else 400)
 
             if path == "/demo/close":

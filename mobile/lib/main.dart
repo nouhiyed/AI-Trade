@@ -886,7 +886,7 @@ class _TradeShellState extends State<TradeShell>
           const SizedBox(height: 20),
           _heading(
             tr('نبض السوق', 'MARKET PULSE'),
-            tr('بيانات توضيحية حالياً', 'PREVIEW DATA'),
+            (_marketCandles['futures:${_selectedSymbols['futures'] ?? 'BTCUSDT'}:${_selectedIntervals['futures'] ?? '5m'}']?.isNotEmpty ?? false) ? 'BINANCE LIVE' : tr('بانتظار بيانات Binance', 'WAITING FOR BINANCE'),
             Icons.candlestick_chart,
           ),
           const SizedBox(height: 10),
@@ -1015,6 +1015,62 @@ class _TradeShellState extends State<TradeShell>
         ),
       );
 
+  Future<void> _depositDemoBalance() async {
+    final amountController = TextEditingController();
+    final amount = await showDialog<double>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: widget.panel,
+        title: Text(tr('إضافة رصيد إلى DEMO', 'Add DEMO balance')),
+        content: TextField(
+          controller: amountController,
+          autofocus: true,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: InputDecoration(
+            labelText: tr('المبلغ بالدولار', 'Amount in USD'),
+            prefixText: r'$ ',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(tr('إلغاء', 'Cancel')),
+          ),
+          FilledButton(
+            onPressed: () {
+              final value = double.tryParse(amountController.text.trim());
+              if (value != null && value.isFinite && value > 0) {
+                Navigator.pop(ctx, value);
+              }
+            },
+            child: Text(tr('إضافة', 'Add')),
+          ),
+        ],
+      ),
+    );
+    amountController.dispose();
+    if (amount == null || !mounted) return;
+
+    setState(() => apiBusy = true);
+    var success = false;
+    try {
+      final result = await ApiService.depositDemoBalance(amount);
+      if (!mounted) return;
+      success = result['success'] == true;
+      notify(success
+          ? tr('تمت إضافة الرصيد الافتراضي بنجاح.', 'DEMO balance added successfully.')
+          : '${tr('تعذر إضافة الرصيد: ', 'Deposit failed: ')}${result['reason'] ?? result['error'] ?? 'Unknown error'}');
+    } catch (error) {
+      if (mounted) {
+        notify('${tr('خطأ أثناء الإيداع: ', 'Deposit error: ')}$error');
+      }
+    } finally {
+      if (mounted) setState(() => apiBusy = false);
+    }
+    if (success && mounted) await _refreshStatus();
+  }
+
+
   Widget _portfolioCard() {
     final rawSummary = paperData['account_summary'];
     final summary = rawSummary is Map
@@ -1103,6 +1159,15 @@ class _TradeShellState extends State<TradeShell>
                   apiOnline ? '$totalTrades' : '—', widget.text),
             ],
           ),
+            const SizedBox(height: 14),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: apiBusy || !apiOnline ? null : _depositDemoBalance,
+                icon: const Icon(Icons.add_circle_outline, size: 18),
+                label: Text(tr('إضافة رصيد افتراضي', 'Add DEMO funds')),
+              ),
+            ),
         ],
       ),
     );
@@ -1174,12 +1239,12 @@ class _TradeShellState extends State<TradeShell>
         content: Text(
           isDemo
               ? tr(
-                  'سيتم إرسال أمر $side على BTCUSDT إلى Binance Futures Testnet، مع إعداد مخاطرة 0.5% ورافعة 1x. لن يتم استخدام أموال حقيقية.',
-                  'A $side BTCUSDT order will be sent to Binance Futures Testnet with 0.5% risk and 1x leverage. No real funds will be used.',
+                  'سيتم تنفيذ محاكاة صفقة $side على BTCUSDT داخل محرك DEMO المحلي، باستخدام أسعار Binance الحقيقية، مع مخاطرة 0.5% ورافعة 1x. لن يتم إرسال أي أوامر إلى Binance.',
+                  'A $side BTCUSDT trade will be simulated locally in the DEMO engine using live Binance market prices, with 0.5% risk and 1x leverage. No orders will be sent to Binance.',
                 )
               : tr(
-                  'أنت في وضع PAPER. لن يتم إرسال أي أمر إلى Binance.',
-                  'You are in PAPER mode. No Binance order will be sent.',
+                  'التداول الحقيقي غير متاح؛ وضع LIVE مقفل من الخادم.',
+                  'Live trading is unavailable and securely locked by the backend.',
                 ),
         ),
         actions: [
@@ -1195,8 +1260,8 @@ class _TradeShellState extends State<TradeShell>
 
                     if (!isDemo) {
                       notify(tr(
-                        'وضع PAPER لا يرسل أوامر إلى Binance.',
-                        'PAPER mode does not send Binance orders.',
+                        'التداول الحقيقي غير متاح؛ وضع LIVE مقفل من الخادم.',
+                        'Live trading is unavailable and securely locked by the backend.',
                       ));
                       return;
                     }
@@ -1730,53 +1795,93 @@ class _TradeShellState extends State<TradeShell>
         ),
       );
 
-  Widget _chart(bool compact) => _panel(
-        child: Column(
-          children: [
-            Row(
-              children: [
-                Text(
-                  'BTC / USDT',
-                  style: TextStyle(color: widget.text, fontWeight: FontWeight.bold),
-                ),
-                const Spacer(),
-                const Text(
-                  '\$67,420',
-                  style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
-                ),
-              ],
-            ),
-            const SizedBox(height: 5),
-            const Row(
-              children: [
-                Text('+2.41%', style: TextStyle(color: green, fontSize: 11)),
-                SizedBox(width: 6),
-                Text('PREVIEW DATA', style: TextStyle(color: Colors.grey, fontSize: 9)),
-              ],
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              height: compact ? 150 : 235,
-              child: AnimatedBuilder(
-                animation: pulse,
-                builder: (_, __) => CustomPaint(
-                  painter: CandlePainter(pulse.value),
-                  child: const SizedBox.expand(),
+  Widget _chart(bool compact) {
+    final symbol = _selectedSymbols['futures'] ?? 'BTCUSDT';
+    final interval = _selectedIntervals['futures'] ?? '5m';
+    final key = 'futures:$symbol:$interval';
+    final candles = _marketCandles[key] ?? [];
+    final last = candles.isNotEmpty ? candles.last['close']! : 0.0;
+    final first = candles.isNotEmpty ? candles.first['open']! : 0.0;
+    final change = first > 0 ? ((last - first) / first) * 100 : null;
+
+    return _panel(
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Text(
+                symbol,
+                style: TextStyle(color: widget.text, fontWeight: FontWeight.bold),
+              ),
+              const Spacer(),
+              Text(
+                last > 0 ? last.toStringAsFixed(2) : '—',
+                style: TextStyle(
+                  color: widget.text,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 18,
                 ),
               ),
-            ),
-            Row(
-              children: [
-                _legend(green, 'BULLISH'),
-                const SizedBox(width: 15),
-                _legend(red, 'BEARISH'),
-                const Spacer(),
-                Text('RSI 58.4 · MACD +124', style: TextStyle(color: widget.muted, fontSize: 9)),
-              ],
-            ),
-          ],
-        ),
-      );
+            ],
+          ),
+          const SizedBox(height: 5),
+          Row(
+            children: [
+              if (change != null)
+                Text(
+                  '${change >= 0 ? '+' : ''}${change.toStringAsFixed(2)}%',
+                  style: TextStyle(
+                    color: change >= 0 ? green : red,
+                    fontSize: 11,
+                  ),
+                ),
+              const SizedBox(width: 8),
+              Text(
+                apiOnline && candles.isNotEmpty ? 'BINANCE LIVE' : 'DATA UNAVAILABLE',
+                style: TextStyle(
+                  color: apiOnline && candles.isNotEmpty ? green : red,
+                  fontSize: 9,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                '$interval · ${candles.length} ${tr('شمعة', 'candles')}',
+                style: TextStyle(color: widget.muted, fontSize: 9),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: compact ? 150 : 235,
+            child: candles.isEmpty
+                ? Center(
+                    child: Text(
+                      tr('بانتظار بيانات Binance الحقيقية', 'Waiting for live Binance candles'),
+                      style: TextStyle(color: widget.muted, fontSize: 11),
+                    ),
+                  )
+                : CustomPaint(
+                    painter: LiveCandlePainter(candles),
+                    child: const SizedBox.expand(),
+                  ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              _legend(green, 'BULLISH'),
+              const SizedBox(width: 15),
+              _legend(red, 'BEARISH'),
+              const Spacer(),
+              Text(
+                tr('المصدر: Binance REST', 'Source: Binance REST'),
+                style: TextStyle(color: widget.muted, fontSize: 9),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _coin(String symbol, String pair, String name, String price, String change, Color color) =>
       _panel(
