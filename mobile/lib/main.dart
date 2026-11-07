@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'services/api_service.dart';
@@ -19,7 +20,7 @@ class AITradeApp extends StatefulWidget {
 class _AITradeAppState extends State<AITradeApp> {
   bool dark = true;
   bool english = false;
-  String mode = 'PAPER';
+  String mode = 'DEMO';
 
   @override
   Widget build(BuildContext context) {
@@ -93,6 +94,21 @@ class _TradeShellState extends State<TradeShell>
   Map<String, dynamic> paperData = {};
   Map<String, dynamic> agentControls = {};
   final Set<String> closingPositionIds = {};
+  Timer? _refreshTimer;
+  final Map<String, List<Map<String, double>>> _marketCandles = {};
+  final Map<String, List<String>> _marketSymbols = {};
+  final Map<String, String> _selectedSymbols = {
+    'futures': 'BTCUSDT',
+    'spot': 'BTCUSDT',
+    'alpha': '',
+  };
+  final Map<String, String> _selectedIntervals = {
+    'futures': '5m',
+    'spot': '5m',
+    'alpha': '5m',
+  };
+  final Set<String> _marketLoading = {};
+  bool _marketRefreshing = false;
   late final AnimationController pulse = AnimationController(
     vsync: this,
     duration: const Duration(seconds: 9),
@@ -104,70 +120,382 @@ class _TradeShellState extends State<TradeShell>
   @override
   void initState() {
     super.initState();
-    _refreshStatus();
+    () async {
+      await _refreshStatus();
+      if (!mounted) return;
+      await _refreshMarketData(loadSymbols: true);
+    }();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 15), (_) async {
+      if (!mounted) return;
+      await _refreshStatus();
+      if (!mounted) return;
+      await _refreshMarketData();
+    });
   }
 
   Future<void> _refreshStatus() async {
     if (apiBusy) return;
     setState(() => apiBusy = true);
-
     try {
       final data = await ApiService.status();
       if (!mounted) return;
-
-      final paper = data['paper'];
-      final controls = data['controls'];
-      final mergedPaper = paper is Map
-          ? Map<String, dynamic>.from(paper)
-          : <String, dynamic>{};
-
-      if (widget.mode.toUpperCase() == 'DEMO') {
-        final demo = await ApiService.demoPositions();
-        final source = demo['positions'] ??
-            demo['open_positions'] ??
-            demo['items'] ??
-            (demo['data'] is Map
-                ? (demo['data']['positions'] ??
-                    demo['data']['open_positions'])
-                : null);
-
-        final positions = source is List
-            ? source.whereType<Map>().map((item) {
-                final position = Map<String, dynamic>.from(item);
-                position['id'] = position['id'] ??
-                    position['position_id'] ??
-                    position['trade_id'] ??
-                    '';
-                return position;
-              }).where((item) => item['id'].toString().isNotEmpty).toList()
-            : <Map<String, dynamic>>[];
-
-        mergedPaper['open_positions'] = positions;
-        mergedPaper['open_count'] = positions.length;
-      }
-
-      setState(() {
-        apiOnline = true;
-        paperData = mergedPaper;
-        agentControls = controls is Map
-            ? Map<String, dynamic>.from(controls)
-            : {};
-      });
-    } catch (e) {
-      if (mounted) {
-        setState(() => apiOnline = false);
-      }
+      _applyStatus(data);
+      setState(() => apiOnline = true);
+    } catch (_) {
+      if (mounted) setState(() => apiOnline = false);
     } finally {
-      if (mounted) {
-        setState(() => apiBusy = false);
-      }
+      if (mounted) setState(() => apiBusy = false);
     }
   }
+
+  void _applyStatus(Map<String, dynamic> data) {
+    final demo = data['demo'];
+    final controls = data['controls'];
+    paperData = demo is Map
+        ? Map<String, dynamic>.from(demo)
+        : <String, dynamic>{};
+    final raw = paperData['open_positions'] ??
+        paperData['positions'] ??
+        paperData['items'];
+    final positions = raw is List
+        ? raw.whereType<Map>().map((item) {
+            final position = Map<String, dynamic>.from(item);
+            position['id'] = position['id'] ??
+                position['position_id'] ??
+                position['trade_id'] ??
+                '';
+            return position;
+          }).where((item) => item['id'].toString().isNotEmpty).toList()
+        : <Map<String, dynamic>>[];
+    paperData['open_positions'] = positions;
+    paperData['open_count'] = positions.length;
+    agentControls = controls is Map
+        ? Map<String, dynamic>.from(controls)
+        : {};
+  }
+
+  List<Map<String, double>> _normalizeCandles(dynamic raw) {
+    if (raw is! List) return [];
+    final result = <Map<String, double>>[];
+    for (final item in raw) {
+      try {
+        if (item is Map) {
+          double n(dynamic v) => double.tryParse('$v') ?? 0;
+          final candle = {
+            'open': n(item['open'] ?? item['o']),
+            'high': n(item['high'] ?? item['h']),
+            'low': n(item['low'] ?? item['l']),
+            'close': n(item['close'] ?? item['c']),
+          };
+          if (candle['high']! > 0 && candle['low']! > 0) {
+            result.add(candle);
+          }
+        } else if (item is List && item.length >= 5) {
+          double n(dynamic v) => double.tryParse('$v') ?? 0;
+          final candle = {
+            'open': n(item[1]),
+            'high': n(item[2]),
+            'low': n(item[3]),
+            'close': n(item[4]),
+          };
+          if (candle['high']! > 0 && candle['low']! > 0) {
+            result.add(candle);
+          }
+        }
+      } catch (_) {}
+    }
+    return result;
+  }
+
+  Future<void> _loadMarketSymbols(String market) async {
+    try {
+      final result = await ApiService.marketSymbols(market);
+      if (!mounted) return;
+      dynamic raw = result['symbols'] ?? result['data'] ?? result['items'];
+      if (raw is Map) {
+        raw = raw['symbols'] ?? raw['items'] ?? raw['data'];
+      }
+      final symbols = <String>[];
+      if (raw is List) {
+        for (final item in raw) {
+          final value = item is Map
+              ? (item['symbol'] ?? item['s'] ?? item['pair'])
+              : item;
+          if (value != null && '$value'.isNotEmpty) {
+            symbols.add('$value');
+          }
+        }
+      }
+      if (symbols.isNotEmpty) {
+        setState(() {
+          _marketSymbols[market] = symbols.toSet().toList()..sort();
+          if (!_marketSymbols[market]!.contains(_selectedSymbols[market])) {
+            _selectedSymbols[market] = _marketSymbols[market]!.first;
+          }
+        });
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _loadMarketCandles(String market) async {
+    final symbol = _selectedSymbols[market] ?? '';
+    final interval = _selectedIntervals[market] ?? '5m';
+    if (symbol.isEmpty) return;
+    final key = '$market:$symbol:$interval';
+    if (_marketLoading.contains(key)) return;
+    _marketLoading.add(key);
+    try {
+      final result = await ApiService.marketCandles(
+        market: market,
+        symbol: symbol,
+        interval: interval,
+        limit: 100,
+      );
+      if (!mounted) return;
+      final raw = result['candles'] ??
+          result['klines'] ??
+          result['data'] ??
+          result['items'];
+      final candles = _normalizeCandles(raw);
+      if (candles.isNotEmpty) {
+        setState(() => _marketCandles[key] = candles);
+      }
+    } catch (_) {
+      // Keep the last successfully received market data.
+    } finally {
+      _marketLoading.remove(key);
+    }
+  }
+
+  Future<void> _loadPositionCandles(String market, String symbol) async {
+    if (symbol.isEmpty) return;
+    final key = '$market:$symbol:5m';
+    if (_marketLoading.contains(key)) return;
+    _marketLoading.add(key);
+    try {
+      final result = await ApiService.marketCandles(
+        market: market,
+        symbol: symbol,
+        interval: '5m',
+        limit: 80,
+      );
+      if (!mounted) return;
+      final raw = result['candles'] ??
+          result['klines'] ??
+          result['data'] ??
+          result['items'];
+      final parsed = _normalizeCandles(raw);
+      if (parsed.isNotEmpty) {
+        setState(() => _marketCandles[key] = parsed);
+      }
+    } catch (_) {
+      // Keep the last successfully received candles.
+    } finally {
+      _marketLoading.remove(key);
+    }
+  }
+
+  Future<void> _refreshMarketData({bool loadSymbols = false}) async {
+    if (_marketRefreshing) return;
+    _marketRefreshing = true;
+    try {
+      for (final market in ['futures', 'spot', 'alpha']) {
+        if (loadSymbols || !(_marketSymbols[market]?.isNotEmpty ?? false)) {
+          await _loadMarketSymbols(market);
+        }
+        await _loadMarketCandles(market);
+      }
+
+      final rawPositions = paperData['open_positions'];
+      if (rawPositions is List) {
+        final refreshed = <String>{};
+        for (final item in rawPositions) {
+          if (item is! Map) continue;
+          final position = Map<String, dynamic>.from(item);
+          final domain = '${position['domain'] ?? position['market_type'] ?? 'spot'}'.toLowerCase();
+          final market = domain.contains('future')
+              ? 'futures'
+              : domain.contains('alpha')
+                  ? 'alpha'
+                  : 'spot';
+          final symbol = '${position['symbol'] ?? ''}';
+          final key = '$market:$symbol:5m';
+          if (symbol.isNotEmpty && refreshed.add(key)) {
+            await _loadPositionCandles(market, symbol);
+          }
+        }
+      }
+    } finally {
+      _marketRefreshing = false;
+      if (mounted) setState(() {});
+    }
+  }
+
+  Future<void> _chooseMarketSymbol(String market) async {
+    if (!(_marketSymbols[market]?.isNotEmpty ?? false)) {
+      await _loadMarketSymbols(market);
+    }
+    if (!mounted) return;
+    final symbols = _marketSymbols[market] ?? [];
+    if (symbols.isEmpty) {
+      notify(tr('تعذر تحميل أزواج هذا السوق', 'Could not load market pairs'));
+      return;
+    }
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: widget.panel,
+      isScrollControlled: true,
+      builder: (ctx) => SafeArea(
+        child: SizedBox(
+          height: MediaQuery.of(ctx).size.height * .72,
+          child: ListView(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(
+                  tr('اختر زوج التداول', 'Select trading pair'),
+                  style: TextStyle(
+                    color: widget.text,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 17,
+                  ),
+                ),
+              ),
+              ...symbols.map((symbol) => ListTile(
+                title: Text(symbol, style: TextStyle(color: widget.text)),
+                trailing: symbol == _selectedSymbols[market]
+                    ? const Icon(Icons.check_circle, color: cyan)
+                    : null,
+                onTap: () => Navigator.pop(ctx, symbol),
+              )),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (selected == null || !mounted) return;
+    setState(() => _selectedSymbols[market] = selected);
+    await _loadMarketCandles(market);
+  }
+
+  Widget _marketPanel(String market, String title, Color accent) {
+    final symbol = _selectedSymbols[market] ?? '';
+    final interval = _selectedIntervals[market] ?? '5m';
+    final key = '$market:$symbol:$interval';
+    final candles = _marketCandles[key] ?? [];
+    final last = candles.isNotEmpty ? candles.last['close']! : 0.0;
+    final intervals = market == 'alpha'
+        ? ['5m', '15m', '1h']
+        : ['5m', '15m', '1h', '4h'];
+
+    return _panel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Container(
+              width: 8,
+              height: 28,
+              decoration: BoxDecoration(
+                color: accent,
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            const SizedBox(width: 9),
+            Expanded(
+              child: Text(title,
+                style: TextStyle(
+                  color: widget.text,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 15,
+                ),
+              ),
+            ),
+            Text(
+              market.toUpperCase(),
+              style: TextStyle(color: accent, fontSize: 9,
+                fontWeight: FontWeight.bold),
+            ),
+          ]),
+          const SizedBox(height: 12),
+          Row(children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: () => _chooseMarketSymbol(market),
+                icon: const Icon(Icons.swap_horiz, size: 17),
+                label: Text(symbol.isEmpty ? 'Select pair' : symbol,
+                  overflow: TextOverflow.ellipsis),
+              ),
+            ),
+            const SizedBox(width: 8),
+            IconButton(
+              onPressed: () => _loadMarketCandles(market),
+              icon: const Icon(Icons.refresh, color: cyan),
+            ),
+          ]),
+          Row(
+            children: intervals.map((tf) {
+              final active = interval == tf;
+              return Padding(
+                padding: const EdgeInsetsDirectional.only(end: 7),
+                child: ChoiceChip(
+                  label: Text(tf),
+                  selected: active,
+                  onSelected: (_) {
+                    setState(() => _selectedIntervals[market] = tf);
+                    _loadMarketCandles(market);
+                  },
+                  selectedColor: accent.withOpacity(.22),
+                ),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 8),
+          Row(children: [
+            Expanded(
+              child: Text(
+                last > 0 ? last.toStringAsFixed(6) : '—',
+                style: TextStyle(
+                  color: widget.text,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 18,
+                ),
+              ),
+            ),
+            Text(
+              candles.isEmpty
+                  ? tr('بانتظار بيانات السوق', 'Waiting for market data')
+                  : tr('بيانات Binance', 'Binance market data'),
+              style: TextStyle(color: widget.muted, fontSize: 10),
+            ),
+          ]),
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 190,
+            child: candles.isEmpty
+                ? Center(
+                    child: Text(
+                      tr('لا توجد شموع متاحة حالياً', 'No candles available'),
+                      style: TextStyle(color: widget.muted),
+                    ),
+                  )
+                : CustomPaint(
+                    painter: LiveCandlePainter(candles),
+                    child: const SizedBox.expand(),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _closePaperPosition(Map<String, dynamic> position) async {
     final id = '${position['id'] ?? position['position_id'] ?? position['trade_id'] ?? ''}';
     if (id.isEmpty || closingPositionIds.contains(id)) return;
 
     final isDemo = widget.mode.toUpperCase() == 'DEMO';
+    if (!isDemo) return;
+    if (!isDemo) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -175,8 +503,8 @@ class _TradeShellState extends State<TradeShell>
         title: Text(tr('تأكيد إغلاق الصفقة', 'Confirm position close')),
         content: Text(
           tr(
-            'سيتم إغلاق ${position['symbol'] ?? ''} في وضع ${isDemo ? 'DEMO' : 'PAPER'}. هذا الإجراء خاص بهذا المركز فقط.',
-            'This will close ${position['symbol'] ?? ''} in ${isDemo ? 'DEMO' : 'PAPER'} mode. Only this position will be affected.',
+            'سيتم إغلاق ${position['symbol'] ?? ''} في وضع DEMO. هذا الإجراء خاص بهذا المركز فقط.',
+            'This will close ${position['symbol'] ?? ''} in DEMO mode. Only this position will be affected.',
           ),
         ),
         actions: [
@@ -197,9 +525,7 @@ class _TradeShellState extends State<TradeShell>
 
     setState(() => closingPositionIds.add(id));
     try {
-      final result = isDemo
-          ? await ApiService.closeDemoTrade(positionId: id)
-          : await ApiService.closePaperTrade(positionId: id);
+      final result = await ApiService.closeDemoTrade(positionId: id);
 
       if (!mounted) return;
 
@@ -229,15 +555,29 @@ class _TradeShellState extends State<TradeShell>
     }
   }
   void _applyStatus(Map<String, dynamic> data) {
-    final paper = data['paper'];
+    final demo = data['demo'];
     final controls = data['controls'];
     apiOnline = true;
-    paperData = paper is Map
-        ? Map<String, dynamic>.from(paper)
-        : {};
+    paperData = demo is Map
+        ? Map<String, dynamic>.from(demo)
+        : <String, dynamic>{};
+    final raw = paperData['open_positions'] ??
+        paperData['positions'] ??
+        paperData['items'];
+    final positions = raw is List
+        ? raw.whereType<Map>().map((item) {
+            final position = Map<String, dynamic>.from(item);
+            position['id'] = position['id'] ??
+                position['position_id'] ??
+                position['trade_id'] ??
+                '';
+            return position;
+          }).where((item) => item['id'].toString().isNotEmpty).toList()
+        : <Map<String, dynamic>>[];
+    paperData['open_positions'] = positions;
     agentControls = controls is Map
         ? Map<String, dynamic>.from(controls)
-        : {};
+        : <String, dynamic>{};
   }
 
   bool get allAgentsEnabled {
@@ -336,6 +676,7 @@ class _TradeShellState extends State<TradeShell>
 
   @override
   void dispose() {
+    _refreshTimer?.cancel();
     pulse.dispose();
     super.dispose();
   }
@@ -488,7 +829,6 @@ class _TradeShellState extends State<TradeShell>
         ),
         child: Row(
           children: [
-            _modeButton('PAPER', tr('ورقي', 'Paper'), cyan),
             _modeButton('DEMO', tr('تجريبي', 'Demo'), blue),
             _modeButton('LIVE', tr('حقيقي', 'Live'), red),
           ],
@@ -702,11 +1042,34 @@ class _TradeShellState extends State<TradeShell>
       );
 
   Widget _portfolioCard() {
-    final balance = double.tryParse('${paperData['balance'] ?? ''}');
-    final openCount = paperData['open_count'] ?? 0;
+    final rawSummary = paperData['account_summary'];
+    final summary = rawSummary is Map
+        ? Map<String, dynamic>.from(rawSummary)
+        : <String, dynamic>{};
+
+    String money(List<String> keys) {
+      for (final key in keys) {
+        final value = summary[key] ?? paperData[key];
+        final number = double.tryParse('$value');
+        if (number != null) {
+          return '\$${number.toStringAsFixed(2)}';
+        }
+      }
+      return '—';
+    }
+
+    final equity = money(['equity', 'total_equity']);
+    final available = money(['available_balance', 'available']);
+    final wallet = money(['wallet_balance', 'balance']);
+    final margin = money(['locked_margin', 'used_margin']);
+    final unrealized = money(['unrealized_pnl', 'unrealized_profit']);
+    final realized = money(['realized_pnl', 'realized_profit']);
+    final fees = money(['total_fees', 'fees']);
+    final openCount = paperData['open_count'] ??
+        (paperData['open_positions'] is List
+            ? (paperData['open_positions'] as List).length
+            : 0);
     final totalTrades = paperData['total_trades'] ?? 0;
-    final balanceText =
-        balance == null ? '—' : '\$${balance.toStringAsFixed(2)}';
 
     return _panel(
       child: Column(
@@ -715,11 +1078,11 @@ class _TradeShellState extends State<TradeShell>
           Row(
             children: [
               Text(
-                tr('رصيد محاكاة PAPER', 'PAPER SIMULATION BALANCE'),
+                tr('حساب DEMO', 'DEMO ACCOUNT'),
                 style: TextStyle(color: widget.muted, fontSize: 11),
               ),
               const Spacer(),
-              _pill(apiOnline ? 'PAPER' : tr('غير متصل', 'OFFLINE'),
+              _pill(apiOnline ? 'DEMO' : tr('غير متصل', 'OFFLINE'),
                   apiOnline ? cyan : red),
               IconButton(
                 tooltip: tr('تحديث البيانات', 'Refresh data'),
@@ -730,7 +1093,7 @@ class _TradeShellState extends State<TradeShell>
           ),
           const SizedBox(height: 9),
           Text(
-            apiOnline ? balanceText : '—',
+            apiOnline ? equity : '—',
             style: TextStyle(
               color: widget.text,
               fontSize: 34,
@@ -738,17 +1101,28 @@ class _TradeShellState extends State<TradeShell>
             ),
           ),
           Text(
-            apiOnline
-                ? tr('بيانات فعلية من محرك PAPER المحلي',
-                    'Live data from the local PAPER engine')
-                : tr('شغّل خادم Termux لعرض بيانات المحاكاة',
-                    'Start the Termux server to load simulation data'),
+            tr('إجمالي قيمة الحساب', 'TOTAL ACCOUNT EQUITY'),
             style: TextStyle(color: widget.muted, fontSize: 10),
           ),
           const SizedBox(height: 18),
           Row(
             children: [
-              _metric(tr('الربح', 'PROFIT'), '—', widget.muted),
+              _metric(tr('المتاح', 'AVAILABLE'), apiOnline ? available : '—', widget.text),
+              _metric(tr('المحفظة', 'WALLET'), apiOnline ? wallet : '—', widget.text),
+              _metric(tr('الهامش المحجوز', 'LOCKED MARGIN'), apiOnline ? margin : '—', widget.text),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              _metric(tr('ربح عائم', 'UNREALIZED PNL'), apiOnline ? unrealized : '—', widget.text),
+              _metric(tr('ربح محقق', 'REALIZED PNL'), apiOnline ? realized : '—', widget.text),
+              _metric(tr('الرسوم', 'FEES'), apiOnline ? fees : '—', widget.text),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
               _metric(tr('المراكز المفتوحة', 'OPEN POSITIONS'),
                   apiOnline ? '$openCount' : '—', widget.text),
               _metric(tr('إجمالي الصفقات', 'TOTAL TRADES'),
@@ -1002,28 +1376,102 @@ class _TradeShellState extends State<TradeShell>
       );
 
   Widget _markets() => ListView(
-        padding: const EdgeInsets.all(15),
+    padding: const EdgeInsets.all(15),
+    children: [
+      _pageHeading(
+        tr('مركز الأسواق', 'MARKET INTELLIGENCE'),
+        'LIVE BINANCE DATA',
+      ),
+      const SizedBox(height: 12),
+      _marketPanel('futures', tr('العقود الآجلة', 'FUTURES'), cyan),
+      const SizedBox(height: 13),
+      _marketPanel('spot', tr('السوق الفوري', 'SPOT'), blue),
+      const SizedBox(height: 13),
+      _marketPanel('alpha', 'ALPHA', violet),
+    ],
+  );
+
+  Widget _positionLiveChart(Map<String, dynamic> position) {
+    final domain = '${position['domain'] ?? 'spot'}'.toLowerCase();
+    final market = domain.contains('future')
+        ? 'futures'
+        : domain.contains('alpha')
+            ? 'alpha'
+            : 'spot';
+    final symbol = '${position['symbol'] ?? ''}';
+    final key = '$market:$symbol:5m';
+    final candles = _marketCandles[key] ?? [];
+    final current = candles.isNotEmpty ? candles.last['close']! : 0.0;
+    final entry = double.tryParse('${position['entry_price'] ?? ''}') ?? 0;
+    final stop = double.tryParse('${position['stop_loss'] ?? ''}') ?? 0;
+    final target = double.tryParse('${position['take_profit'] ?? ''}') ?? 0;
+
+    if (symbol.isNotEmpty && candles.isEmpty && !_marketLoading.contains(key)) {
+      Future.microtask(() => _loadPositionCandles(market, symbol));
+    }
+
+    final direction = '${position['direction'] ?? 'LONG'}'.toUpperCase();
+    final qty = double.tryParse(
+      '${position['remaining_quantity'] ?? position['quantity'] ?? ''}',
+    ) ?? 0;
+    final pnl = current > 0 && entry > 0
+        ? (direction == 'SHORT' ? entry - current : current - entry) * qty
+        : null;
+
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: widget.bg.withOpacity(.55),
+        borderRadius: BorderRadius.circular(13),
+        border: Border.all(color: cyan.withOpacity(.16)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _pageHeading(tr('مركز الأسواق', 'MARKET INTELLIGENCE'), 'MARKET DATA'),
-          const SizedBox(height: 12),
-          _chart(false),
-          const SizedBox(height: 15),
-          _heading(tr('قائمة المراقبة', 'WATCHLIST'), 'PREVIEW', Icons.star),
-          const SizedBox(height: 10),
-          _coin('₿', 'BTC / USDT', 'Bitcoin', '\$67,420', '+2.41%', cyan),
-          _coin('Ξ', 'ETH / USDT', 'Ethereum', '\$3,520', '+1.28%', blue),
-          _coin('◎', 'SOL / USDT', 'Solana', '\$184.32', '-0.74%', violet),
-          const SizedBox(height: 8),
-          Text(
-            tr(
-              'الأسعار المعروضة توضيحية وليست أسعار Binance الحية.',
-              'Illustrative prices — not live Binance prices.',
+          Row(children: [
+            Expanded(
+              child: Text(
+                current > 0
+                    ? '${tr('السعر الحالي', 'CURRENT PRICE')}: ${current.toStringAsFixed(6)}'
+                    : tr('بانتظار السعر الحي', 'Waiting for live price'),
+                style: TextStyle(color: widget.text, fontSize: 11,
+                  fontWeight: FontWeight.bold),
+              ),
             ),
-            textAlign: TextAlign.center,
-            style: TextStyle(color: widget.muted, fontSize: 10),
+            if (pnl != null)
+              Text(
+                '${pnl >= 0 ? '+' : ''}${pnl.toStringAsFixed(4)} USDT',
+                style: TextStyle(
+                  color: pnl >= 0 ? green : red,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 11,
+                ),
+              ),
+          ]),
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 125,
+            child: candles.isEmpty
+                ? Center(
+                    child: Text(
+                      tr('يتم تحميل التشارت...', 'Loading position chart...'),
+                      style: TextStyle(color: widget.muted, fontSize: 10),
+                    ),
+                  )
+                : CustomPaint(
+                    painter: LiveCandlePainter(
+                      candles,
+                      entry: entry,
+                      stop: stop,
+                      target: target,
+                    ),
+                    child: const SizedBox.expand(),
+                  ),
           ),
         ],
-      );
+      ),
+    );
+  }
 
   Widget _openPositionsSection() {
     final raw = paperData['open_positions'];
@@ -1096,6 +1544,8 @@ class _TradeShellState extends State<TradeShell>
                         Expanded(child: _metric(tr('الكمية المتبقية', 'REMAINING QTY'), quantity, widget.text)),
                       ],
                     ),
+                    const SizedBox(height: 12),
+                    _positionLiveChart(position),
                     const SizedBox(height: 12),
                     Row(
                       children: [
@@ -1277,16 +1727,26 @@ class _TradeShellState extends State<TradeShell>
 
   Widget _setting(IconData icon, String title, String sub, Widget trailing) =>
       Padding(
-        padding: const EdgeInsets.symmetric(vertical: 10),
+        padding: const EdgeInsets.symmetric(vertical: 7),
         child: Row(
           children: [
-            Icon(icon, color: cyan, size: 21),
-            const SizedBox(width: 11),
+            Container(
+              width: 39,
+              height: 39,
+              decoration: BoxDecoration(
+                color: cyan.withOpacity(widget.dark ? .13 : .09),
+                borderRadius: BorderRadius.circular(13),
+                border: Border.all(color: cyan.withOpacity(.16)),
+              ),
+              child: Icon(icon, color: cyan, size: 20),
+            ),
+            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(title, style: TextStyle(color: widget.text, fontSize: 12, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 3),
                   Text(sub, style: TextStyle(color: widget.muted, fontSize: 10)),
                 ],
               ),
@@ -1478,12 +1938,43 @@ class _TradeShellState extends State<TradeShell>
       Container(
         padding: EdgeInsets.all(padding),
         decoration: BoxDecoration(
-          color: widget.panel,
+          color: widget.dark
+              ? widget.panel.withOpacity(.82)
+              : Colors.white.withOpacity(.88),
           borderRadius: BorderRadius.circular(21),
-          border: Border.all(color: border ?? widget.muted.withOpacity(.13)),
-          boxShadow: widget.dark
-              ? [BoxShadow(color: Colors.black.withOpacity(.12), blurRadius: 16, offset: const Offset(0, 6))]
-              : [],
+          border: Border.all(
+            color: border ?? (widget.dark
+                ? Colors.white.withOpacity(.10)
+                : Colors.white.withOpacity(.85)),
+          ),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: widget.dark
+                ? [
+                    const Color(0xFF18263B).withOpacity(.92),
+                    const Color(0xFF0D1728).withOpacity(.96),
+                  ]
+                : [
+                    Colors.white.withOpacity(.96),
+                    const Color(0xFFEAF1FA).withOpacity(.88),
+                  ],
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: widget.dark
+                  ? Colors.black.withOpacity(.22)
+                  : const Color(0xFF8295AD).withOpacity(.13),
+              blurRadius: 22,
+              offset: const Offset(0, 8),
+            ),
+            if (widget.dark)
+              BoxShadow(
+                color: cyan.withOpacity(.035),
+                blurRadius: 18,
+                spreadRadius: -5,
+              ),
+          ],
         ),
         child: child,
       );
@@ -1733,6 +2224,107 @@ class NetworkPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant NetworkPainter old) => old.t != t;
+}
+
+class LiveCandlePainter extends CustomPainter {
+  final List<Map<String, double>> candles;
+  final double entry;
+  final double stop;
+  final double target;
+
+  LiveCandlePainter(
+    this.candles, {
+    this.entry = 0,
+    this.stop = 0,
+    this.target = 0,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (candles.isEmpty || size.width <= 0 || size.height <= 0) return;
+
+    final visible = candles.length > 70
+        ? candles.sublist(candles.length - 70)
+        : candles;
+    var minPrice = visible.map((c) => c['low']!).reduce(math.min);
+    var maxPrice = visible.map((c) => c['high']!).reduce(math.max);
+    for (final level in [entry, stop, target]) {
+      if (level > 0) {
+        minPrice = math.min(minPrice, level);
+        maxPrice = math.max(maxPrice, level);
+      }
+    }
+    final spread = maxPrice - minPrice;
+    if (spread <= 0) return;
+    final pad = spread * .08;
+    minPrice -= pad;
+    maxPrice += pad;
+    final range = maxPrice - minPrice;
+    double y(double price) =>
+        size.height - ((price - minPrice) / range) * size.height;
+
+    final grid = Paint()
+      ..color = Colors.white.withOpacity(.07)
+      ..strokeWidth = 1;
+    for (int i = 0; i < 5; i++) {
+      final gy = size.height * i / 4;
+      canvas.drawLine(Offset(0, gy), Offset(size.width, gy), grid);
+    }
+
+    final step = size.width / visible.length;
+    final bodyWidth = math.max(2.0, step * .58);
+    for (int i = 0; i < visible.length; i++) {
+      final c = visible[i];
+      final open = c['open']!;
+      final close = c['close']!;
+      final high = c['high']!;
+      final low = c['low']!;
+      final color = close >= open ? green : red;
+      final x = step * i + step / 2;
+      final paint = Paint()
+        ..color = color
+        ..strokeWidth = 1.2;
+      canvas.drawLine(Offset(x, y(high)), Offset(x, y(low)), paint);
+      final top = math.min(y(open), y(close));
+      final bottom = math.max(y(open), y(close));
+      canvas.drawRect(
+        Rect.fromLTRB(
+          x - bodyWidth / 2,
+          top,
+          x + bodyWidth / 2,
+          math.max(top + 1.5, bottom),
+        ),
+        Paint()..color = color,
+      );
+    }
+
+    void drawLevel(double value, Color color) {
+      if (value <= 0 || value < minPrice || value > maxPrice) return;
+      final levelY = y(value);
+      final paint = Paint()
+        ..color = color.withOpacity(.9)
+        ..strokeWidth = 1
+        ..style = PaintingStyle.stroke;
+      for (double x = 0; x < size.width; x += 9) {
+        canvas.drawLine(
+          Offset(x, levelY),
+          Offset(math.min(x + 5, size.width), levelY),
+          paint,
+        );
+      }
+    }
+
+    drawLevel(entry, blue);
+    drawLevel(stop, red);
+    drawLevel(target, green);
+  }
+
+  @override
+  bool shouldRepaint(covariant LiveCandlePainter old) =>
+      old.candles != candles ||
+      old.entry != entry ||
+      old.stop != stop ||
+      old.target != target;
 }
 
 class CandlePainter extends CustomPainter {

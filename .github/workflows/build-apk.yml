@@ -5,6 +5,10 @@ on:
   push:
     paths:
       - 'mobile/**'
+      - 'api/**'
+      - 'core/**'
+      - 'tests/**'
+      - 'requirements*.txt'
       - '.github/workflows/build-apk.yml'
 
 permissions:

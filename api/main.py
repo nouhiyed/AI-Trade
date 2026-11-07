@@ -2,7 +2,7 @@ import json
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 from core.coordinator import TradingCoordinator
 
 coordinator = TradingCoordinator(initial_balance=1000)
@@ -21,15 +21,66 @@ class APIHandler(BaseHTTPRequestHandler):
         return json.loads(self.rfile.read(length) or b"{}")
 
     def do_GET(self):
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
+        params = parse_qs(parsed.query)
         try:
+            if path == "/market/symbols":
+                market = params.get("market", ["spot"])[0].lower()
+                if market == "alpha":
+                    symbols = coordinator.paper_price_feed.fetch_alpha_symbols()
+                elif market in {"spot", "futures"}:
+                    symbols = coordinator.paper_price_feed.fetch_symbols(market)
+                else:
+                    return self.send_json({"error": "Unsupported market"}, 400)
+                return self.send_json({
+                    "market": market,
+                    "symbols": symbols,
+                    "source": "binance_rest"
+                })
+
+            if path == "/market/candles":
+                market = params.get("market", ["spot"])[0].lower()
+                symbol = params.get("symbol", ["BTCUSDT"])[0].upper()
+                interval = params.get("interval", ["5m"])[0]
+                limit = int(params.get("limit", ["200"])[0])
+                if interval not in {"1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d"}:
+                    return self.send_json({"error": "Unsupported interval"}, 400)
+                if market == "alpha":
+                    candles = coordinator.paper_price_feed.fetch_alpha_candles(
+                        symbol, interval, limit=min(max(limit, 2), 1000)
+                    )
+                elif market in {"spot", "futures"}:
+                    candles = coordinator.paper_price_feed.fetch_candles(
+                        market, symbol, interval, limit=min(max(limit, 2), 1000)
+                    )
+                else:
+                    return self.send_json({"error": "Unsupported market"}, 400)
+                records = []
+                for row in candles.itertuples(index=False):
+                    records.append({
+                        "time": int(row.open_time.timestamp()),
+                        "open": float(row.open),
+                        "high": float(row.high),
+                        "low": float(row.low),
+                        "close": float(row.close),
+                        "volume": float(row.volume)
+                    })
+                return self.send_json({
+                    "market": market,
+                    "symbol": symbol,
+                    "interval": interval,
+                    "candles": records,
+                    "source": candles.attrs.get("source", "binance_rest"),
+                    "received_at": candles.attrs.get("received_at")
+                })
             if path == "/health":
                 return self.send_json({"ok": True, "mode": coordinator.mode})
             if path == "/status":
                 return self.send_json({
                     "system": coordinator.get_system_status(),
                     "controls": coordinator.get_agent_controls(),
-                    "paper": coordinator.get_paper_status()
+                    "demo": coordinator.get_demo_positions()
                 })
             if path == "/paper/history":
                 return self.send_json(coordinator.paper.get_trade_history())
@@ -90,12 +141,23 @@ class APIHandler(BaseHTTPRequestHandler):
                 return self.send_json(result)
 
             if path == "/mode":
-                result = coordinator.set_mode(data.get("mode", "PAPER"))
+                result = coordinator.set_mode(data.get("mode", "DEMO"))
                 return self.send_json(result, 200 if result.get("success") else 400)
 
             if path == "/demo/close":
                 result = coordinator.close_demo_position(data["position_id"])
                 return self.send_json(result, 200 if result.get("success") else 400)
+
+            if path == "/alpha/open":
+                result = coordinator.request_paper_trade(
+                    domain="alpha",
+                    symbol=data["symbol"],
+                    direction="BUY",
+                    entry=data.get("entry", 0),
+                    quantity=data["quantity"],
+                    leverage=1,
+                )
+                return self.send_json(result, 200 if result.get("approved") else 400)
 
             if path == "/demo/open":
                 result = coordinator.request_demo_futures_trade(
@@ -120,12 +182,19 @@ def paper_monitor_worker():
     print("[PAPER] Automatic position monitor started")
     while True:
         try:
-            result = coordinator.monitor_paper_positions()
-            for event in result.get("events", []):
+            paper_result = coordinator.monitor_paper_positions()
+            for event in paper_result.get("events", []):
                 if event.get("reason"):
                     print("[PAPER] Auto-close:", event)
                 elif event.get("error"):
                     print("[PAPER] Monitor error:", event)
+
+            demo_result = coordinator.monitor_demo_positions()
+            for event in demo_result.get("events", []):
+                if event.get("reason"):
+                    print("[DEMO] Auto-close:", event)
+                elif event.get("error"):
+                    print("[DEMO] Monitor error:", event)
         except Exception as error:
             print("[PAPER] Monitor cycle error:", error)
         time.sleep(2)

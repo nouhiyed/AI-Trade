@@ -26,3 +26,6 @@ apk/
 # Python cache
 __pycache__/
 *.py[cod]
+
+# Generated APK output
+apk-output/

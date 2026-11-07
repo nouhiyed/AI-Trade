@@ -1,4 +1,5 @@
 
+from decimal import Decimal
 import json
 from pathlib import Path
 
@@ -14,6 +15,9 @@ from core.binance_market_data import BinanceMarketData
 from core.market_scanner import FuturesMarketScanner
 from core.trade_planner import TradePlanner
 from core.binance_execution import BinanceExecutionEngine
+from core.demo.database import DemoDatabase
+from core.demo.ledger import Ledger
+from core.demo.engine import DemoEngine
 
 
 class TradingCoordinator:
@@ -41,10 +45,26 @@ class TradingCoordinator:
 
         self.last_signals = {}
         self.alpha_config_path = Path("config/alpha_tokens.json")
-        self.mode = "PAPER"
-        self.demo_execution = None
+        self.mode = "DEMO"
         self.demo_state_path = Path("config/demo_state.json")
         self.demo_positions = self._load_demo_state()
+
+        self.demo_account_id = "primary"
+        self.demo_database = DemoDatabase(Path("data/demo_trading.db"))
+        self.demo_ledger = Ledger(database=self.demo_database)
+        self.demo_execution = DemoEngine(
+            self.demo_database, self.demo_ledger
+        )
+
+        account = self.demo_database.connection.execute(
+            "SELECT account_id FROM demo_accounts WHERE account_id = ?",
+            (self.demo_account_id,),
+        ).fetchone()
+        if account is None:
+            self.demo_execution.create_account(
+                self.demo_account_id, initial_balance
+            )
+        self._recover_demo_positions()
 
 
     def _load_demo_state(self):
@@ -63,173 +83,250 @@ class TradingCoordinator:
         temp.write_text(json.dumps(self.demo_positions, indent=2, default=str))
         temp.replace(self.demo_state_path)
 
+
+    def _recover_demo_positions(self):
+        rows = self.demo_execution.get_open_positions(self.demo_account_id)
+        changed = False
+
+        for position in rows:
+            engine_id = str(position["position_id"])
+            record = next(
+                (
+                    item for item in self.demo_positions.values()
+                    if item.get("engine_position_id") == engine_id
+                ),
+                None,
+            )
+
+            if record is None:
+                record = {
+                    "position_id": engine_id,
+                    "trade_id": engine_id,
+                    "engine_position_id": engine_id,
+                    "domain": "futures",
+                    "execution_source": "INTERNAL_DEMO",
+                    "status": "DEMO_RECONCILIATION_REQUIRED",
+                }
+                self.demo_positions[engine_id] = record
+                changed = True
+
+            for key, value in (
+                ("symbol", position["symbol"]),
+                ("direction", position["direction"]),
+                ("quantity", position["initial_quantity"]),
+                ("remaining_quantity", position["remaining_quantity"]),
+                ("entry_price", position["average_entry_price"]),
+                ("leverage", position["leverage"]),
+            ):
+                value = str(value)
+                if record.get(key) != value:
+                    record[key] = value
+                    changed = True
+
+            db_status = position["status"]
+            if db_status == "PARTIALLY_CLOSED":
+                status = "DEMO_PARTIALLY_CLOSED"
+            elif record.get("stop_loss") is not None and record.get("take_profit") is not None:
+                status = "DEMO_OPEN"
+            else:
+                status = "DEMO_RECONCILIATION_REQUIRED"
+
+            if record.get("status") != status:
+                record["status"] = status
+                changed = True
+
+        if changed:
+            self._save_demo_state()
+
     def set_mode(self, mode):
         mode = str(mode).strip().upper()
-        if mode == "LIVE":
-            return {"success": False, "reason": "LIVE is not enabled"}
-        if mode not in ("PAPER", "DEMO"):
-            return {"success": False, "reason": "Unsupported mode"}
-        if mode == "DEMO":
-            if any(
-                p.get("status") in ("DEMO_OPEN", "DEMO_UNPROTECTED",
-                                    "DEMO_RECONCILIATION_REQUIRED")
-                for p in self.demo_positions.values()
-            ):
-                return {
-                    "success": False,
-                    "reason": "Resolve existing DEMO positions before changing mode"
-                }
-            try:
-                if self.demo_execution is None:
-                    self.demo_execution = BinanceExecutionEngine(mode="DEMO")
-            except Exception as error:
-                return {"success": False, "reason": str(error)}
-        self.mode = mode
+        if mode != "DEMO":
+            return {"success": False, "reason": "Only DEMO mode is supported"}
+        if any(
+            p.get("status") in (
+                "DEMO_OPEN", "DEMO_UNPROTECTED",
+                "DEMO_RECONCILIATION_REQUIRED"
+            )
+            for p in self.demo_positions.values()
+        ):
+            return {
+                "success": False,
+                "reason": "Resolve existing DEMO positions before changing mode"
+            }
+        self.mode = "DEMO"
         return {"success": True, "mode": self.mode}
 
     def get_demo_positions(self):
-        return {
+        result = {
             "mode": self.mode,
             "positions": list(self.demo_positions.values())
         }
+        if self.demo_execution is not None and self.demo_account_id is not None:
+            result["account_summary"] = self.demo_execution.get_account_summary(
+                self.demo_account_id
+            )
+        return result
 
 
-    def close_demo_position(self, position_id):
+    def _demo_market_price(self, symbol, market="futures"):
+        quote = self.paper_price_feed.fetch_book_ticker(market, symbol)
+        price = Decimal(str(quote["mid_price"]))
+        if not price.is_finite() or price <= 0:
+            raise ValueError("Invalid live market price")
+        market_type = "SPOT" if str(market).lower() == "spot" else "FUTURES"
+        self.demo_execution.update_mark_price(
+            symbol, market_type, price, source="BINANCE"
+        )
+        return price
+
+    def close_demo_position(self, position_id, quantity=None):
         position_id = str(position_id).strip()
         record = self.demo_positions.get(position_id)
-
         if not record:
             return {"success": False, "reason": "DEMO position not found"}
+
         if record.get("status") not in (
-            "DEMO_OPEN", "DEMO_UNPROTECTED",
-            "DEMO_RECONCILIATION_REQUIRED"
+            "DEMO_OPEN", "DEMO_PARTIALLY_CLOSED",
+            "DEMO_UNPROTECTED", "DEMO_RECONCILIATION_REQUIRED"
         ):
             return {"success": False, "reason": "Position is not closable"}
 
-        engine = self.demo_execution
-        if engine is None:
-            try:
-                engine = BinanceExecutionEngine(mode="DEMO")
-                self.demo_execution = engine
-            except Exception as error:
-                return {"success": False, "reason": str(error)}
-
-        symbol = str(record["symbol"]).upper()
-        direction = str(record["direction"]).upper()
+        engine_position_id = record.get("engine_position_id")
+        if not engine_position_id:
+            return {
+                "success": False,
+                "reason": "Legacy position requires manual reconciliation; no Binance orders were sent"
+            }
 
         try:
-            positions = engine.get_futures_positions(symbol)
-            matching = []
-            for item in positions:
-                if str(item.get("symbol", "")).upper() != symbol:
-                    continue
-                amount = Decimal(str(item.get("positionAmt", "0")))
-                if amount == 0:
-                    continue
-                side = str(item.get("positionSide", "BOTH")).upper()
-                if side == direction or (
-                    side == "BOTH" and
-                    ((direction == "LONG" and amount > 0) or
-                     (direction == "SHORT" and amount < 0))
-                ):
-                    matching.append((item, amount))
+            symbol = str(record["symbol"]).upper()
+            price = self._demo_market_price(symbol)
+            result = self.demo_execution.close_futures_position(
+                self.demo_account_id,
+                engine_position_id,
+                market_price=price,
+                quantity=quantity,
+                    reason="MANUAL",
+            )
 
-            if len(matching) > 1:
-                raise RuntimeError("Ambiguous exchange position; manual reconciliation required")
-
-            if matching:
-                item, amount = matching[0]
-                quantity = format(abs(amount), "f")
-                hedge = str(item.get("positionSide", "BOTH")).upper() != "BOTH"
-                side = "SELL" if direction == "LONG" else "BUY"
-
-                order = engine.place_market_order(
-                    market="futures",
-                    symbol=symbol,
-                    side=side,
-                    quantity=quantity,
-                    reduce_only=not hedge,
-                    position_side=direction if hedge else None
-                )
-
-                if not isinstance(order, dict):
-                    raise RuntimeError("Invalid close order response")
-
-                if order.get("status") != "FILLED":
-                    order_id = order.get("orderId")
-                    if not order_id:
-                        raise RuntimeError("Close order is not confirmed FILLED")
-                    order = engine.get_order("futures", symbol, order_id)
-
-                if not isinstance(order, dict) or order.get("status") != "FILLED":
-                    raise RuntimeError("Binance did not confirm the close")
-
-            # Verify the exact position side is gone before cancelling protection.
-            remaining = engine.get_futures_positions(symbol)
-            still_open = False
-            for item in remaining:
-                if str(item.get("symbol", "")).upper() != symbol:
-                    continue
-                amount = Decimal(str(item.get("positionAmt", "0")))
-                if amount == 0:
-                    continue
-                side = str(item.get("positionSide", "BOTH")).upper()
-                if side == direction or (
-                    side == "BOTH" and
-                    ((direction == "LONG" and amount > 0) or
-                     (direction == "SHORT" and amount < 0))
-                ):
-                    still_open = True
-                    break
-
-            if still_open:
-                record["status"] = "DEMO_RECONCILIATION_REQUIRED"
-                record["close_error"] = "Exchange position remains after close"
-                self._save_demo_state()
-                self.risk.update_reservation_status(
-                    position_id, "DEMO_RECONCILIATION_REQUIRED",
-                    close_verified=False
-                )
-                return {"success": False, "reason": record["close_error"]}
-
-            # Cancel only this position's known protection IDs, after verified closure.
-            cancel_errors = []
-            for key in ("stop_algo_id", "target_algo_id"):
-                algo_id = record.get(key)
-                if algo_id:
-                    try:
-                        engine.cancel_futures_algo_order(symbol, algo_id)
-                    except Exception as error:
-                        cancel_errors.append(str(error))
-
-            record["status"] = "DEMO_CLOSED_PENDING_RECONCILIATION"
-            record["close_verified"] = True
-            record["protection_cancel_errors"] = cancel_errors
+            record["status"] = (
+                "DEMO_CLOSED" if result["status"] == "CLOSED"
+                else "DEMO_PARTIALLY_CLOSED"
+            )
+            record["close_price"] = str(result["execution_price"])
+            record["realized_pnl"] = str(result["realized_pnl"])
+            record["close_fee"] = str(result["fee"])
+            record["remaining_quantity"] = str(result["remaining_quantity"])
             self._save_demo_state()
 
             self.risk.update_reservation_status(
-                position_id, "DEMO_RECONCILIATION_REQUIRED",
+                position_id, record["status"],
                 close_verified=True,
-                settlement_pending=True
+                realized_pnl=str(result["realized_pnl"]),
             )
-
             return {
                 "success": True,
                 "position_id": position_id,
-                "exchange_closed": True,
-                "settlement": "PENDING_REALIZED_PNL_VERIFICATION",
-                "protection_cancel_errors": cancel_errors
+                "execution": result,
+                "mode": "DEMO",
             }
-
         except Exception as error:
-            record["status"] = "DEMO_RECONCILIATION_REQUIRED"
             record["close_error"] = str(error)
             self._save_demo_state()
-            self.risk.update_reservation_status(
-                position_id, "DEMO_RECONCILIATION_REQUIRED",
-                close_error=str(error)
-            )
             return {"success": False, "reason": str(error)}
+
+    def monitor_demo_positions(self):
+        """Monitor internal DEMO Futures positions using live Binance quotes."""
+        results = []
+        positions = [
+            (position_id, record)
+            for position_id, record in self.demo_positions.items()
+            if record.get("status") in ("DEMO_OPEN", "DEMO_PARTIALLY_CLOSED")
+            and record.get("engine_position_id")
+        ]
+        price_cache = {}
+
+        for position_id, record in positions:
+            try:
+                symbol = str(record["symbol"]).upper()
+                if symbol not in price_cache:
+                    quote = self.paper_price_feed.fetch_book_ticker(
+                        "futures", symbol
+                    )
+                    price_cache[symbol] = quote
+
+                quote = price_cache[symbol]
+                direction = str(record["direction"]).upper()
+                exit_price = Decimal(str(
+                    quote["ask"] if direction == "SHORT" else quote["bid"]
+                ))
+                if not exit_price.is_finite() or exit_price <= 0:
+                    raise ValueError("Invalid DEMO exit quote")
+
+                self.demo_execution.update_mark_price(
+                    symbol, "FUTURES", exit_price, source="BINANCE"
+                )
+
+                stop = Decimal(str(record["stop_loss"]))
+                target = Decimal(str(record["take_profit"]))
+                reason = None
+
+                if direction == "LONG":
+                    if exit_price <= stop:
+                        reason = "STOP_LOSS"
+                    elif exit_price >= target:
+                        reason = "TAKE_PROFIT"
+                elif direction == "SHORT":
+                    if exit_price >= stop:
+                        reason = "STOP_LOSS"
+                    elif exit_price <= target:
+                        reason = "TAKE_PROFIT"
+
+                if reason:
+                    result = self.demo_execution.close_futures_position(
+                        self.demo_account_id,
+                        record["engine_position_id"],
+                        market_price=exit_price,
+                        reason=reason,
+                    )
+                    record["status"] = (
+                        "DEMO_CLOSED" if result["status"] == "CLOSED"
+                        else "DEMO_PARTIALLY_CLOSED"
+                    )
+                    record["close_reason"] = reason
+                    record["close_price"] = str(result["execution_price"])
+                    record["realized_pnl"] = str(result["realized_pnl"])
+                    record["close_fee"] = str(result["fee"])
+                    record["remaining_quantity"] = str(
+                        result["remaining_quantity"]
+                    )
+                    self._save_demo_state()
+
+                    try:
+                        self.risk.update_reservation_status(
+                            position_id,
+                            record["status"],
+                            close_verified=True,
+                            realized_pnl=str(result["realized_pnl"]),
+                        )
+                    except Exception as risk_error:
+                        record["risk_sync_error"] = str(risk_error)
+                        self._save_demo_state()
+
+                    results.append({
+                        "position_id": position_id,
+                        "symbol": symbol,
+                        "reason": reason,
+                        "result": result,
+                    })
+            except Exception as error:
+                results.append({
+                    "position_id": position_id,
+                    "symbol": record.get("symbol"),
+                    "error": str(error),
+                })
+
+        return {"checked": len(positions), "events": results}
 
     def request_demo_futures_trade(
         self, symbol, direction, risk_pct=0.5, leverage=1
@@ -247,8 +344,10 @@ class TradingCoordinator:
             return {"approved": False, "reason": "Invalid Futures direction"}
 
         if any(
-            p.get("status") in ("DEMO_OPEN", "DEMO_UNPROTECTED",
-                                "DEMO_RECONCILIATION_REQUIRED")
+            p.get("status") in (
+                "DEMO_OPEN", "DEMO_UNPROTECTED",
+                "DEMO_RECONCILIATION_REQUIRED"
+            )
             for p in self.demo_positions.values()
         ):
             return {"approved": False, "reason": "An unresolved DEMO position exists"}
@@ -265,11 +364,12 @@ class TradingCoordinator:
         if str(plan.get("direction", "")).upper() != direction:
             return {"approved": False, "reason": "Trade plan direction mismatch"}
 
+        trade_id = None
         try:
-            from decimal import Decimal
             entry = Decimal(str(plan["entry"]))
             stop = Decimal(str(plan["stop_loss"]))
             target = Decimal(str(plan["take_profit"]))
+
             if not all(x.is_finite() and x > 0 for x in (entry, stop, target)):
                 raise ValueError("Invalid trade plan prices")
             if direction == "LONG" and not stop < entry < target:
@@ -278,9 +378,13 @@ class TradingCoordinator:
                 raise ValueError("Invalid SHORT trade plan levels")
 
             reservation = self.risk.reserve_trade(
-                domain="futures", symbol=symbol, direction=direction,
-                entry=float(entry), stop_loss=float(stop),
-                risk_pct=float(risk_pct), leverage=int(leverage)
+                domain="futures",
+                symbol=symbol,
+                direction=direction,
+                entry=float(entry),
+                stop_loss=float(stop),
+                risk_pct=float(risk_pct),
+                leverage=int(leverage),
             )
             if not reservation.get("approved"):
                 return reservation
@@ -288,87 +392,52 @@ class TradingCoordinator:
             trade_id = reservation["trade_id"]
             self.risk.update_reservation_status(trade_id, "DEMO_PENDING")
 
-            engine = self.demo_execution
-            filters = engine.get_futures_symbol_filters(symbol)
-            quantity = engine.round_futures_quantity(
-                reservation["quantity"], filters
-            )
-            qty_dec = Decimal(quantity)
-            min_notional = filters.get("min_notional")
-            if min_notional is not None:
-                if qty_dec * entry < Decimal(str(min_notional)):
-                    raise ValueError("Order is below Binance minimum notional")
+            market_price = self._demo_market_price(symbol)
+            quantity = Decimal(str(reservation["quantity"]))
 
-            rounded_stop = engine.round_futures_price(stop, filters)
-            rounded_target = engine.round_futures_price(target, filters)
-
-            engine.set_futures_leverage(symbol, int(leverage))
-            position_mode = engine.get_futures_position_mode()
-            hedge = bool(position_mode.get("dualSidePosition"))
-            position_side = direction if hedge else None
-            side = "BUY" if direction == "LONG" else "SELL"
-
-            order = engine.place_market_order(
-                market="futures", symbol=symbol, side=side,
-                quantity=quantity, position_side=position_side
-            )
-            if not isinstance(order, dict):
-                raise RuntimeError("Invalid Binance entry response")
-
-            if order.get("status") != "FILLED":
-                order_id = order.get("orderId")
-                if not order_id:
-                    raise RuntimeError("Entry order is not confirmed FILLED")
-                order = engine.get_order("futures", symbol, order_id)
-
-            if not isinstance(order, dict) or order.get("status") != "FILLED":
-                raise RuntimeError("Binance did not confirm a filled entry")
-
-            executed = Decimal(str(order.get("executedQty", "0")))
-            avg_price = Decimal(str(order.get("avgPrice", "0")))
-            if executed <= 0 or avg_price <= 0:
-                raise RuntimeError("Invalid confirmed execution quantity or price")
-
-            protection = engine.place_futures_protection(
+            execution = self.demo_execution.open_futures_position(
+                self.demo_account_id,
+                agent_id="futures",
                 symbol=symbol,
                 direction=direction,
-                stop_loss=rounded_stop,
-                take_profit=rounded_target,
-                position_side=position_side
+                quantity=quantity,
+                market_price=market_price,
+                leverage=Decimal(str(leverage)),
+                reference_id=trade_id,
             )
-            if not protection.get("verified"):
-                raise RuntimeError("Protective orders were not verified")
 
             record = {
                 "position_id": trade_id,
                 "trade_id": trade_id,
+                "engine_position_id": execution["position_id"],
                 "domain": "futures",
                 "symbol": symbol,
                 "direction": direction,
-                "quantity": format(executed, "f"),
-                "entry_price": format(avg_price, "f"),
-                "stop_loss": rounded_stop,
-                "take_profit": rounded_target,
-                "entry_order_id": order.get("orderId"),
-                "stop_algo_id": protection["stop_loss"].get("algoId"),
-                "target_algo_id": protection["take_profit"].get("algoId"),
+                "quantity": str(execution["quantity"]),
+                "entry_price": str(execution["entry_price"]),
+                "stop_loss": str(stop),
+                "take_profit": str(target),
+                "initial_margin": str(execution["initial_margin"]),
+                "entry_fee": str(execution["fee"]),
                 "status": "DEMO_OPEN",
-                "protection_verified": True
+                "protection_verified": False,
+                "execution_source": "INTERNAL_DEMO",
             }
             self.demo_positions[trade_id] = record
             self._save_demo_state()
+
             self.risk.update_reservation_status(
                 trade_id, "DEMO_OPEN",
-                exchange_order_id=order.get("orderId"),
-                protection_verified=True
+                protection_verified=False,
+                execution_source="INTERNAL_DEMO",
             )
             return {"approved": True, "mode": "DEMO", **record}
 
         except Exception as error:
-            if "trade_id" in locals():
+            if trade_id:
                 self.risk.update_reservation_status(
                     trade_id, "DEMO_UNPROTECTED",
-                    execution_error=str(error)
+                    execution_error=str(error),
                 )
                 self.demo_positions[trade_id] = {
                     "position_id": trade_id,
@@ -377,10 +446,14 @@ class TradingCoordinator:
                     "direction": direction,
                     "status": "DEMO_UNPROTECTED",
                     "error": str(error),
-                    "protection_verified": False
+                    "execution_source": "INTERNAL_DEMO",
                 }
                 self._save_demo_state()
-            return {"approved": False, "mode": "DEMO", "reason": str(error)}
+            return {
+                "approved": False,
+                "mode": "DEMO",
+                "reason": str(error),
+            }
 
     def _agent_enabled(self, domain):
         domains = self.risk.get_status().get("domains", {})
@@ -502,7 +575,10 @@ class TradingCoordinator:
                         )
 
                 if domain == "alpha" and isinstance(signal, dict):
-                    signal["execution_enabled"] = False
+                    signal["execution_enabled"] = (
+                        self.mode == "DEMO"
+                        and str(agent_data["token_safety"].get("status", "")).upper() == "PASS"
+                    )
 
                 results[domain] = signal
                 self.last_signals[domain] = signal
@@ -701,6 +777,64 @@ class TradingCoordinator:
         if signal.get("direction") != direction:
             return {"approved": False, "reason": "Direction does not match latest signal"}
 
+        if domain == "spot":
+            if self.mode != "DEMO" or self.demo_execution is None:
+                return {"approved": False, "reason": "Select DEMO mode first"}
+            if direction not in ("BUY", "SELL"):
+                return {"approved": False, "reason": "Spot requires BUY or SELL"}
+
+            try:
+                market_price = self._demo_market_price(symbol, "spot")
+                execution = self.demo_execution.submit_order(
+                    self.demo_account_id,
+                    agent_id="spot",
+                    symbol=symbol,
+                    market_type="SPOT",
+                    side=direction,
+                    quantity=Decimal(str(quantity)),
+                    market_price=market_price,
+                    leverage=Decimal("1"),
+                )
+            except Exception as error:
+                return {"approved": False, "reason": str(error)}
+
+            return {
+                "approved": execution.get("status") == "FILLED",
+                "mode": "DEMO",
+                "domain": "spot",
+                **execution,
+            }
+
+        if domain == "alpha":
+            if self.mode != "DEMO" or self.demo_execution is None:
+                return {"approved": False, "reason": "Select DEMO mode first"}
+            if direction != "BUY":
+                return {"approved": False, "reason": "Alpha only supports BUY entries"}
+            safety = self._get_alpha_safety(symbol)
+            if str(safety.get("status", "")).upper() != "PASS":
+                return {"approved": False, "reason": "Alpha token safety is not PASS"}
+            try:
+                market_price = self._demo_market_price(symbol, "spot")
+                execution = self.demo_execution.submit_order(
+                    self.demo_account_id,
+                    agent_id="alpha",
+                    symbol=symbol,
+                    market_type="SPOT",
+                    side="BUY",
+                    quantity=Decimal(str(quantity)),
+                    market_price=market_price,
+                    leverage=Decimal("1"),
+                )
+            except Exception as error:
+                return {"approved": False, "reason": str(error)}
+            return {
+                "approved": execution.get("status") == "FILLED",
+                "mode": "DEMO",
+                "domain": "alpha",
+                "token_safety": safety,
+                **execution,
+            }
+
         if domain == "futures":
             from math import isfinite
 
@@ -744,8 +878,8 @@ class TradingCoordinator:
             stop_loss = plan_stop
             take_profit = plan_target
 
-        if domain in ("spot", "alpha") and direction != "BUY":
-            return {"approved": False, "reason": "Spot and Alpha only support BUY entries"}
+        if domain == "alpha" and direction != "BUY":
+            return {"approved": False, "reason": "Alpha only supports BUY entries"}
 
         if domain == "futures" and direction not in ("LONG", "SHORT"):
             return {"approved": False, "reason": "Futures requires LONG or SHORT"}

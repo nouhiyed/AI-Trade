@@ -12,6 +12,7 @@ class BinanceMarketData:
         "spot": "https://api.binance.com",
         "futures": "https://fapi.binance.com",
     }
+    ALPHA_BASE_URL = "https://www.binance.com"
 
     CANDLE_COLUMNS = [
         "open_time", "open", "high", "low", "close", "volume",
@@ -102,6 +103,98 @@ class BinanceMarketData:
         ).isoformat()
 
         return df
+
+    def _alpha_request(self, endpoint, params=None):
+        response = self.session.get(
+            self.ALPHA_BASE_URL + endpoint,
+            params=params or {},
+            timeout=self.timeout
+        )
+        response.raise_for_status()
+        result = response.json()
+        if not isinstance(result, dict) or result.get("code") != "000000":
+            raise RuntimeError(
+                "Binance Alpha API error: " +
+                str(result.get("message", "Invalid response") if isinstance(result, dict) else result)
+            )
+        return result.get("data")
+
+    def fetch_alpha_symbols(self):
+        data = self._alpha_request(
+            "/bapi/defi/v1/public/alpha-trade/get-exchange-info"
+        )
+        if not isinstance(data, dict):
+            raise RuntimeError("Invalid Binance Alpha exchange info")
+        return sorted({
+            item["symbol"] for item in data.get("symbols", [])
+            if item.get("status") == "TRADING"
+            and item.get("quoteAsset") == "USDT"
+            and item.get("symbol")
+        })
+
+    def fetch_alpha_candles(self, symbol, interval="5m", limit=200):
+        if not 2 <= int(limit) <= 1000:
+            raise ValueError("limit must be between 2 and 1000")
+        raw = self._alpha_request(
+            "/bapi/defi/v1/public/alpha-trade/klines",
+            {
+                "symbol": str(symbol).upper(),
+                "interval": interval,
+                "limit": int(limit)
+            }
+        )
+        if not isinstance(raw, list) or not raw:
+            raise RuntimeError("Binance Alpha returned no candle data")
+        df = pd.DataFrame(raw, columns=self.CANDLE_COLUMNS)
+        numeric = [
+            "open", "high", "low", "close", "volume",
+            "quote_volume", "trades", "taker_buy_base",
+            "taker_buy_quote"
+        ]
+        for column in numeric:
+            df[column] = pd.to_numeric(df[column], errors="coerce")
+        df["open_time"] = pd.to_datetime(
+            pd.to_numeric(df["open_time"]), unit="ms", utc=True
+        )
+        df["close_time"] = pd.to_datetime(
+            pd.to_numeric(df["close_time"]), unit="ms", utc=True
+        )
+        df["is_closed"] = df["close_time"] < pd.Timestamp.now(tz="UTC")
+        df = df.dropna(
+            subset=["open", "high", "low", "close", "volume"]
+        ).reset_index(drop=True)
+        if len(df) < 2:
+            raise RuntimeError("Not enough Alpha candles")
+        df.attrs.update({
+            "market": "alpha",
+            "symbol": str(symbol).upper(),
+            "interval": interval,
+            "source": "binance_alpha_rest",
+            "received_at": datetime.now(timezone.utc).isoformat()
+        })
+        return df
+
+    def fetch_symbols(self, market):
+        market = str(market).strip().lower()
+        if market == "spot":
+            raw = self._request("spot", "/api/v3/exchangeInfo", {})
+            symbols = [
+                item["symbol"] for item in raw.get("symbols", [])
+                if item.get("status") == "TRADING"
+                and item.get("quoteAsset") == "USDT"
+                and item.get("isSpotTradingAllowed", True)
+            ]
+        elif market == "futures":
+            raw = self._request("futures", "/fapi/v1/exchangeInfo", {})
+            symbols = [
+                item["symbol"] for item in raw.get("symbols", [])
+                if item.get("status") == "TRADING"
+                and item.get("quoteAsset") == "USDT"
+                and item.get("contractType") == "PERPETUAL"
+            ]
+        else:
+            raise ValueError("Market must be spot or futures")
+        return sorted(set(symbols))
 
     def fetch_orderbook(self, market, symbol, limit=100):
         raw = self._request(

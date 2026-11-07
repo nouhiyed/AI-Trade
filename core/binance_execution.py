@@ -20,24 +20,11 @@ class BinanceExecutionEngine:
     }
 
     def __init__(self, mode=None, timeout=15):
-        self.mode = str(
-            mode or os.getenv("BINANCE_MODE", "PAPER")
-        ).upper()
-
-        if self.mode not in ("PAPER", "DEMO", "LIVE"):
-            raise ValueError("Invalid Binance mode")
-
-        if self.mode == "PAPER":
-            raise RuntimeError("Paper mode must use PaperTradingEngine")
-
+        self.mode = str(mode or os.getenv("BINANCE_MODE", "DEMO")).upper()
         if self.mode == "LIVE":
-            enabled = os.getenv("BINANCE_LIVE_ENABLED", "").lower()
-            confirmation = os.getenv("BINANCE_LIVE_CONFIRM", "")
-            if enabled != "true":
-                raise RuntimeError("Live trading is disabled")
-            if confirmation != "I_ACCEPT_REAL_MONEY_RISK":
-                raise RuntimeError("Live confirmation is missing")
-
+            raise RuntimeError("LIVE trading is permanently disabled")
+        if self.mode != "DEMO":
+            raise ValueError("Unsupported Binance execution mode")
         self.timeout = timeout
         self.session = requests.Session()
         self.session.headers.update({
@@ -56,40 +43,7 @@ class BinanceExecutionEngine:
         return key, secret
 
     def _signed_request(self, market, method, endpoint, params=None):
-        if market not in ("spot", "futures"):
-            raise ValueError("Market must be spot or futures")
-
-        key, secret = self._credentials(market)
-        base = self.URLS[self.mode][market]
-        values = dict(params or {})
-        values["recvWindow"] = 5000
-        values["timestamp"] = int(time.time() * 1000)
-
-        payload = urlencode(values)
-        signature = hmac.new(
-            secret.encode("utf-8"),
-            payload.encode("utf-8"),
-            hashlib.sha256,
-        ).hexdigest()
-
-        url = f"{base}{endpoint}?{payload}&signature={signature}"
-
-        response = self.session.request(
-            method=method.upper(),
-            url=url,
-            headers={"X-MBX-APIKEY": key},
-            timeout=self.timeout,
-        )
-        try:
-            data = response.json()
-        except ValueError:
-            data = {"message": response.text[:500]}
-
-        if not response.ok:
-            raise RuntimeError(
-                f"Binance API error HTTP {response.status_code}: {data}"
-            )
-        return data
+        raise RuntimeError("Signed Binance requests are disabled")
 
     @staticmethod
     def _positive(value, name):

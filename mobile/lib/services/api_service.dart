@@ -42,6 +42,26 @@ class ApiService {
     }
   }
 
+  static Future<Map<String, dynamic>> marketSymbols(String market) =>
+      _request(
+        'GET',
+        '/market/symbols?market=${Uri.encodeQueryComponent(market)}',
+      );
+
+  static Future<Map<String, dynamic>> marketCandles({
+    required String market,
+    required String symbol,
+    String interval = '5m',
+    int limit = 200,
+  }) =>
+      _request(
+        'GET',
+        '/market/candles?market=${Uri.encodeQueryComponent(market)}'
+        '&symbol=${Uri.encodeQueryComponent(symbol)}'
+        '&interval=${Uri.encodeQueryComponent(interval)}'
+        '&limit=$limit',
+      );
+
   static Future<bool> health() async {
     final result = await _request('GET', '/health');
     return result['ok'] == true;
