@@ -54,6 +54,8 @@ class ApiService {
     String interval = '5m',
     int limit = 200,
     bool live = false,
+    int? startTime,
+    int? endTime,
   }) =>
       _request(
         'GET',
@@ -61,7 +63,9 @@ class ApiService {
         '&symbol=${Uri.encodeQueryComponent(symbol)}'
         '&interval=${Uri.encodeQueryComponent(interval)}'
         '&limit=$limit'
-        '${live ? '&live=1' : ''}',
+        '${live ? '&live=1' : ''}'
+        '${startTime == null ? '' : '&startTime=$startTime'}'
+        '${endTime == null ? '' : '&endTime=$endTime'}',
       );
 
   static Future<bool> health() async {
@@ -82,12 +86,26 @@ class ApiService {
     required String domain,
     required String symbol,
     required String timeframe,
+    required double entryPrice,
+    required double takeProfit,
+    required double stopLoss,
   }) =>
       _request('POST', '/agent/submit', body: {
         'domain': domain,
         'symbol': symbol,
         'timeframe': timeframe,
+        'entry_price': entryPrice,
+        'take_profit': takeProfit,
+        'stop_loss': stopLoss,
       });
+
+  static Future<Map<String, dynamic>> tradeChart({
+    required String tradeId,
+  }) =>
+      _request(
+        'GET',
+        '/journal/chart?trade_id=${Uri.encodeQueryComponent(tradeId)}',
+      );
 
   static Future<Map<String, dynamic>> scanFutures() =>
       _request('POST', '/scan/futures');
