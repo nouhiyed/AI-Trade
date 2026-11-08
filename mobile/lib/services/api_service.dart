@@ -78,6 +78,17 @@ class ApiService {
   static Future<Map<String, dynamic>> analyze(String symbol) =>
       _request('POST', '/analyze', body: {'symbol': symbol});
 
+  static Future<Map<String, dynamic>> submitChartSignal({
+    required String domain,
+    required String symbol,
+    required String timeframe,
+  }) =>
+      _request('POST', '/agent/submit', body: {
+        'domain': domain,
+        'symbol': symbol,
+        'timeframe': timeframe,
+      });
+
   static Future<Map<String, dynamic>> scanFutures() =>
       _request('POST', '/scan/futures');
 
