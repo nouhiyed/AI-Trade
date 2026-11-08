@@ -99,6 +99,57 @@ class TradeJournal:
             )
             return True
 
+    def record_closed_snapshot(self, record, net_pnl, reason=None):
+        """Persist a closed trade even if its opening journal write was missed."""
+        record = dict(record or {})
+        trade_id = str(record.get("trade_id") or record.get("position_id") or "").strip()
+        if not trade_id:
+            raise ValueError("Closed trade snapshot requires a trade_id")
+        context = record.get("context") or record.get("journal_context") or {}
+        if not isinstance(context, dict):
+            try:
+                context = json.loads(context or "{}")
+            except (TypeError, ValueError):
+                context = {}
+        opened_at = record.get("opened_at") or record.get("opened_at_ms") or int(time.time() * 1000)
+        closed_at = record.get("closed_at") or record.get("closed_at_ms") or int(time.time() * 1000)
+        entry = record.get("entry") or record.get("entry_price")
+        exit_price = record.get("exit_price") or record.get("close_price")
+        risk = record.get("risk_amount")
+        pnl = float(net_pnl)
+        r_mult = pnl / float(risk) if _num(risk) not in (None, 0) else None
+        with self._lock, self._connect() as db:
+            db.execute(
+                """INSERT INTO trades
+                   (trade_id, domain, symbol, direction, setup_key, confidence,
+                    opened_at, closed_at, entry, stop_loss, take_profit,
+                    risk_amount, exit_price, close_reason, net_pnl, r_multiple,
+                    context, status)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'CLOSED')
+                   ON CONFLICT(trade_id) DO UPDATE SET
+                    closed_at=excluded.closed_at,
+                    exit_price=excluded.exit_price,
+                    close_reason=excluded.close_reason,
+                    net_pnl=excluded.net_pnl,
+                    r_multiple=excluded.r_multiple,
+                    status='CLOSED',
+                    context=CASE WHEN trades.context IS NULL OR trades.context='' OR trades.context='{}'
+                                 THEN excluded.context ELSE trades.context END""",
+                (
+                    trade_id, str(record.get("domain") or "futures"),
+                    str(record.get("symbol") or ""),
+                    str(record.get("direction") or "LONG"),
+                    str(record.get("setup_key") or "MANUAL"),
+                    _num(record.get("confidence")),
+                    int(opened_at), int(closed_at), _num(entry),
+                    _num(record.get("stop_loss")), _num(record.get("take_profit")),
+                    _num(risk), _num(exit_price),
+                    str(reason or record.get("close_reason") or "CLOSED"),
+                    pnl, r_mult, json.dumps(context, default=str),
+                ),
+            )
+        return True
+
     def set_setup_disabled(self, setup_key, disabled, reason=""):
         with self._lock, self._connect() as db:
             db.execute(
@@ -116,6 +167,11 @@ class TradeJournal:
         sql = "SELECT * FROM trades WHERE status='CLOSED' ORDER BY closed_at"
         with self._connect() as db:
             rows = [dict(r) for r in db.execute(sql).fetchall()]
+        for item in rows:
+            try:
+                item["context"] = json.loads(item.get("context") or "{}")
+            except (TypeError, ValueError):
+                item["context"] = {}
         return rows[-limit:] if limit else rows
 
     def recent(self, limit=50):
