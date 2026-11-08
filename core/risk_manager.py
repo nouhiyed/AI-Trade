@@ -188,8 +188,18 @@ class RiskManager:
             if direction not in ["LONG", "SHORT"]:
                 return {"approved": False, "reason": "Invalid direction"}
 
+            try:
+                risk_pct = float(risk_pct)
+                leverage = int(leverage)
+            except (TypeError, ValueError):
+                return {"approved": False, "reason": "Invalid risk settings"}
+
             if risk_pct <= 0 or leverage < 1:
                 return {"approved": False, "reason": "Invalid risk settings"}
+            if domain == "futures" and leverage > 5:
+                return {"approved": False, "reason": "Futures leverage exceeds the hard 5x limit"}
+            if domain in ("spot", "alpha") and leverage != 1:
+                return {"approved": False, "reason": "Spot and Alpha must use 1x leverage"}
 
             if direction == "LONG" and stop_loss >= entry:
                 return {"approved": False, "reason": "Invalid LONG stop"}
