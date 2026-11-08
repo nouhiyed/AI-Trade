@@ -95,6 +95,22 @@ class TestTradingCoordinator(unittest.TestCase):
         self.assertFalse(result["opened"])
         self.assertIn("WAIT", result["decision"])
 
+    def test_market_data_failure_before_order_releases_reservation(self):
+        self.system.last_signals["futures"] = {
+            "symbol": "BTCUSDT", "direction": "LONG", "confidence": 80,
+            "trade_plan": {
+                "success": True, "direction": "LONG", "entry": 100,
+                "stop_loss": 99, "take_profit": 102, "atr": 0.5,
+            },
+        }
+        self.system._demo_market_price = lambda *a, **k: (_ for _ in ()).throw(
+            RuntimeError("Binance quote unavailable"))
+        result = self.system.request_demo_futures_trade("BTCUSDT", "LONG")
+        self.assertFalse(result["approved"])
+        self.assertFalse(result["execution_submitted"])
+        self.assertEqual(self.system.risk.get_status()["active_reservations"], 0)
+        self.assertEqual(self.system.demo_positions, {})
+
     def test_futures_leverage_is_confidence_and_volatility_aware(self):
         plan = {"entry": 100, "atr": 0.5}
         self.assertEqual(
