@@ -18,6 +18,9 @@ class ProChartScreen extends StatefulWidget {
   final String initialSymbol;
   final String initialMarket;
   final bool embedded;
+  final String initialInterval;
+  final bool showSubmitButton;
+  final bool lockSelection;
 
   const ProChartScreen({
     super.key,
@@ -30,6 +33,9 @@ class ProChartScreen extends StatefulWidget {
     this.initialSymbol = 'BTCUSDT',
     this.initialMarket = 'futures',
     this.embedded = false,
+    this.initialInterval = '5m',
+    this.showSubmitButton = true,
+    this.lockSelection = false,
   });
 
   @override
@@ -45,7 +51,7 @@ class _ProChartScreenState extends State<ProChartScreen> {
   String? _error;
   String _market = 'futures';
   late String _symbol;
-  String _interval = '5m';
+  late String _interval;
   List<String> _symbols = [];
   double? _lastPrice;
 
@@ -60,8 +66,8 @@ class _ProChartScreenState extends State<ProChartScreen> {
 
   List<String> get _availableIntervals {
     if (_market == 'futures') return ['1m', '5m', '15m', '1h'];
-    if (_market == 'spot') return ['5m', '15m', '1h', '4h'];
-    return ['5m', '15m', '1h'];
+    if (_market == 'spot') return ['1m', '5m', '15m', '1h', '4h'];
+    return ['1m', '5m', '15m', '1h'];
   }
   static const _markets = ['futures', 'spot', 'alpha'];
 
@@ -72,6 +78,7 @@ class _ProChartScreenState extends State<ProChartScreen> {
     super.initState();
     _symbol = widget.initialSymbol;
     _market = widget.initialMarket;
+    _interval = widget.initialInterval;
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(const Color(0xFF0D1117))
@@ -180,108 +187,22 @@ class _ProChartScreenState extends State<ProChartScreen> {
   }
 
   Future<void> _submitToAgent() async {
-    if (_submitting) return;
-    setState(() => _submitting = true);
-    final domain = _market;
-    try {
-      final result = await ApiService.submitChartSignal(
-        domain: domain,
-        symbol: _symbol,
-        timeframe: _interval,
-      );
-      if (!mounted) return;
-      final signal = result['signal'] is Map
-          ? Map<String, dynamic>.from(result['signal'] as Map)
-          : <String, dynamic>{};
-      final plan = result['trade_plan'] is Map
-          ? Map<String, dynamic>.from(result['trade_plan'] as Map)
-          : <String, dynamic>{};
-      final safety = result['token_safety'] is Map
-          ? Map<String, dynamic>.from(result['token_safety'] as Map)
-          : <String, dynamic>{};
-      final confidence = signal['confidence'];
-      final reason = signal['reason'] ?? plan['reason'] ?? '';
-      final execution = result['execution'] is Map
-          ? Map<String, dynamic>.from(result['execution'] as Map)
-          : <String, dynamic>{};
-      if (result['opened'] == true && execution['position_id'] != null) {
-        final id = '${execution['position_id']}';
-        if (!widget.positions.any((p) => '${p['position_id']}' == id)) {
-          widget.positions.add(execution);
-          _pushLevels();
-        }
-      }
-      await showDialog<void>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          backgroundColor: widget.panel,
-          title: Text(t('نتيجة تحليل الوكيل', 'Agent analysis result'),
-              style: TextStyle(color: widget.text)),
-          content: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text('${_symbol} • ${domain.toUpperCase()} • ${_interval}',
-                    style: TextStyle(color: widget.text, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 8),
-                Text('${result['decision'] ?? result['reason'] ?? 'No decision'}',
-                    style: TextStyle(color: widget.text)),
-                Text('${t('الاتجاه', 'Direction')}: ${signal['direction'] ?? '—'}',
-                    style: TextStyle(color: widget.text)),
-                Text('${t('الثقة', 'Confidence')}: ${confidence ?? '—'}%',
-                    style: TextStyle(color: widget.text)),
-                if (plan.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Text('Entry: ${plan['entry'] ?? '—'}',
-                      style: TextStyle(color: widget.text)),
-                  Text('SL: ${plan['stop_loss'] ?? '—'}',
-                      style: const TextStyle(color: _down)),
-                  Text('TP: ${plan['take_profit'] ?? '—'}',
-                      style: const TextStyle(color: _up)),
-                  Text('R/R: ${plan['reward_risk'] ?? '—'}',
-                      style: TextStyle(color: widget.text)),
-                ],
-                if (domain == 'alpha')
-                  Text('Token safety: ${safety['status'] ?? 'UNKNOWN'}',
-                      style: TextStyle(color: widget.text)),
-                if (reason.toString().isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Text(reason.toString(),
-                      style: TextStyle(color: widget.muted, fontSize: 12)),
-                ],
-                const SizedBox(height: 10),
-                Text(
-                  result['opened'] == true
-                      ? t('وافق الوكيل وفتح صفقة DEMO بعد اجتياز فحوصات المخاطر.',
-                          'Agent approved and opened a DEMO position after risk checks.')
-                      : t('لم تُفتح صفقة؛ قرار الوكيل أو فحوصات المخاطر رفضت الدخول.',
-                          'No position opened; the agent or backend risk checks rejected entry.'),
-                  style: TextStyle(
-                    color: result['opened'] == true ? _up : widget.muted,
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: Text(t('إغلاق', 'Close')),
-            ),
-          ],
+    if (_submitting || _symbol.isEmpty) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => AgentSubmissionScreen(
+          english: widget.english,
+          bg: widget.bg,
+          panel: widget.panel,
+          text: widget.text,
+          muted: widget.muted,
+          domain: _market,
+          symbol: _symbol,
+          timeframe: _interval,
+          initialPrice: _lastPrice,
         ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${t('تعذر إرسال التحليل: ', 'Agent request failed: ')}$e')),
-      );
-    } finally {
-      if (mounted) setState(() => _submitting = false);
-    }
+      ),
+    );
   }
 
   Future<void> _pickSymbol() async {
@@ -398,6 +319,21 @@ class _ProChartScreenState extends State<ProChartScreen> {
               ],
             ),
           )
+        else if (widget.lockSelection)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '${_symbol} • ${_market.toUpperCase()} • ${_interval}',
+                    style: TextStyle(color: widget.text, fontWeight: FontWeight.w800),
+                  ),
+                ),
+                const Icon(Icons.lock_outline, size: 15, color: _up),
+              ],
+            ),
+          )
         else
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
@@ -462,19 +398,20 @@ class _ProChartScreenState extends State<ProChartScreen> {
             ],
           ),
         ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
-          child: SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              onPressed: _submitting ? null : _submitToAgent,
-              icon: const Icon(Icons.psychology_alt, size: 18),
-              label: Text(_submitting
-                  ? t('جارٍ التحليل...', 'ANALYZING...')
-                  : t('إرسال للوكيل', 'SEND TO AGENT')),
+        if (widget.showSubmitButton)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+            child: SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _submitting ? null : _submitToAgent,
+                icon: const Icon(Icons.psychology_alt, size: 18),
+                label: Text(_submitting
+                    ? t('جارٍ التحليل...', 'ANALYZING...')
+                    : t('إرسال للوكيل', 'SEND TO AGENT')),
+              ),
             ),
           ),
-        ),
         Expanded(child: WebViewWidget(controller: _controller)),
       ],
     );
@@ -503,6 +440,265 @@ class _ProChartScreenState extends State<ProChartScreen> {
           ],
         ),
         body: chartBody,
+      ),
+    );
+  }
+}
+
+class AgentSubmissionScreen extends StatefulWidget {
+  final bool english;
+  final Color bg, panel, text, muted;
+  final String domain, symbol, timeframe;
+  final double? initialPrice;
+
+  const AgentSubmissionScreen({
+    super.key,
+    required this.english,
+    required this.bg,
+    required this.panel,
+    required this.text,
+    required this.muted,
+    required this.domain,
+    required this.symbol,
+    required this.timeframe,
+    this.initialPrice,
+  });
+
+  @override
+  State<AgentSubmissionScreen> createState() => _AgentSubmissionScreenState();
+}
+
+class _AgentSubmissionScreenState extends State<AgentSubmissionScreen> {
+  late final TextEditingController _entry;
+  final TextEditingController _target = TextEditingController();
+  final TextEditingController _stop = TextEditingController();
+  bool _sending = false;
+  Map<String, dynamic>? _result;
+  String? _error;
+
+  String t(String ar, String en) => widget.english ? en : ar;
+
+  @override
+  void initState() {
+    super.initState();
+    _entry = TextEditingController(
+      text: widget.initialPrice == null ? '' : widget.initialPrice!.toString(),
+    );
+  }
+
+  @override
+  void dispose() {
+    _entry.dispose();
+    _target.dispose();
+    _stop.dispose();
+    super.dispose();
+  }
+
+  double? _number(TextEditingController controller) =>
+      double.tryParse(controller.text.trim());
+
+  Future<void> _submit() async {
+    final entry = _number(_entry);
+    final target = _number(_target);
+    final stop = _number(_stop);
+    if (entry == null || target == null || stop == null ||
+        !entry.isFinite || !target.isFinite || !stop.isFinite ||
+        entry <= 0 || target <= 0 || stop <= 0) {
+      setState(() => _error = t(
+        'أدخل أسعاراً رقمية صحيحة وأكبر من صفر في الخانات الثلاث.',
+        'Enter valid positive numeric prices in all three fields.',
+      ));
+      return;
+    }
+    setState(() { _sending = true; _error = null; _result = null; });
+    try {
+      final result = await ApiService.submitChartSignal(
+        domain: widget.domain,
+        symbol: widget.symbol,
+        timeframe: widget.timeframe,
+        entryPrice: entry,
+        takeProfit: target,
+        stopLoss: stop,
+      );
+      if (mounted) setState(() => _result = result);
+    } catch (e) {
+      if (mounted) setState(() => _error = '$e');
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  Widget _priceField(String label, TextEditingController controller, Color accent) =>
+      Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: TextField(
+          controller: controller,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: false),
+          style: TextStyle(color: widget.text, fontWeight: FontWeight.w700),
+          decoration: InputDecoration(
+            labelText: label,
+            labelStyle: TextStyle(color: widget.muted),
+            prefixIcon: Icon(Icons.price_change_outlined, color: accent),
+            filled: true,
+            fillColor: widget.panel,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: BorderSide(color: accent.withOpacity(.25)),
+            ),
+          ),
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final status = '${_result?['decision_status'] ?? ''}'.toUpperCase();
+    final approved = status == 'APPROVED';
+    final direction = _result?['signal'] is Map
+        ? ((_result!['signal'] as Map)['direction'] ?? '—')
+        : '—';
+    final reason = _result?['decision_reason'] ??
+        _result?['reason'] ??
+        (_result?['execution'] is Map ? (_result!['execution'] as Map)['reason'] : null);
+
+    return Directionality(
+      textDirection: widget.english ? TextDirection.ltr : TextDirection.rtl,
+      child: Scaffold(
+        backgroundColor: widget.bg,
+        appBar: AppBar(
+          backgroundColor: widget.panel,
+          foregroundColor: widget.text,
+          title: Text(t('إرسال فرصة للوكيل', 'SUBMIT SETUP TO AGENT')),
+        ),
+        body: ListView(
+          padding: const EdgeInsets.all(14),
+          children: [
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: widget.panel,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: _up.withOpacity(.3)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.candlestick_chart, color: _up, size: 26),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(widget.symbol, style: TextStyle(
+                          color: widget.text, fontWeight: FontWeight.w900, fontSize: 18,
+                        )),
+                        Text('${widget.domain.toUpperCase()} • ${widget.timeframe}',
+                          style: TextStyle(color: widget.muted, fontSize: 11)),
+                      ],
+                    ),
+                  ),
+                  const Icon(Icons.lock_outline, color: _up),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+            _priceField(t('سعر الدخول المقترح', 'PROPOSED ENTRY'), _entry, const Color(0xFF4287F5)),
+            _priceField(t('سعر جني الأرباح', 'TAKE PROFIT'), _target, _up),
+            _priceField(t('سعر وقف الخسارة', 'STOP LOSS'), _stop, _down),
+            Text(
+              t('الاتجاه لا تختاره أنت؛ الوكيل يحدده وفق تحليله. إدخال الأسعار لا يفتح صفقة بحد ذاته.',
+                'You do not choose direction; the agent determines it. Entering prices alone never opens a trade.'),
+              style: TextStyle(color: widget.muted, fontSize: 11, height: 1.5),
+            ),
+            const SizedBox(height: 12),
+            Text(t('التشارت الحي للمراجعة', 'LIVE CHART REVIEW'),
+              style: TextStyle(color: widget.text, fontWeight: FontWeight.w900)),
+            const SizedBox(height: 6),
+            ProChartScreen(
+              key: ValueKey('review-${widget.domain}-${widget.symbol}-${widget.timeframe}'),
+              english: widget.english,
+              bg: widget.bg,
+              panel: widget.panel,
+              text: widget.text,
+              muted: widget.muted,
+              positions: const [],
+              initialSymbol: widget.symbol,
+              initialMarket: widget.domain,
+              initialInterval: widget.timeframe,
+              embedded: true,
+              showSubmitButton: false,
+              lockSelection: true,
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 50,
+              child: FilledButton.icon(
+                onPressed: _sending ? null : _submit,
+                icon: _sending
+                    ? const SizedBox(width: 18, height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.psychology_alt),
+                label: Text(_sending
+                    ? t('الوكيل يحلل الفرصة...', 'AGENT ANALYZING...')
+                    : t('إرسال للتحليل واتخاذ القرار', 'SEND FOR AGENT DECISION')),
+              ),
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: 10),
+              Text(_error!, style: const TextStyle(color: _down, fontSize: 12)),
+            ],
+            if (_result != null) ...[
+              const SizedBox(height: 14),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: widget.panel,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: (approved ? _up : _down).withOpacity(.45)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(children: [
+                      Icon(approved ? Icons.check_circle : Icons.cancel,
+                        color: approved ? _up : _down),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text(
+                        status.isEmpty ? t('لم يصدر قرار', 'NO DECISION') : status,
+                        style: TextStyle(color: approved ? _up : _down,
+                          fontWeight: FontWeight.w900, fontSize: 16),
+                      )),
+                      Text('${direction}', style: TextStyle(
+                        color: widget.text, fontWeight: FontWeight.bold)),
+                    ]),
+                    const SizedBox(height: 8),
+                    Text('${reason ?? t('لم يذكر الوكيل سبباً إضافياً.', 'No additional reason returned.')}',
+                      style: TextStyle(color: widget.text, height: 1.5)),
+                    if (_result!['trade_plan'] is Map) ...[
+                      const SizedBox(height: 10),
+                      Text('Entry: ${(_result!['trade_plan'] as Map)['entry'] ?? '—'}',
+                        style: TextStyle(color: widget.text)),
+                      Text('TP: ${(_result!['trade_plan'] as Map)['take_profit'] ?? '—'}',
+                        style: const TextStyle(color: _up)),
+                      Text('SL: ${(_result!['trade_plan'] as Map)['stop_loss'] ?? '—'}',
+                        style: const TextStyle(color: _down)),
+                      Text('R/R: ${(_result!['trade_plan'] as Map)['reward_risk'] ?? '—'}',
+                        style: TextStyle(color: widget.text)),
+                    ],
+                    if (_result!['opened'] == true)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 10),
+                        child: Text(
+                          t('تم قبول الفرصة وفتح مركز DEMO بعد اجتياز فحوصات المخاطر.',
+                            'Setup accepted; a DEMO position opened after risk checks.'),
+                          style: const TextStyle(color: _up, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
