@@ -19,12 +19,15 @@ ENTRY = (66, 135, 245)
 
 
 def render_trade_chart(candles, direction, entry, stop_loss, take_profit,
-                       symbol="", width=900, height=560):
+                       symbol="", width=900, height=560, exit_price=None,
+                       timeframe="5m", opened_at=None, closed_at=None):
     """candles: list of dicts with open/high/low/close. Returns PNG bytes or None."""
     if Image is None or not candles:
         return None
     candles = candles[-90:]
     levels = [float(entry), float(stop_loss), float(take_profit)]
+    if exit_price is not None:
+        levels.append(float(exit_price))
     lo = min(min(float(c["low"]) for c in candles), *levels)
     hi = max(max(float(c["high"]) for c in candles), *levels)
     pad = (hi - lo) * 0.06 or 1.0
@@ -63,14 +66,23 @@ def render_trade_chart(candles, direction, entry, stop_loss, take_profit,
         top_y, bot_y = sorted((y(o), y(cl)))
         draw.rectangle([x - body / 2, top_y, x + body / 2, max(bot_y, top_y + 1)], fill=color)
 
-    for name, price, color in (("TP", take_profit, UP), ("ENTRY", entry, ENTRY),
-                               ("SL", stop_loss, DOWN)):
+    chart_levels = [("TP", take_profit, UP), ("ENTRY", entry, ENTRY),
+                    ("SL", stop_loss, DOWN)]
+    if exit_price is not None:
+        chart_levels.append(("EXIT", exit_price, (245, 166, 35)))
+    for name, price, color in chart_levels:
         py = y(price)
         draw.line([(left, py), (left + plot_w, py)], fill=color, width=2)
         draw.rectangle([left + plot_w + 2, py - 8, width - 4, py + 8], fill=color)
         draw.text((left + plot_w + 6, py - 5), f"{name} {float(price):.6g}", fill=(255, 255, 255))
 
-    draw.text((left + 6, 12), f"{symbol}  {str(direction).upper()}  (demo)", fill=TEXT)
+    draw.text((left + 6, 12),
+              f"{symbol}  {str(direction).upper()}  {timeframe}  DEMO",
+              fill=TEXT)
+    if opened_at:
+        draw.text((left + 6, height - 16),
+                  f"OPEN {opened_at}  |  CLOSE {closed_at or '—'}",
+                  fill=TEXT)
     out = io.BytesIO()
     img.convert("RGB").save(out, format="PNG")
     return out.getvalue()
