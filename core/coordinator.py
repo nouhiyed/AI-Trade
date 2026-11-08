@@ -630,6 +630,7 @@ class TradingCoordinator(SpotDemoMixin):
         leverage = self.select_futures_leverage(signal, plan)
 
         trade_id = None
+        execution_attempted = False
         try:
             entry = Decimal(str(plan["entry"]))
             stop = Decimal(str(plan["stop_loss"]))
@@ -682,6 +683,7 @@ class TradingCoordinator(SpotDemoMixin):
 
             quantity = Decimal(str(reservation["quantity"]))
 
+            execution_attempted = True
             execution = self.demo_execution.open_futures_position(
                 self.demo_account_id,
                 agent_id="futures",
@@ -726,6 +728,14 @@ class TradingCoordinator(SpotDemoMixin):
             return {"approved": True, "mode": "DEMO", **record}
 
         except Exception as error:
+            if trade_id and not execution_attempted:
+                self.risk.release_reservation(trade_id)
+                return {
+                    "approved": False,
+                    "mode": "DEMO",
+                    "reason": str(error),
+                    "execution_submitted": False,
+                }
             if trade_id and "Insufficient DEMO cash for margin and fee" in str(error):
                 self.risk.release_reservation(trade_id)
                 return {
