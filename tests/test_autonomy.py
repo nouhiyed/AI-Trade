@@ -132,6 +132,15 @@ class TestAutopilot(Base):
         ap = Autopilot(self.c, config_path="config/ap.json")
         self.assertEqual(ap.tick()["opened"], [])
 
+    def test_string_false_cannot_enable_autopilot(self):
+        ap = Autopilot(self.c, config_path="config/ap.json")
+        ap.update({"enabled": "false"})
+        self.assertFalse(ap.config["enabled"])
+        ap.update({"enabled": True})
+        self.assertTrue(ap.config["enabled"])
+        ap.update({"enabled": "false"})
+        self.assertTrue(ap.config["enabled"])
+
     def test_opens_respecting_confidence_and_limits(self):
         self._scan([("BTCUSDT", 80), ("ETHUSDT", 40), ("SOLUSDT", 75)])
         ap = Autopilot(self.c, config_path="config/ap.json")
