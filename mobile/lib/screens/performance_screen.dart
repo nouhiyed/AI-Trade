@@ -64,6 +64,15 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
       // Read the authoritative autopilot state first; never hydrate the switch
       // from stale device preferences.
       final auto = await ApiService.autopilot();
+      if (!mounted) return;
+      // Publish the authoritative switch state immediately, before slower
+      // analytics/history requests can delay or fail.
+      setState(() {
+        if (!_autoSaving) _auto = auto;
+        _autoLoaded = true;
+        _serverOnline = true;
+      });
+
       final perf = await ApiService.performance();
       final learning = await ApiService.learning();
       final journal = await ApiService.journal(closedOnly: true);
@@ -73,8 +82,6 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
         _perf = perf;
         _learning = learning;
         if (!_autoSaving) _auto = auto;
-        _autoLoaded = true;
-        _serverOnline = true;
         _trades = rows is List
             ? rows.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
             : <Map<String, dynamic>>[];
@@ -224,14 +231,16 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
           ],
         ),
         Text(
-          enabled
-              ? (_serverOnline
-                  ? t('يعمل: يفحص السوق ويفتح صفقات تجريبية تلقائياً.',
-                      'Running: scans the market and opens demo trades automatically.')
-                  : t('آخر إعداد محفوظ مفعّل، لكن الخادم غير متصل ولا يمكن تأكيد استمرار التشغيل.',
-                      'Last saved setting is ON, but the server is offline; active trading cannot be confirmed.'))
-              : t('متوقف. شغّله ليبدأ الوكيل بالتداول التجريبي.',
-                  'Off. Turn it on to let the agent trade in demo.'),
+          !_autoLoaded
+              ? t('جارٍ قراءة الحالة الفعلية من الخادم...', 'Reading the actual server state...')
+              : enabled
+                  ? (_serverOnline
+                      ? t('يعمل: يفحص السوق ويفتح صفقات تجريبية تلقائياً.',
+                          'Running: scans the market and opens demo trades automatically.')
+                      : t('آخر حالة مؤكدة مفعّلة، لكن الخادم غير متصل.',
+                          'Last confirmed state is ON, but the server is offline.'))
+                  : t('متوقف. شغّله ليبدأ الوكيل بالتداول التجريبي.',
+                      'Off. Turn it on to let the agent trade in demo.'),
           style: TextStyle(color: widget.muted, fontSize: 11),
         ),
         Wrap(
