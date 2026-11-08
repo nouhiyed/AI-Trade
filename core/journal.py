@@ -127,9 +127,19 @@ class TradeJournal:
                     context, status)
                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'CLOSED')
                    ON CONFLICT(trade_id) DO UPDATE SET
-                    closed_at=excluded.closed_at,
-                    exit_price=excluded.exit_price,
-                    close_reason=excluded.close_reason,
+                    domain=CASE WHEN trades.domain IS NULL OR trades.domain='' THEN excluded.domain ELSE trades.domain END,
+                    symbol=CASE WHEN trades.symbol IS NULL OR trades.symbol='' THEN excluded.symbol ELSE trades.symbol END,
+                    direction=CASE WHEN trades.direction IS NULL OR trades.direction='' THEN excluded.direction ELSE trades.direction END,
+                    setup_key=CASE WHEN trades.setup_key IS NULL OR trades.setup_key='' THEN excluded.setup_key ELSE trades.setup_key END,
+                    confidence=COALESCE(trades.confidence, excluded.confidence),
+                    opened_at=CASE WHEN trades.opened_at IS NULL OR trades.opened_at=0 THEN excluded.opened_at ELSE trades.opened_at END,
+                    closed_at=COALESCE(excluded.closed_at, trades.closed_at),
+                    entry=COALESCE(NULLIF(trades.entry, 0), excluded.entry),
+                    stop_loss=COALESCE(NULLIF(trades.stop_loss, 0), excluded.stop_loss),
+                    take_profit=COALESCE(NULLIF(trades.take_profit, 0), excluded.take_profit),
+                    risk_amount=COALESCE(NULLIF(trades.risk_amount, 0), excluded.risk_amount),
+                    exit_price=COALESCE(excluded.exit_price, trades.exit_price),
+                    close_reason=COALESCE(excluded.close_reason, trades.close_reason),
                     net_pnl=excluded.net_pnl,
                     r_multiple=excluded.r_multiple,
                     status='CLOSED',
