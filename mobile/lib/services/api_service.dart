@@ -95,19 +95,6 @@ class ApiService {
   static Future<Map<String, dynamic>> demoPositions() =>
       _request('GET', '/demo/positions');
 
-  static Future<Map<String, dynamic>> openDemoTrade({
-    required String symbol,
-    required String direction,
-    double riskPct = 0.5,
-    int leverage = 1,
-  }) =>
-      _request('POST', '/demo/open', body: {
-        'symbol': symbol,
-        'direction': direction,
-        'risk_pct': riskPct,
-        'leverage': leverage,
-      });
-
   static Future<Map<String, dynamic>> closeDemoTrade({
     required String positionId,
   }) =>
