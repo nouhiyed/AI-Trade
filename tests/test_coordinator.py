@@ -96,7 +96,8 @@ class TestTradingCoordinator(unittest.TestCase):
         result = self.system.submit_chart_signal("futures", "BTCUSDT", "5m", 100, 102, 99)
         self.assertTrue(result["success"])
         self.assertFalse(result["opened"])
-        self.assertIn("WAIT", result["decision"])
+        self.assertEqual(result["decision_status"], "WAIT")
+        self.assertIn("No directional edge", result["decision_reason"])
 
     def test_chart_submission_rejects_invalid_proposed_level_order(self):
         self.system.analyze_live = lambda symbol, preferred_timeframe=None: {
@@ -114,6 +115,10 @@ class TestTradingCoordinator(unittest.TestCase):
             "futures", "BTCUSDT", "1m", 100, 98, 99)
         self.assertEqual(result["decision_status"], "REJECTED")
         self.assertIn("Stop Loss", result["decision_reason"])
+
+    def test_spot_and_alpha_accept_one_minute_chart_timeframe(self):
+        self.assertIn("1m", self.system.required_timeframes["spot"])
+        self.assertIn("1m", self.system.required_timeframes["alpha"])
 
     def test_market_data_failure_before_order_releases_reservation(self):
         self.system.last_signals["futures"] = {
