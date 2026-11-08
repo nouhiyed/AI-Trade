@@ -63,6 +63,85 @@ class _AITradeAppState extends State<AITradeApp> {
   }
 }
 
+
+class _BalanceAiPainter extends CustomPainter {
+  const _BalanceAiPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final area = Offset.zero & size;
+    final glow = Paint()..shader = RadialGradient(
+      colors: [const Color(0xFF00DCC0).withOpacity(.18), Colors.transparent],
+    ).createShader(Rect.fromCircle(
+      center: Offset(size.width * .82, size.height * .22),
+      radius: size.width * .72,
+    ));
+    canvas.drawRect(area, glow);
+
+    final linePaint = Paint()
+      ..color = const Color(0xFF46B8FF).withOpacity(.16)
+      ..strokeWidth = 1.1
+      ..style = PaintingStyle.stroke;
+    final nodes = <Offset>[
+      Offset(size.width * .60, size.height * .22),
+      Offset(size.width * .77, size.height * .12),
+      Offset(size.width * .91, size.height * .28),
+      Offset(size.width * .72, size.height * .48),
+      Offset(size.width * .91, size.height * .66),
+      Offset(size.width * .57, size.height * .72),
+    ];
+    for (final pair in const [(0, 1), (1, 2), (0, 3), (3, 4), (3, 5), (2, 4)]) {
+      canvas.drawLine(nodes[pair.$1], nodes[pair.$2], linePaint);
+    }
+    for (var i = 0; i < nodes.length; i++) {
+      canvas.drawCircle(nodes[i], i.isEven ? 3.2 : 2.2,
+        Paint()..color = const Color(0xFF00E5C3).withOpacity(.55));
+    }
+
+    final chip = RRect.fromRectAndRadius(
+      Rect.fromCenter(
+        center: Offset(size.width * .78, size.height * .43),
+        width: size.width * .19,
+        height: size.height * .30,
+      ),
+      const Radius.circular(12),
+    );
+    canvas.drawRRect(chip, Paint()
+      ..color = const Color(0xFF39A8FF).withOpacity(.045)
+      ..style = PaintingStyle.fill);
+    canvas.drawRRect(chip, Paint()
+      ..color = const Color(0xFF39A8FF).withOpacity(.22)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1);
+
+    final candleXs = [size.width * .57, size.width * .64, size.width * .71,
+      size.width * .87, size.width * .94];
+    final candleYs = [
+      [size.height * .61, size.height * .46, size.height * .53, size.height * .39],
+      [size.height * .55, size.height * .37, size.height * .45, size.height * .31],
+      [size.height * .48, size.height * .34, size.height * .40, size.height * .26],
+      [size.height * .58, size.height * .40, size.height * .48, size.height * .32],
+      [size.height * .49, size.height * .30, size.height * .39, size.height * .23],
+    ];
+    for (var i = 0; i < candleXs.length; i++) {
+      final color = i == 1 || i == 4
+          ? const Color(0xFF00E5C3).withOpacity(.48)
+          : const Color(0xFF39A8FF).withOpacity(.42);
+      final p = Paint()..color = color..strokeWidth = 1.5;
+      canvas.drawLine(Offset(candleXs[i], candleYs[i][0]),
+          Offset(candleXs[i], candleYs[i][3]), p);
+      canvas.drawRRect(RRect.fromRectAndRadius(
+        Rect.fromLTRB(candleXs[i] - 3, candleYs[i][1],
+            candleXs[i] + 3, candleYs[i][2]),
+        const Radius.circular(2),
+      ), p);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _BalanceAiPainter oldDelegate) => false;
+}
+
 class TradeShell extends StatefulWidget {
   final bool dark, english;
   final String mode;
@@ -1045,7 +1124,14 @@ class _TradeShellState extends State<TradeShell>
     final totalTrades = demoData['total_trades'] ?? 0;
 
     return _panel(
-      child: Column(
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Stack(
+          children: [
+            const Positioned.fill(
+              child: IgnorePointer(child: CustomPaint(painter: _BalanceAiPainter())),
+            ),
+            Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
@@ -1112,6 +1198,9 @@ class _TradeShellState extends State<TradeShell>
               ),
             ),
         ],
+            ),
+          ],
+        ),
       ),
     );
   }
