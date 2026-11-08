@@ -101,10 +101,18 @@ jobs:
               '<uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />',
               '<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />',
               '<uses-permission android:name="android.permission.WAKE_LOCK" />',
+              '<uses-permission android:name="com.termux.permission.RUN_COMMAND" />',
           ]
           for permission in permissions:
               if permission not in s:
                   s = s.replace("<application", permission + "\n    <application", 1)
+
+          if 'android:name="com.termux"' not in s:
+              s = s.replace(
+                  "<application",
+                  '    <queries>\\n        <package android:name="com.termux" />\\n    </queries>\\n    <application',
+                  1,
+              )
 
           match = re.search(r'<application\b[^>]*', s)
           if not match:
