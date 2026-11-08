@@ -60,6 +60,7 @@ submission_jobs = _load_submission_jobs()
 
 
 def _process_agent_submission(request_id, payload):
+    failed = False
     try:
         result = coordinator.submit_chart_signal(
             domain=payload.get("domain", ""),
@@ -70,6 +71,7 @@ def _process_agent_submission(request_id, payload):
             stop_loss=payload.get("stop_loss"),
         )
     except Exception as error:
+        failed = True
         result = {
             "success": False,
             "decision_status": "ERROR",
@@ -79,8 +81,9 @@ def _process_agent_submission(request_id, payload):
     with submission_jobs_lock:
         job = submission_jobs.get(request_id)
         if job is not None:
-            job["status"] = "COMPLETED"
+            job["status"] = "FAILED" if failed else "COMPLETED"
             job["result"] = result
+            job["reason"] = result.get("decision_reason") or result.get("reason")
             job["completed_at"] = time.time()
             _save_submission_jobs_locked()
 
@@ -276,6 +279,17 @@ class APIHandler(BaseHTTPRequestHandler):
                 return self.send_json(
                     performance.compute(coordinator.journal.closed_trades()))
             if path == "/journal":
+                if params.get("closed", ["0"])[0] == "1":
+                    trades = coordinator.journal.closed_trades()
+                    trades.sort(
+                        key=lambda item: int(item.get("closed_at") or 0),
+                        reverse=True,
+                    )
+                    return self.send_json({
+                        "trades": trades,
+                        "count": len(trades),
+                        "archive": True,
+                    })
                 limit = min(max(int(params.get("limit", ["50"])[0]), 1), 500)
                 return self.send_json({"trades": coordinator.journal.recent(limit)})
             if path == "/learning":
@@ -304,7 +318,7 @@ class APIHandler(BaseHTTPRequestHandler):
                         else snapshot.get("reason") or "Request is being processed"
                     ),
                 }
-                if snapshot["status"] == "COMPLETED":
+                if snapshot["status"] in {"COMPLETED", "FAILED"}:
                     response["result"] = snapshot.get("result")
                 if snapshot["status"] == "FAILED":
                     response["reason"] = snapshot.get("reason", "Agent request failed")
