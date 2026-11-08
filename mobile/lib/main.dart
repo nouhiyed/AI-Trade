@@ -1864,8 +1864,9 @@ class _TradeShellState extends State<TradeShell>
       notify(
         '${decision} · ${signal['direction'] ?? 'WAIT'} · ${tr('الثقة', 'Confidence')} ${signal['confidence'] ?? 0}%'
         '${plan['success'] == true ? ' · R/R ${plan['reward_risk']}' : ''}'
-        ' · ${tr('لم تُفتح صفقة', 'No trade opened')}',
+        ' · ${result['opened'] == true ? tr('تم فتح صفقة DEMO', 'DEMO position opened') : tr('لم تُفتح صفقة', 'No trade opened')}',
       );
+      if (result['opened'] == true) await _refreshStatus();
     } catch (error) {
       if (mounted) notify('${tr('تعذر إرسال الفرصة: ', 'Submit failed: ')}$error');
     } finally {
