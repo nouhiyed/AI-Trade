@@ -110,7 +110,7 @@ jobs:
           if 'android:name="com.termux"' not in s:
               s = s.replace(
                   "<application",
-                  '    <queries>\\n        <package android:name="com.termux" />\\n    </queries>\\n    <application',
+                  '    <queries>\n        <package android:name="com.termux" />\n    </queries>\n    <application',
                   1,
               )
 
