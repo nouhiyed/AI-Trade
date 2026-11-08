@@ -97,6 +97,7 @@ class _TradeShellState extends State<TradeShell>
   Map<String, dynamic> agentControls = {};
   final Set<String> closingPositionIds = {};
   Timer? _refreshTimer;
+  Timer? _statusTimer;
   final Map<String, List<Map<String, double>>> _marketCandles = {};
   final Map<String, List<String>> _marketSymbols = {};
   final Map<String, String> _selectedSymbols = {
@@ -127,9 +128,12 @@ class _TradeShellState extends State<TradeShell>
       if (!mounted) return;
       await _refreshMarketData(loadSymbols: true);
     }();
-    _refreshTimer = Timer.periodic(const Duration(seconds: 15), (_) async {
+    // Poll position state separately so automatic closes leave the live portfolio promptly.
+    _statusTimer = Timer.periodic(const Duration(seconds: 3), (_) async {
       if (!mounted) return;
       await _refreshStatus();
+    });
+    _refreshTimer = Timer.periodic(const Duration(seconds: 15), (_) async {
       if (!mounted) return;
       await _refreshMarketData();
     });
@@ -478,20 +482,36 @@ class _TradeShellState extends State<TradeShell>
     demoData = demo is Map
         ? Map<String, dynamic>.from(demo)
         : <String, dynamic>{};
-    final raw = demoData['open_positions'] ??
+    final rawOpen = demoData['open_positions'] ??
         demoData['positions'] ??
         demoData['items'];
-    final positions = raw is List
-        ? raw.whereType<Map>().map((item) {
+    final openPositions = rawOpen is List
+        ? rawOpen.whereType<Map>().map((item) {
             final position = Map<String, dynamic>.from(item);
             position['id'] = position['id'] ??
                 position['position_id'] ??
                 position['trade_id'] ??
                 '';
             return position;
+          }).where((item) =>
+              item['id'].toString().isNotEmpty &&
+              !{'DEMO_CLOSED', 'CLOSED'}.contains(
+                '${item['status'] ?? ''}'.toUpperCase(),
+              )).toList()
+        : <Map<String, dynamic>>[];
+    final rawClosed = demoData['closed_positions'];
+    final closedPositions = rawClosed is List
+        ? rawClosed.whereType<Map>().map((item) {
+            final trade = Map<String, dynamic>.from(item);
+            trade['id'] = trade['id'] ??
+                trade['position_id'] ??
+                trade['trade_id'] ??
+                '';
+            return trade;
           }).where((item) => item['id'].toString().isNotEmpty).toList()
         : <Map<String, dynamic>>[];
-    demoData['open_positions'] = positions;
+    demoData['open_positions'] = openPositions;
+    demoData['closed_positions'] = closedPositions;
     agentControls = controls is Map
         ? Map<String, dynamic>.from(controls)
         : <String, dynamic>{};
@@ -594,6 +614,7 @@ class _TradeShellState extends State<TradeShell>
   @override
   void dispose() {
     _refreshTimer?.cancel();
+    _statusTimer?.cancel();
     pulse.dispose();
     super.dispose();
   }
@@ -1435,6 +1456,119 @@ class _TradeShellState extends State<TradeShell>
     );
   }
 
+  Widget _closedPositionsSection() {
+    final raw = demoData['closed_positions'];
+    final trades = raw is List
+        ? raw.whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item)).toList()
+        : <Map<String, dynamic>>[];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _heading(
+          tr('أرشيف الصفقات المغلقة', 'CLOSED TRADE ARCHIVE'),
+          '${trades.length} CLOSED',
+          Icons.archive_outlined,
+        ),
+        const SizedBox(height: 10),
+        if (trades.isEmpty)
+          _panel(
+            child: Center(
+              child: Text(
+                tr('لا توجد صفقات مغلقة بعد', 'No closed trades yet'),
+                style: TextStyle(color: widget.muted),
+              ),
+            ),
+          )
+        else
+          ...trades.map((trade) {
+            final symbol = '${trade['symbol'] ?? '—'}';
+            final direction = '${trade['direction'] ?? '—'}'.toUpperCase();
+            final domain = '${trade['domain'] ?? '—'}'.toUpperCase();
+            final entry = trade['entry_price'] ?? trade['entry'] ?? '—';
+            final exit = trade['close_price'] ?? trade['exit_price'] ?? '—';
+            final pnlValue = double.tryParse(
+              '${trade['net_pnl'] ?? trade['realized_pnl'] ?? 0}',
+            ) ?? 0;
+            final reason = '${trade['close_reason'] ?? 'CLOSED'}'.toUpperCase();
+            final closedAt = trade['closed_at'] ?? trade['closed_at_ms'];
+            String closedLabel = '—';
+            if (closedAt != null) {
+              final stamp = int.tryParse('$closedAt');
+              if (stamp != null && stamp > 0) {
+                final date = DateTime.fromMillisecondsSinceEpoch(
+                  stamp < 1000000000000 ? stamp * 1000 : stamp,
+                ).toLocal();
+                closedLabel =
+                    '${date.year}-${date.month.toString().padLeft(2, '0')}-'
+                    '${date.day.toString().padLeft(2, '0')} '
+                    '${date.hour.toString().padLeft(2, '0')}:'
+                    '${date.minute.toString().padLeft(2, '0')}';
+              }
+            }
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 9),
+              child: _panel(
+                border: (pnlValue >= 0 ? green : red).withOpacity(.22),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            symbol,
+                            style: TextStyle(
+                              color: widget.text,
+                              fontWeight: FontWeight.w900,
+                              fontSize: 15,
+                            ),
+                          ),
+                        ),
+                        _pill(direction, direction == 'SHORT' ? red : green),
+                        const SizedBox(width: 6),
+                        _pill(domain, blue),
+                      ],
+                    ),
+                    const SizedBox(height: 11),
+                    Row(
+                      children: [
+                        Expanded(child: _metric(tr('الدخول', 'ENTRY'), '$entry', widget.text)),
+                        Expanded(child: _metric(tr('الخروج', 'EXIT'), '$exit', widget.text)),
+                        Expanded(
+                          child: _metric(
+                            tr('النتيجة الصافية', 'NET PNL'),
+                            '${pnlValue >= 0 ? '+' : ''}${pnlValue.toStringAsFixed(4)} USDT',
+                            pnlValue >= 0 ? green : red,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 9),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '${tr('سبب الإغلاق', 'CLOSE REASON')}: $reason',
+                            style: TextStyle(color: widget.muted, fontSize: 10),
+                          ),
+                        ),
+                        Text(
+                          closedLabel,
+                          style: TextStyle(color: widget.muted, fontSize: 10),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }),
+      ],
+    );
+  }
+
   Widget _portfolio() => ListView(
         padding: const EdgeInsets.all(15),
         children: [
@@ -1443,6 +1577,8 @@ class _TradeShellState extends State<TradeShell>
           _portfolioCard(),
           const SizedBox(height: 16),
           _openPositionsSection(),
+          const SizedBox(height: 16),
+          _closedPositionsSection(),
           const SizedBox(height: 16),
           _heading(tr('توزيع رأس المال', 'CAPITAL ALLOCATION'), 'DEMO', Icons.pie_chart),
           const SizedBox(height: 10),
@@ -1471,20 +1607,15 @@ class _TradeShellState extends State<TradeShell>
             ),
           ),
           const SizedBox(height: 17),
-          _heading(tr('سجل الصفقات', 'TRADE HISTORY'), 'ACTIVITY', Icons.receipt_long),
+          _heading(tr('سجل الصفقات', 'TRADE HISTORY'), 'ARCHIVE', Icons.receipt_long),
           const SizedBox(height: 10),
           _panel(
-            child: Center(
-              child: Column(
-                children: [
-                  Icon(Icons.receipt_long, color: widget.muted, size: 35),
-                  const SizedBox(height: 9),
-                  Text(
-                    tr('لا توجد صفقات مسجلة', 'No trades recorded'),
-                    style: TextStyle(color: widget.muted),
-                  ),
-                ],
+            child: Text(
+              tr(
+                'تظهر جميع المراكز المحسومة في أرشيف الصفقات المغلقة أعلاه، ولا تُعرض ضمن المراكز النشطة أو التشارتات الحية.',
+                'All settled positions are listed in the closed-trade archive above and are excluded from active positions and live charts.',
               ),
+              style: TextStyle(color: widget.muted, fontSize: 11),
             ),
           ),
         ],
