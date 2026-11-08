@@ -42,6 +42,17 @@ class TestTradePlanner(unittest.TestCase):
         self.assertLess(plan["take_profit"], plan["entry"])
         self.assertGreater(plan["stop_loss"], plan["entry"])
 
+    def test_prefers_selected_4h_timeframe_when_available(self):
+        data = {
+            "symbol": "BTCUSDT",
+            "15m": self.frame(close=100.0, atr=2.0),
+            "4h": self.frame(close=200.0, atr=4.0, support=196.4, resistance=220.0),
+        }
+        plan = self.planner.create(data, "LONG", preferred_timeframe="4h")
+        self.assertTrue(plan["success"], plan)
+        self.assertEqual(plan["timeframe"], "4h")
+        self.assertAlmostEqual(plan["entry"], 200.0)
+
     def test_rejects_target_blocked_by_resistance(self):
         plan = self.planner.create(
             {"symbol": "BTCUSDT",
