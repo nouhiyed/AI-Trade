@@ -64,10 +64,15 @@ jobs:
 
           p = Path("android/gradle/wrapper/gradle-wrapper.properties")
           s = p.read_text()
-          url = r"distributionUrl=https\://downloads.gradle.org/distributions/gradle-9.3.1-bin.zip"
+          url = r"distributionUrl=https\://mirror.nju.edu.cn/gradle/gradle-9.3.1-bin.zip"
           s, count = re.subn(r"(?m)^distributionUrl=.*$", url, s)
           if count != 1:
               raise SystemExit("ERROR: Expected one Gradle distributionUrl")
+          checksum = "distributionSha256Sum=b266d5ff6b90eada6dc3b20cb090e3731302e553a27c5d3e4df1f0d76beaff06"
+          if re.search(r"(?m)^distributionSha256Sum=", s):
+              s = re.sub(r"(?m)^distributionSha256Sum=.*$", checksum, s)
+          else:
+              s = s.rstrip() + "\n" + checksum + "\n"
           p.write_text(s)
           print("Gradle 9.3.1 BIN download configured")
           PYTHON
