@@ -42,7 +42,7 @@ class BinanceMarketData:
 
     def fetch_candles(
         self, market, symbol, interval="1m",
-        limit=500, closed_only=True
+        limit=500, closed_only=True, start_time=None, end_time=None
     ):
         if not 2 <= int(limit) <= 1000:
             raise ValueError("limit must be between 2 and 1000")
@@ -52,9 +52,13 @@ class BinanceMarketData:
             "/api/v3/klines" if market == "spot"
             else "/fapi/v1/klines",
             {
-                "symbol": symbol.upper(),
-                "interval": interval,
-                "limit": int(limit),
+                **{
+                    "symbol": symbol.upper(),
+                    "interval": interval,
+                    "limit": int(limit),
+                },
+                **({"startTime": int(start_time)} if start_time is not None else {}),
+                **({"endTime": int(end_time)} if end_time is not None else {}),
             },
         )
 
@@ -132,15 +136,22 @@ class BinanceMarketData:
             and item.get("symbol")
         })
 
-    def fetch_alpha_candles(self, symbol, interval="5m", limit=200):
+    def fetch_alpha_candles(
+        self, symbol, interval="5m", limit=200,
+        start_time=None, end_time=None
+    ):
         if not 2 <= int(limit) <= 1000:
             raise ValueError("limit must be between 2 and 1000")
         raw = self._alpha_request(
             "/bapi/defi/v1/public/alpha-trade/klines",
             {
-                "symbol": str(symbol).upper(),
-                "interval": interval,
-                "limit": int(limit)
+                **{
+                    "symbol": str(symbol).upper(),
+                    "interval": interval,
+                    "limit": int(limit)
+                },
+                **({"startTime": int(start_time)} if start_time is not None else {}),
+                **({"endTime": int(end_time)} if end_time is not None else {}),
             }
         )
         if not isinstance(raw, list) or not raw:
