@@ -32,6 +32,9 @@ class TradingKeepAliveService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == "com.example.ai_trade.RETRY_BACKEND") {
+            lastLaunchAttemptMs = 0L
+        }
         val notification = buildNotification("Starting AI-Trader background engine")
         if (Build.VERSION.SDK_INT >= 34) {
             startForeground(1001, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
@@ -48,7 +51,7 @@ class TradingKeepAliveService : Service() {
             while (running) {
                 val message = if (checkBackend()) {
                     lastLaunchAttemptMs = 0L
-                    "Trading engine active • Termux API connected"
+                    "Trading engine active • Termux connected"
                 } else {
                     requestTermuxBackend()
                 }
