@@ -949,6 +949,8 @@ class TradingCoordinator(SpotDemoMixin):
             self.last_signals[domain] = signal
         plan = signal.get("trade_plan")
         safety = signal.get("token_safety") or {}
+        execution = None
+        opened = False
         if domain == "alpha" and str(safety.get("status", "")).upper() != "PASS":
             decision = "REJECTED: Alpha token safety is not PASS"
         elif domain == "futures" and signal.get("direction") not in ("LONG", "SHORT"):
@@ -975,9 +977,8 @@ class TradingCoordinator(SpotDemoMixin):
                 execution = {"approved": False, "reason": str(error)}
                 opened = False
                 decision = "REJECTED: " + str(error)
-        if "execution" not in locals():
+        if execution is None:
             execution = {"approved": False, "reason": decision}
-            opened = False
         return {
             "success": True,
             "opened": opened,
