@@ -265,10 +265,16 @@ class _ClosedTradeDetailScreenState extends State<ClosedTradeDetailScreen> {
                   : _candles.isNotEmpty
                       ? ClipRRect(
                           borderRadius: BorderRadius.circular(10),
-                          child: AspectRatio(
-                            aspectRatio: 1.45,
-                            child: CustomPaint(
-                              painter: HistoricalTradeChartPainter(
+                          child: InteractiveViewer(
+                            minScale: 1,
+                            maxScale: 5,
+                            boundaryMargin: const EdgeInsets.all(60),
+                            panEnabled: true,
+                            scaleEnabled: true,
+                            child: AspectRatio(
+                              aspectRatio: 1.45,
+                              child: CustomPaint(
+                                painter: HistoricalTradeChartPainter(
                                 candles: _candles,
                                 symbol: symbol,
                                 direction: direction,
@@ -276,7 +282,8 @@ class _ClosedTradeDetailScreenState extends State<ClosedTradeDetailScreen> {
                                 entry: _price(_chart['entry'] ?? trade['entry'] ?? trade['entry_price']),
                                 exit: _price(_chart['exit'] ?? trade['exit_price'] ?? trade['close_price']),
                                 stopLoss: _price(_chart['stop_loss'] ?? trade['stop_loss']),
-                                takeProfit: _price(_chart['take_profit'] ?? trade['take_profit']),
+                                  takeProfit: _price(_chart['take_profit'] ?? trade['take_profit']),
+                                ),
                               ),
                             ),
                           ),
