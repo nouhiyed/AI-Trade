@@ -56,7 +56,7 @@ class TestTradingCoordinator(unittest.TestCase):
         self.assertAlmostEqual(self.system.risk.balance, 1010)
 
     def test_chart_submission_routes_approved_trade_to_executor(self):
-        self.system.analyze_live = lambda symbol: {
+        self.system.analyze_live = lambda symbol, preferred_timeframe=None: {
             "signals": {
                 "futures": {
                     "symbol": symbol,
