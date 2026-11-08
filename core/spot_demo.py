@@ -68,6 +68,14 @@ class SpotDemoMixin:
         universe = ranked[: max(1, min(int(limit), 30))]
 
         opportunities, errors = [], {}
+        rejections, rejection_samples = {}, []
+
+        def reject(symbol, reason):
+            reason = str(reason or "No actionable signal")
+            rejections[reason] = rejections.get(reason, 0) + 1
+            if len(rejection_samples) < 10:
+                rejection_samples.append({"symbol": symbol, "reason": reason})
+
         for item in universe:
             symbol = item["symbol"]
             try:
@@ -76,15 +84,28 @@ class SpotDemoMixin:
                 opp = self._as_opportunity(item, signal, "spot")
                 if opp:
                     opportunities.append(opp)
+                elif not isinstance(signal, dict):
+                    reject(symbol, "Missing Spot analysis")
+                elif str(signal.get("direction", "")).upper() != "BUY":
+                    reject(symbol, signal.get("reason") or "Spot signal is not BUY")
+                else:
+                    plan = signal.get("trade_plan") or {}
+                    reject(symbol, plan.get("reason") or "Trade plan rejected")
             except Exception as error:
                 errors[symbol] = str(error)
-        return self._finish_scan("spot", universe, opportunities, errors)
+        return self._finish_scan(
+            "spot", universe, opportunities, errors,
+            rejections=rejections, rejection_samples=rejection_samples)
 
     def _as_opportunity(self, item, signal, domain):
         if not isinstance(signal, dict):
             return None
         if str(signal.get("direction", "")).upper() != "BUY":
             return None
+        if domain == "alpha":
+            safety = signal.get("token_safety") or {}
+            if str(safety.get("status", "")).upper() != "PASS":
+                return None
         plan = signal.get("trade_plan")
         if not isinstance(plan, dict) or plan.get("success") is not True:
             return None
@@ -92,7 +113,8 @@ class SpotDemoMixin:
                 float(signal.get("confidence", 0) or 0),
                 "trade_plan": plan, "signal": signal, "domain": domain}
 
-    def _finish_scan(self, domain, universe, opportunities, errors):
+    def _finish_scan(self, domain, universe, opportunities, errors,
+                     rejections=None, rejection_samples=None):
         opportunities.sort(key=lambda o: (o["confidence"],
                                           o.get("quote_volume", 0)), reverse=True)
         if opportunities:
@@ -100,7 +122,9 @@ class SpotDemoMixin:
         return {"success": True, "scanned": len(universe),
                 "actionable": len(opportunities),
                 "selected": opportunities[0]["symbol"] if opportunities else None,
-                "opportunities": opportunities, "errors": errors}
+                "opportunities": opportunities, "errors": errors,
+                "rejections": rejections or {},
+                "rejection_samples": rejection_samples or []}
 
     def _alpha_safety(self, token):
         """Auto token-safety from the contract data of the Alpha token list."""
@@ -152,6 +176,14 @@ class SpotDemoMixin:
                     "reason": "Alpha universe scan failed: " + str(error),
                     "opportunities": []}
         opportunities, errors = [], {}
+        rejections, rejection_samples = {}, []
+
+        def reject(symbol, reason):
+            reason = str(reason or "No actionable signal")
+            rejections[reason] = rejections.get(reason, 0) + 1
+            if len(rejection_samples) < 10:
+                rejection_samples.append({"symbol": symbol, "reason": reason})
+
         for token in universe:
             try:
                 signal = self.analyze_alpha(token)
@@ -161,9 +193,18 @@ class SpotDemoMixin:
                 opp = self._as_opportunity(item, signal, "alpha")
                 if opp:
                     opportunities.append(opp)
+                elif str((signal.get("token_safety") or {}).get("status", "")).upper() != "PASS":
+                    reject(token["symbol"], "Token safety is not PASS")
+                elif str(signal.get("direction", "")).upper() != "BUY":
+                    reject(token["symbol"], signal.get("reason") or "Alpha signal is not BUY")
+                else:
+                    plan = signal.get("trade_plan") or {}
+                    reject(token["symbol"], plan.get("reason") or "Trade plan rejected")
             except Exception as error:
                 errors[token["symbol"]] = str(error)
-        return self._finish_scan("alpha", universe, opportunities, errors)
+        return self._finish_scan(
+            "alpha", universe, opportunities, errors,
+            rejections=rejections, rejection_samples=rejection_samples)
 
     # ---- open --------------------------------------------------------------------
 
