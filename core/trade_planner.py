@@ -38,7 +38,7 @@ class TradePlanner:
 
         selected = None
         preferred = str(preferred_timeframe or "").strip().lower()
-        timeframe_order = ((preferred,) if preferred in self.TIMEFRAME_PRIORITY else ()) + tuple(
+        timeframe_order = ((preferred,) if preferred and preferred in agent_data else ()) + tuple(
             tf for tf in self.TIMEFRAME_PRIORITY if tf != preferred
         )
         for tf in timeframe_order:
