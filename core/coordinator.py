@@ -171,9 +171,56 @@ class TradingCoordinator(SpotDemoMixin):
         return {"success": True, "mode": self.mode}
 
     def get_demo_positions(self):
+        """Return active positions separately from the closed-trade archive."""
+        active_statuses = {
+            "DEMO_OPEN", "DEMO_PARTIALLY_CLOSED",
+            "DEMO_UNPROTECTED", "DEMO_RECONCILIATION_REQUIRED",
+        }
+        closed_statuses = {"DEMO_CLOSED", "CLOSED"}
+        open_positions = []
+        closed_by_id = {}
+
+        for position_id, raw in self.demo_positions.items():
+            if not isinstance(raw, dict):
+                continue
+            record = dict(raw)
+            record.setdefault("id", str(position_id))
+            record.setdefault("position_id", str(position_id))
+            record.setdefault("trade_id", str(position_id))
+            status = str(record.get("status", "")).upper()
+            if status in active_statuses:
+                open_positions.append(record)
+            elif status in closed_statuses:
+                closed_by_id[str(position_id)] = record
+
+        # The SQLite journal is the durable archive for manual and automatic closes.
+        try:
+            for trade in self.journal.recent(200):
+                if str(trade.get("status", "")).upper() != "CLOSED":
+                    continue
+                trade_id = str(trade.get("trade_id", "")).strip()
+                if not trade_id:
+                    continue
+                archived = dict(trade)
+                archived.setdefault("id", trade_id)
+                archived.setdefault("position_id", trade_id)
+                archived.setdefault("close_price", archived.get("exit_price"))
+                archived.setdefault("close_reason", archived.get("close_reason") or "CLOSED")
+                closed_by_id.setdefault(trade_id, archived)
+        except Exception:
+            # State-backed closed trades remain available if journal access fails.
+            pass
+
+        closed_positions = sorted(
+            closed_by_id.values(),
+            key=lambda item: int(item.get("closed_at") or item.get("closed_at_ms") or 0),
+            reverse=True,
+        )
         result = {
             "mode": self.mode,
-            "positions": list(self.demo_positions.values())
+            "positions": open_positions,
+            "open_positions": open_positions,
+            "closed_positions": closed_positions,
         }
         if self.demo_execution is not None and self.demo_account_id is not None:
             result["account_summary"] = self.demo_execution.get_account_summary(
