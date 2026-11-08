@@ -658,6 +658,28 @@ class TradingCoordinator(SpotDemoMixin):
             self.risk.update_reservation_status(trade_id, "DEMO_PENDING")
 
             market_price = self._demo_market_price(symbol)
+            if abs(market_price - entry) / entry > Decimal("0.01"):
+                self.risk.release_reservation(trade_id)
+                return {
+                    "approved": False,
+                    "mode": "DEMO",
+                    "reason": "Market price moved more than 1% from the approved plan entry",
+                }
+            if direction == "LONG" and not stop < market_price < target:
+                self.risk.release_reservation(trade_id)
+                return {
+                    "approved": False,
+                    "mode": "DEMO",
+                    "reason": "Live price is outside the LONG plan range",
+                }
+            if direction == "SHORT" and not target < market_price < stop:
+                self.risk.release_reservation(trade_id)
+                return {
+                    "approved": False,
+                    "mode": "DEMO",
+                    "reason": "Live price is outside the SHORT plan range",
+                }
+
             quantity = Decimal(str(reservation["quantity"]))
 
             execution = self.demo_execution.open_futures_position(
@@ -906,6 +928,18 @@ class TradingCoordinator(SpotDemoMixin):
         signal = dict(signal)
         signal["chart_timeframe"] = timeframe
         signal["chart_market"] = domain
+        if domain == "alpha":
+            try:
+                token = self.alpha_feed.token(symbol)
+                safety = self._alpha_safety(token)
+            except Exception:
+                safety = {"status": "UNKNOWN", "passed": False, "critical": False}
+            signal["token_safety"] = safety
+            signal["execution_enabled"] = (
+                self.mode == "DEMO"
+                and str(safety.get("status", "")).upper() == "PASS"
+            )
+            self.last_signals[domain] = signal
         plan = signal.get("trade_plan")
         safety = signal.get("token_safety") or {}
         if domain == "alpha" and str(safety.get("status", "")).upper() != "PASS":
