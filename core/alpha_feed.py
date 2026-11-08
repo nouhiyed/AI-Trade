@@ -52,18 +52,34 @@ class AlphaFeed:
         r = self.session.get(TOKEN_LIST, timeout=self.timeout)
         r.raise_for_status()
         payload = r.json()
-        if not isinstance(payload, dict) or payload.get("success") is False:
-            raise RuntimeError("Alpha token list request was not successful")
+        if not isinstance(payload, dict):
+            raise RuntimeError("Binance Alpha token list returned an invalid response")
+        if payload.get("success") is False or (
+            payload.get("code") is not None and str(payload.get("code")) != "000000"
+        ):
+            raise RuntimeError(
+                "Binance Alpha token list error: " +
+                str(payload.get("message") or payload.get("messageDetail") or payload.get("code"))
+            )
+
+        data = payload.get("data")
+        if isinstance(data, dict):
+            data = data.get("tokens") or data.get("list") or data.get("items")
+        if not isinstance(data, list):
+            raise RuntimeError("Binance Alpha token list data is not a list")
+
         rows = {}
-        for token in payload.get("data") or []:
+        for token in data:
             if not isinstance(token, dict):
                 continue
+            # alphaId is Binance's tradable Alpha pair identifier (e.g. ALPHA_175).
             alpha_id = str(token.get("alphaId") or "").strip()
-            price = _f(token.get("price"))
-            if not alpha_id or not price or price <= 0:
+            if not alpha_id:
                 continue
-            symbol = alpha_id.upper() + "USDT"
-            ticker = str(token.get("symbol") or "").strip().upper()
+            symbol = alpha_id.upper()
+            if not symbol.endswith("USDT"):
+                symbol += "USDT"
+            ticker = str(token.get("symbol") or "").strip()
             token_name = str(
                 token.get("name")
                 or token.get("tokenName")
@@ -75,14 +91,15 @@ class AlphaFeed:
                 "symbol": symbol,
                 "name": token_name,
                 "ticker": ticker,
-                "display": ticker or token_name.upper(),
-                "price": price,
+                "display": ticker or token_name,
+                # Keep the token in the directory even if its price is temporarily absent.
+                "price": _f(token.get("price")),
                 "volume_24h": _f(token.get("volume24h"), 0.0),
                 "liquidity": _f(token.get("liquidity"), 0.0),
                 "change_24h": _f(token.get("percentChange24h"), 0.0),
                 "chain_id": str(token.get("chainId") or ""),
                 "address": str(token.get("contractAddress") or ""),
-                "offline": bool(token.get("offline") or token.get("offsell")),
+                "offline": token.get("offline") is True or token.get("offsell") is True,
             }
         with self._lock:
             self._cache = (now, rows)
@@ -116,6 +133,8 @@ class AlphaFeed:
         row = self.token(symbol)
         if row["offline"]:
             raise ValueError("Alpha token is offline")
+        if row["price"] is None or row["price"] <= 0:
+            raise ValueError("Alpha token has no valid live price")
         return row["price"]
 
     def universe(self, limit=10):
