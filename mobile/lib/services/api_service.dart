@@ -10,6 +10,7 @@ class ApiService {
     String path, {
     Map<String, dynamic>? body,
     Duration? requestTimeout,
+    bool allowNotFound = false,
   }) async {
     final uri = Uri.parse('$baseUrl$path');
     late http.Response response;
@@ -30,6 +31,11 @@ class ApiService {
         throw Exception('Invalid server response');
       }
 
+      if (allowNotFound &&
+          response.statusCode == 404 &&
+          decoded['request_status'] == 'NOT_FOUND') {
+        return decoded;
+      }
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw Exception(
           decoded['reason'] ??
@@ -104,6 +110,7 @@ class ApiService {
       _request(
         'GET',
         '/agent/submission?id=${Uri.encodeQueryComponent(requestId)}',
+        allowNotFound: true,
       );
 
   static Future<Map<String, dynamic>> tradeChart({
@@ -148,8 +155,14 @@ class ApiService {
   static Future<Map<String, dynamic>> learning() =>
       _request('GET', '/learning');
 
-  static Future<Map<String, dynamic>> journal({int limit = 30}) =>
-      _request('GET', '/journal?limit=$limit');
+  static Future<Map<String, dynamic>> journal({
+    int limit = 30,
+    bool closedOnly = false,
+  }) =>
+      _request(
+        'GET',
+        closedOnly ? '/journal?closed=1' : '/journal?limit=$limit',
+      );
 
   static Future<Map<String, dynamic>> autopilot() =>
       _request('GET', '/autopilot');
