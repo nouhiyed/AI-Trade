@@ -642,6 +642,8 @@ class _AgentSubmissionScreenState extends State<AgentSubmissionScreen> {
   Widget build(BuildContext context) {
     final status = '${_result?['decision_status'] ?? (_result?['opened'] == true ? 'APPROVED' : 'REJECTED')}'.toUpperCase();
     final approved = status == 'APPROVED';
+    final waiting = status == 'WAIT' || status == 'PROCESSING';
+    final decisionColor = approved ? _up : waiting ? const Color(0xFFFFC857) : _down;
     final direction = _result?['signal'] is Map
         ? ((_result!['signal'] as Map)['direction'] ?? '—')
         : '—';
@@ -730,7 +732,7 @@ class _AgentSubmissionScreenState extends State<AgentSubmissionScreen> {
                     : t('إرسال للتحليل واتخاذ القرار', 'SEND FOR AGENT DECISION')),
               ),
             ),
-            if (_sending && _requestReceived) ...[
+            if (_requestReceived) ...[
               const SizedBox(height: 12),
               Container(
                 padding: const EdgeInsets.all(13),
@@ -740,8 +742,8 @@ class _AgentSubmissionScreenState extends State<AgentSubmissionScreen> {
                   const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
                   const SizedBox(width: 10),
                   Expanded(child: Text(
-                    '${t('تم استلام الطلب من الخادم وإرساله للوكيل المختص. يجري التحليل الآن.', 'Server confirmed receipt and forwarded the request to the selected agent. Analysis is running.')}'
-                    '${_requestId == null ? '' : '\\nID: $_requestId'}',
+                    '${_result != null ? t('وصل قرار الوكيل.', 'Agent decision received.') : _sending ? t('تم استلام الطلب من الخادم وإرساله للوكيل المختص. يجري التحليل الآن.', 'Server confirmed receipt and forwarded the request to the selected agent. Analysis is running.') : t('تم تأكيد الاستلام، لكن تعذر جلب القرار حتى الآن.', 'Receipt is confirmed, but the decision has not been retrieved yet.')}'
+                    '${_requestId == null ? '' : '\\nRequest ID: $_requestId'}',
                     style: TextStyle(color: widget.text, fontSize: 12, height: 1.45))),
                 ]),
               ),
@@ -763,12 +765,14 @@ class _AgentSubmissionScreenState extends State<AgentSubmissionScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(children: [
-                      Icon(approved ? Icons.check_circle : Icons.cancel,
-                        color: approved ? _up : _down),
+                      Icon(
+                        approved ? Icons.check_circle : waiting ? Icons.hourglass_top : Icons.cancel,
+                        color: decisionColor,
+                      ),
                       const SizedBox(width: 8),
                       Expanded(child: Text(
                         status.isEmpty ? t('لم يصدر قرار', 'NO DECISION') : status,
-                        style: TextStyle(color: approved ? _up : _down,
+                        style: TextStyle(color: decisionColor,
                           fontWeight: FontWeight.w900, fontSize: 16),
                       )),
                       Text('${direction}', style: TextStyle(
