@@ -206,21 +206,26 @@ class _ProChartScreenState extends State<ProChartScreen> {
 
   Future<void> _submitToAgent() async {
     if (_submitting || _symbol.isEmpty) return;
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => AgentSubmissionScreen(
-          english: widget.english,
-          bg: widget.bg,
-          panel: widget.panel,
-          text: widget.text,
-          muted: widget.muted,
-          domain: _market,
-          symbol: _symbol,
-          timeframe: _interval,
-          initialPrice: _lastPrice,
+    setState(() => _submitting = true);
+    try {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => AgentSubmissionScreen(
+            english: widget.english,
+            bg: widget.bg,
+            panel: widget.panel,
+            text: widget.text,
+            muted: widget.muted,
+            domain: _market,
+            symbol: _symbol,
+            timeframe: _interval,
+            initialPrice: _lastPrice,
+          ),
         ),
-      ),
-    );
+      );
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
   }
 
   Future<void> _pickSymbol() async {
@@ -592,7 +597,15 @@ class _AgentSubmissionScreenState extends State<AgentSubmissionScreen> {
             decision = Map<String, dynamic>.from(progress['result'] as Map);
             break;
           }
-          if (requestStatus == 'NOT_FOUND' || requestStatus == 'FAILED') {
+          if (requestStatus == 'FAILED') {
+            if (progress['result'] is Map) {
+              decision = Map<String, dynamic>.from(progress['result'] as Map);
+            } else {
+              lastPollingError = Exception(progress['reason'] ?? requestStatus);
+            }
+            break;
+          }
+          if (requestStatus == 'NOT_FOUND') {
             lastPollingError = Exception(progress['reason'] ?? requestStatus);
             break;
           }
