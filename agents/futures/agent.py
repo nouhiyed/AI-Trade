@@ -217,6 +217,19 @@ class FuturesAgent(BaseAgent):
             if confidence < 25:
                 direction = "WAIT"
 
+        if direction == "WAIT":
+            if total == 0:
+                reason = "No directional evidence: LONG and SHORT scores are both zero"
+            elif scores["LONG"] == scores["SHORT"]:
+                reason = "Directional scores are balanced"
+            else:
+                reason = (
+                    f"Directional confidence {confidence:.2f}% is below "
+                    "the 25% decision threshold"
+                )
+        else:
+            reason = "Technical + SMC + Order Book analysis"
+
         return self.record_signal({
             "symbol": market_data.get("symbol", "UNKNOWN"),
             "direction": direction,
@@ -227,6 +240,6 @@ class FuturesAgent(BaseAgent):
                 "used": orderbook_used,
                 "imbalance": imbalance
             },
-            "reason": "Technical + SMC + Order Book analysis"
+            "reason": reason
         })
 
