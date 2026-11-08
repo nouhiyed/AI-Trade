@@ -917,7 +917,7 @@ class TradingCoordinator(SpotDemoMixin):
         symbol = str(symbol).strip().upper()
         timeframe = str(timeframe).strip().lower()
         allowed_timeframes = {
-            "futures": {"1m", "5m", "15m", "1h", "4h"},
+            "futures": {"1m", "5m", "15m", "1h"},
             "spot": {"5m", "15m", "1h", "4h"},
             "alpha": {"5m", "15m", "1h"},
         }
