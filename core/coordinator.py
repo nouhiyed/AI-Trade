@@ -294,13 +294,15 @@ class TradingCoordinator(SpotDemoMixin):
         record["status"] = "DEMO_CLOSED"
         settled = self.close_trade(position_id, net)
         try:
-            journaled = self.journal.record_close(
+            # Always merge the final position snapshot into the archive.
+            # record_close alone cannot backfill missing SL/TP/entry metadata
+            # from the execution state when an older OPEN journal row is incomplete.
+            self.journal.record_close(
                 position_id, net,
                 exit_price=record.get("close_price"),
                 reason=reason or record.get("close_reason") or "MANUAL")
-            if not journaled:
-                self.journal.record_closed_snapshot(
-                    record, net, reason or record.get("close_reason") or "MANUAL")
+            self.journal.record_closed_snapshot(
+                record, net, reason or record.get("close_reason") or "MANUAL")
             self._save_demo_state()
             disabled = self.learning.evaluate()
             self._notify_close(record, net, reason)
