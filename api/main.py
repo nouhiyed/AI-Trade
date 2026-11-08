@@ -326,10 +326,13 @@ class APIHandler(BaseHTTPRequestHandler):
             if path == "/health":
                 return self.send_json({"ok": True, "mode": coordinator.mode})
             if path == "/status":
+                # get_system_status already includes the DEMO snapshot.
+                # Reuse it instead of rebuilding the full open/closed archive twice.
+                system_status = coordinator.get_system_status()
                 return self.send_json({
-                    "system": coordinator.get_system_status(),
+                    "system": system_status,
                     "controls": coordinator.get_agent_controls(),
-                    "demo": coordinator.get_demo_positions()
+                    "demo": system_status.get("demo", {})
                 })
             return self.send_json({"error": "Not found"}, 404)
         except Exception as e:
