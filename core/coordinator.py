@@ -839,7 +839,7 @@ class TradingCoordinator(SpotDemoMixin):
             return unknown
 
 
-    def analyze_live(self, symbol):
+    def analyze_live(self, symbol, preferred_timeframe=None):
         symbol = str(symbol).strip().upper()
 
         if not symbol:
@@ -880,13 +880,15 @@ class TradingCoordinator(SpotDemoMixin):
                     direction = str(signal.get("direction", "WAIT")).upper()
                     if direction in ("LONG", "SHORT"):
                         signal["trade_plan"] = self.trade_planner.create(
-                            agent_data, direction
+                            agent_data, direction,
+                            preferred_timeframe=preferred_timeframe,
                         )
 
                 if domain == "spot" and isinstance(signal, dict):
                     if str(signal.get("direction", "")).upper() == "BUY":
                         signal["trade_plan"] = self.trade_planner.create(
-                            agent_data, "LONG"
+                            agent_data, "LONG",
+                            preferred_timeframe=preferred_timeframe,
                         )
 
                 if domain == "alpha" and isinstance(signal, dict):
@@ -930,7 +932,7 @@ class TradingCoordinator(SpotDemoMixin):
             return {"success": False, "reason": domain.title() + " agent is stopped",
                     "opened": False}
 
-        analysis = self.analyze_live(symbol)
+        analysis = self.analyze_live(symbol, preferred_timeframe=timeframe)
         signal = analysis.get("signals", {}).get(domain, {})
         if domain == "alpha":
             try:
