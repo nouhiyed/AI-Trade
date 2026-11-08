@@ -259,7 +259,7 @@ class RiskManager:
                 "margin": margin,
                 "risk": risk_amount,
                 "leverage": leverage,
-                "status": "PAPER_RESERVED"
+                "status": "RESERVED"
             }
 
             self.reservations[trade_id] = reservation
@@ -274,7 +274,7 @@ class RiskManager:
     def update_reservation_status(self, trade_id, status, **metadata):
         """Persist an execution lifecycle status without releasing risk."""
         allowed = {
-            "PAPER_RESERVED", "DEMO_PENDING", "DEMO_OPEN",
+            "RESERVED", "DEMO_PENDING", "DEMO_OPEN", "DEMO_PARTIALLY_CLOSED",
             "DEMO_UNPROTECTED", "DEMO_RECONCILIATION_REQUIRED",
             "LIVE_PENDING", "LIVE_OPEN",
         }
@@ -306,6 +306,22 @@ class RiskManager:
             self.reservations.pop(str(trade_id))
             self.save_state()
             return {"success": True, "trade_id": str(trade_id)}
+
+    def sync_balance(self, balance):
+        """Align the risk balance with the real (testnet) account when nothing is reserved."""
+        with self.lock:
+            if self.reservations:
+                return False
+            try:
+                value = float(balance)
+            except (TypeError, ValueError):
+                return False
+            if not value > 0 or value != value or value == float("inf"):
+                return False
+            self.balance = value
+            self.equity = value
+            self.save_state()
+            return True
 
     # -------------------------
     # CLOSE TRADE

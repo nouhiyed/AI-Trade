@@ -1,4 +1,7 @@
 
+import math
+import threading
+import time
 from decimal import Decimal
 import json
 from pathlib import Path
@@ -11,7 +14,6 @@ from agents.alpha.agent import AlphaAgent
 from core.risk_manager import RiskManager
 from core.market_data_engine import MarketDataEngine
 from core.token_safety_engine import TokenSafetyEngine
-from core.paper_trading_engine import PaperTradingEngine
 from core.binance_market_data import BinanceMarketData
 from core.market_scanner import FuturesMarketScanner
 from core.trade_planner import TradePlanner
@@ -19,14 +21,19 @@ from core.binance_execution import BinanceExecutionEngine
 from core.demo.database import DemoDatabase
 from core.demo.ledger import Ledger
 from core.demo.engine import DemoEngine
+from core.journal import TradeJournal
+from core.learning import LearningEngine, setup_key as make_setup_key
+from core.notifier import Notifier
+from core.chart_image import render_trade_chart
+from core.alpha_feed import AlphaFeed
+from core.spot_demo import SpotDemoMixin
 
 
-class TradingCoordinator:
+class TradingCoordinator(SpotDemoMixin):
 
     def __init__(self, initial_balance=1000):
         self.risk = RiskManager(initial_balance=initial_balance)
-        self.paper = PaperTradingEngine(initial_balance=initial_balance)
-        self.paper_price_feed = BinanceMarketData(timeout=6)
+        self.market_feed = BinanceMarketData(timeout=6)
         self.market_engine = MarketDataEngine()
         self.market_scanner = FuturesMarketScanner()
         self.trade_planner = TradePlanner()
@@ -45,6 +52,7 @@ class TradingCoordinator:
         }
 
         self.last_signals = {}
+        self._demo_lock = threading.RLock()
         self.alpha_config_path = Path("config/alpha_tokens.json")
         self.mode = "DEMO"
         self.demo_state_path = Path("config/demo_state.json")
@@ -65,6 +73,11 @@ class TradingCoordinator:
             self.demo_execution.create_account(
                 self.demo_account_id, initial_balance
             )
+        self.journal = TradeJournal(Path("data/journal.db"))
+        self.learning = LearningEngine(self.journal)
+        self.notifier = Notifier()
+        self.alpha_feed = AlphaFeed()
+        self.max_concurrent_demo = 3
         self._recover_demo_positions()
 
 
@@ -145,7 +158,7 @@ class TradingCoordinator:
             return {"success": False, "reason": "Only DEMO mode is supported"}
         if any(
             p.get("status") in (
-                "DEMO_OPEN", "DEMO_UNPROTECTED",
+                "DEMO_OPEN", "DEMO_PARTIALLY_CLOSED", "DEMO_UNPROTECTED",
                 "DEMO_RECONCILIATION_REQUIRED"
             )
             for p in self.demo_positions.values()
@@ -182,6 +195,10 @@ class TradingCoordinator:
             value,
             f"api-deposit:{uuid4().hex}",
         )
+        self.risk.sync_balance(
+            float(self.demo_execution.get_account_summary(
+                self.demo_account_id)["wallet_balance"])
+        )
         return {
             "success": True,
             "balance": str(balance),
@@ -191,7 +208,7 @@ class TradingCoordinator:
         }
 
     def _demo_market_price(self, symbol, market="futures"):
-        quote = self.paper_price_feed.fetch_book_ticker(market, symbol)
+        quote = self.market_feed.fetch_book_ticker(market, symbol)
         price = Decimal(str(quote["mid_price"]))
         if not price.is_finite() or price <= 0:
             raise ValueError("Invalid live market price")
@@ -201,7 +218,148 @@ class TradingCoordinator:
         )
         return price
 
+    @staticmethod
+    def _apply_close_result(record, result):
+        """Accumulate gross PnL and fees over every (partial) close of a position."""
+        gross = Decimal(record.get("gross_pnl", "0")) + Decimal(str(result["realized_pnl"]))
+        fees = Decimal(record.get("total_fees", record.get("entry_fee", "0"))) + Decimal(str(result["fee"]))
+        record["gross_pnl"] = str(gross)
+        record["total_fees"] = str(fees)
+        record["net_pnl"] = str(gross - fees)
+
+    def _settle_risk(self, position_id, record, reason=None):
+        """Release the risk reservation of a fully closed DEMO trade.
+
+        Net result = price PnL minus every fee paid on this trade. It goes to the
+        risk engine (balance, daily loss, agent history), to the trade journal
+        (learning input) and to the notifier.
+        """
+        net = float(record.get("net_pnl", "0"))
+        settled = self.close_trade(position_id, net)
+        try:
+            self.journal.record_close(
+                position_id, net,
+                exit_price=record.get("close_price"),
+                reason=reason or record.get("close_reason") or "MANUAL")
+            disabled = self.learning.evaluate()
+            self._notify_close(record, net, reason)
+            for item in disabled:
+                self.notifier.send_message(
+                    "Learning: setup disabled " + item["setup"] + " - " + item["reason"])
+        except Exception as error:
+            record["journal_error"] = str(error)
+        if not self.risk.reservations:
+            try:
+                self.risk.sync_balance(float(
+                    self.demo_execution.get_account_summary(
+                        self.demo_account_id)["wallet_balance"]))
+            except Exception:
+                pass
+        return settled
+
+    def _notify_close(self, record, net, reason):
+        if not self.notifier.enabled:
+            return
+        text = "%s %s closed (%s)\nNet PnL: %+.4f USDT" % (
+            record.get("symbol"), record.get("direction"),
+            reason or record.get("close_reason") or "MANUAL", net)
+        threading.Thread(target=self.notifier.send_message, args=(text,),
+                         daemon=True).start()
+
+    def _on_demo_open(self, record, signal, reservation):
+        """Journal the new trade and (optionally) send a chart snapshot."""
+        try:
+            context = {
+                "confidence": signal.get("confidence"),
+                "scores": signal.get("scores"),
+                "market_context": signal.get("market_context"),
+                "reward_risk": (signal.get("trade_plan") or {}).get("reward_risk"),
+            }
+            confidence = float(signal.get("confidence") or 0)
+            domain = record.get("domain", "futures")
+            key = signal.get("setup_key") or make_setup_key(
+                record["direction"], confidence,
+                context["reward_risk"], domain)
+            record["setup_key"] = key
+            self.journal.record_open(
+                record["trade_id"], record.get("domain", "futures"),
+                record["symbol"], record["direction"],
+                key, confidence, record["entry_price"], record["stop_loss"],
+                record["take_profit"], reservation.get("risk"), context)
+        except Exception as error:
+            record["journal_error"] = str(error)
+        if self.notifier.enabled:
+            threading.Thread(target=self._send_open_snapshot,
+                             args=(dict(record), signal), daemon=True).start()
+
+    def _send_open_snapshot(self, record, signal):
+        try:
+            domain = record.get("domain", "futures")
+            if domain == "alpha":
+                frame = self.market_feed.fetch_alpha_candles(
+                    record["symbol"], "5m", limit=90)
+            else:
+                frame = self.market_feed.fetch_candles(
+                    "spot" if domain == "spot" else "futures",
+                    record["symbol"], "5m", limit=90, closed_only=False)
+            candles = frame[["open", "high", "low", "close"]].to_dict("records")
+            png = render_trade_chart(
+                candles, record["direction"], float(record["entry_price"]),
+                float(record["stop_loss"]), float(record["take_profit"]),
+                record["symbol"])
+            ctx = signal.get("market_context") or {}
+            caption = "%s %s (DEMO)\nEntry %s\nSL %s\nTP %s\nConfidence %s\n%s" % (
+                record["symbol"], record["direction"], record["entry_price"],
+                record["stop_loss"], record["take_profit"],
+                signal.get("confidence"), "; ".join(ctx.get("flags", [])))
+            if png:
+                self.notifier.send_photo(png, caption)
+            else:
+                self.notifier.send_message(caption)
+        except Exception as error:
+            print("[NOTIFY] snapshot failed:", error)
+
+    def _catch_up(self, record, direction, stop, target):
+        """After an outage, replay 1m candles to see if stop/target was touched.
+
+        Returns (reason, level) or None. If one candle touches both levels the
+        stop is assumed first (conservative). Candles that opened before the last
+        successful check are skipped, so only fully unseen minutes are evaluated.
+        """
+        since = float(record.get("last_checked_ms") or record.get("opened_at_ms") or 0)
+        now_ms = time.time() * 1000
+        if not since or now_ms - since < 30_000:
+            return None
+        limit = min(1000, max(2, int(math.ceil((now_ms - since) / 60_000)) + 2))
+        domain = record.get("domain", "futures")
+        symbol = str(record["symbol"]).upper()
+        if domain == "alpha":
+            frame = self.market_feed.fetch_alpha_candles(symbol, "1m", limit=limit)
+        else:
+            frame = self.market_feed.fetch_candles(
+                "spot" if domain == "spot" else "futures", symbol, "1m",
+                limit=limit, closed_only=False)
+        for row in frame.itertuples(index=False):
+            if row.open_time.timestamp() * 1000 <= since:
+                continue
+            low, high = float(row.low), float(row.high)
+            if direction == "LONG":
+                if low <= float(stop):
+                    return "STOP_LOSS", Decimal(str(stop))
+                if high >= float(target):
+                    return "TAKE_PROFIT", Decimal(str(target))
+            else:
+                if high >= float(stop):
+                    return "STOP_LOSS", Decimal(str(stop))
+                if low <= float(target):
+                    return "TAKE_PROFIT", Decimal(str(target))
+        return None
+
     def close_demo_position(self, position_id, quantity=None):
+        with self._demo_lock:
+            return self._close_demo_position_locked(position_id, quantity)
+
+    def _close_demo_position_locked(self, position_id, quantity=None):
         position_id = str(position_id).strip()
         record = self.demo_positions.get(position_id)
         if not record:
@@ -212,6 +370,16 @@ class TradingCoordinator:
             "DEMO_UNPROTECTED", "DEMO_RECONCILIATION_REQUIRED"
         ):
             return {"success": False, "reason": "Position is not closable"}
+
+        if record.get("domain") in ("spot", "alpha"):
+            try:
+                result = self._close_spot_like(position_id, record, "MANUAL")
+                return {"success": True, "position_id": position_id,
+                        "execution": result, "mode": "DEMO"}
+            except Exception as error:
+                record["close_error"] = str(error)
+                self._save_demo_state()
+                return {"success": False, "reason": str(error)}
 
         engine_position_id = record.get("engine_position_id")
         if not engine_position_id:
@@ -241,11 +409,18 @@ class TradingCoordinator:
             record["remaining_quantity"] = str(result["remaining_quantity"])
             self._save_demo_state()
 
-            self.risk.update_reservation_status(
-                position_id, record["status"],
-                close_verified=True,
-                realized_pnl=str(result["realized_pnl"]),
-            )
+            self._apply_close_result(record, result)
+            if record["status"] == "DEMO_CLOSED":
+                record["close_reason"] = "MANUAL"
+                settled = self._settle_risk(position_id, record, "MANUAL")
+                record["risk_settled"] = bool(settled.get("success"))
+            else:
+                self.risk.update_reservation_status(
+                    position_id, record["status"],
+                    close_verified=True,
+                    realized_pnl=str(result["realized_pnl"]),
+                )
+            self._save_demo_state()
             return {
                 "success": True,
                 "position_id": position_id,
@@ -258,6 +433,12 @@ class TradingCoordinator:
             return {"success": False, "reason": str(error)}
 
     def monitor_demo_positions(self):
+        with self._demo_lock:
+            out = self._monitor_demo_positions_locked()
+            out["events"] = list(out.get("events", [])) + self._monitor_spot_like()
+            return out
+
+    def _monitor_demo_positions_locked(self):
         """Monitor internal DEMO Futures positions using live Binance quotes."""
         results = []
         positions = [
@@ -272,7 +453,7 @@ class TradingCoordinator:
             try:
                 symbol = str(record["symbol"]).upper()
                 if symbol not in price_cache:
-                    quote = self.paper_price_feed.fetch_book_ticker(
+                    quote = self.market_feed.fetch_book_ticker(
                         "futures", symbol
                     )
                     price_cache[symbol] = quote
@@ -292,17 +473,33 @@ class TradingCoordinator:
                 stop = Decimal(str(record["stop_loss"]))
                 target = Decimal(str(record["take_profit"]))
                 reason = None
+                checked_ok = True
 
-                if direction == "LONG":
-                    if exit_price <= stop:
-                        reason = "STOP_LOSS"
-                    elif exit_price >= target:
-                        reason = "TAKE_PROFIT"
-                elif direction == "SHORT":
-                    if exit_price >= stop:
-                        reason = "STOP_LOSS"
-                    elif exit_price <= target:
-                        reason = "TAKE_PROFIT"
+                # 1) replay candles missed while the app/network was down
+                try:
+                    missed = self._catch_up(record, direction, stop, target)
+                except Exception as catch_error:
+                    missed = None
+                    checked_ok = False
+                    record["catch_up_error"] = str(catch_error)
+                if missed:
+                    reason, exit_price = missed
+
+                # 2) live quote check
+                if reason is None:
+                    if direction == "LONG":
+                        if exit_price <= stop:
+                            reason = "STOP_LOSS"
+                        elif exit_price >= target:
+                            reason = "TAKE_PROFIT"
+                    elif direction == "SHORT":
+                        if exit_price >= stop:
+                            reason = "STOP_LOSS"
+                        elif exit_price <= target:
+                            reason = "TAKE_PROFIT"
+
+                if checked_ok:
+                    record["last_checked_ms"] = int(time.time() * 1000)
 
                 if reason:
                     result = self.demo_execution.close_futures_position(
@@ -325,12 +522,18 @@ class TradingCoordinator:
                     self._save_demo_state()
 
                     try:
-                        self.risk.update_reservation_status(
-                            position_id,
-                            record["status"],
-                            close_verified=True,
-                            realized_pnl=str(result["realized_pnl"]),
-                        )
+                        self._apply_close_result(record, result)
+                        if record["status"] == "DEMO_CLOSED":
+                            settled = self._settle_risk(position_id, record, reason)
+                            record["risk_settled"] = bool(settled.get("success"))
+                        else:
+                            self.risk.update_reservation_status(
+                                position_id,
+                                record["status"],
+                                close_verified=True,
+                                realized_pnl=str(result["realized_pnl"]),
+                            )
+                        self._save_demo_state()
                     except Exception as risk_error:
                         record["risk_sync_error"] = str(risk_error)
                         self._save_demo_state()
@@ -350,7 +553,11 @@ class TradingCoordinator:
 
         return {"checked": len(positions), "events": results}
 
-    def request_demo_futures_trade(
+    def request_demo_futures_trade(self, symbol, direction, risk_pct=0.5, leverage=1):
+        with self._demo_lock:
+            return self._request_demo_futures_trade_locked(symbol, direction, risk_pct, leverage)
+
+    def _request_demo_futures_trade_locked(
         self, symbol, direction, risk_pct=0.5, leverage=1
     ):
         symbol = str(symbol).strip().upper()
@@ -365,14 +572,18 @@ class TradingCoordinator:
         if direction not in ("LONG", "SHORT"):
             return {"approved": False, "reason": "Invalid Futures direction"}
 
+        live_statuses = ("DEMO_OPEN", "DEMO_PARTIALLY_CLOSED")
         if any(
-            p.get("status") in (
-                "DEMO_OPEN", "DEMO_UNPROTECTED",
-                "DEMO_RECONCILIATION_REQUIRED"
-            )
+            p.get("status") in ("DEMO_UNPROTECTED", "DEMO_RECONCILIATION_REQUIRED")
             for p in self.demo_positions.values()
         ):
             return {"approved": False, "reason": "An unresolved DEMO position exists"}
+        active = [p for p in self.demo_positions.values()
+                  if p.get("status") in live_statuses]
+        if len(active) >= int(self.max_concurrent_demo):
+            return {"approved": False, "reason": "Max concurrent DEMO positions reached"}
+        if any(str(p.get("symbol")).upper() == symbol for p in active):
+            return {"approved": False, "reason": "A DEMO position on this symbol is already open"}
 
         signal = self.last_signals.get("futures", {})
         if str(signal.get("symbol", "")).upper() != symbol:
@@ -444,8 +655,13 @@ class TradingCoordinator:
                 "status": "DEMO_OPEN",
                 "protection_verified": False,
                 "execution_source": "INTERNAL_DEMO",
+                "total_fees": str(execution["fee"]),
+                "opened_at_ms": int(time.time() * 1000),
+                "last_checked_ms": int(time.time() * 1000),
+                "leverage": str(leverage),
             }
             self.demo_positions[trade_id] = record
+            self._on_demo_open(record, signal, reservation)
             self._save_demo_state()
 
             self.risk.update_reservation_status(
@@ -601,6 +817,12 @@ class TradingCoordinator:
                     if direction in ("LONG", "SHORT"):
                         signal["trade_plan"] = self.trade_planner.create(
                             agent_data, direction
+                        )
+
+                if domain == "spot" and isinstance(signal, dict):
+                    if str(signal.get("direction", "")).upper() == "BUY":
+                        signal["trade_plan"] = self.trade_planner.create(
+                            agent_data, "LONG"
                         )
 
                 if domain == "alpha" and isinstance(signal, dict):
@@ -786,317 +1008,6 @@ class TradingCoordinator:
             leverage=leverage
         )
 
-    def request_paper_trade(
-        self, domain, symbol, direction, entry, quantity,
-        leverage=1, stop_loss=None, take_profit=None
-    ):
-        domain = str(domain).strip().lower()
-        symbol = str(symbol).strip().upper()
-        direction = str(direction).strip().upper()
-
-        if domain not in self.agents:
-            return {"approved": False, "reason": "Unknown agent"}
-        if not self._agent_enabled(domain):
-            return {"approved": False, "reason": "Agent is stopped"}
-
-        signal = self.last_signals.get(domain, {})
-        if signal.get("symbol") != symbol:
-            return {"approved": False, "reason": "Symbol does not match latest signal"}
-
-        if signal.get("direction") != direction:
-            return {"approved": False, "reason": "Direction does not match latest signal"}
-
-        if domain == "spot":
-            if self.mode != "DEMO" or self.demo_execution is None:
-                return {"approved": False, "reason": "Select DEMO mode first"}
-            if direction not in ("BUY", "SELL"):
-                return {"approved": False, "reason": "Spot requires BUY or SELL"}
-
-            try:
-                market_price = self._demo_market_price(symbol, "spot")
-                execution = self.demo_execution.submit_order(
-                    self.demo_account_id,
-                    agent_id="spot",
-                    symbol=symbol,
-                    market_type="SPOT",
-                    side=direction,
-                    quantity=Decimal(str(quantity)),
-                    market_price=market_price,
-                    leverage=Decimal("1"),
-                )
-            except Exception as error:
-                return {"approved": False, "reason": str(error)}
-
-            return {
-                "approved": execution.get("status") == "FILLED",
-                "mode": "DEMO",
-                "domain": "spot",
-                **execution,
-            }
-
-        if domain == "alpha":
-            if self.mode != "DEMO" or self.demo_execution is None:
-                return {"approved": False, "reason": "Select DEMO mode first"}
-            if direction != "BUY":
-                return {"approved": False, "reason": "Alpha only supports BUY entries"}
-            safety = self._get_alpha_safety(symbol)
-            if str(safety.get("status", "")).upper() != "PASS":
-                return {"approved": False, "reason": "Alpha token safety is not PASS"}
-            try:
-                market_price = self._demo_market_price(symbol, "spot")
-                execution = self.demo_execution.submit_order(
-                    self.demo_account_id,
-                    agent_id="alpha",
-                    symbol=symbol,
-                    market_type="SPOT",
-                    side="BUY",
-                    quantity=Decimal(str(quantity)),
-                    market_price=market_price,
-                    leverage=Decimal("1"),
-                )
-            except Exception as error:
-                return {"approved": False, "reason": str(error)}
-            return {
-                "approved": execution.get("status") == "FILLED",
-                "mode": "DEMO",
-                "domain": "alpha",
-                "token_safety": safety,
-                **execution,
-            }
-
-        if domain == "futures":
-            from math import isfinite
-
-            plan = signal.get("trade_plan")
-            if not isinstance(plan, dict) or plan.get("success") is not True:
-                return {"approved": False, "reason": "No approved Futures trade plan"}
-
-            if str(plan.get("direction", "")).upper() != direction:
-                return {"approved": False, "reason": "Trade plan direction mismatch"}
-
-            try:
-                plan_entry = float(plan["entry"])
-                plan_stop = float(plan["stop_loss"])
-                plan_target = float(plan["take_profit"])
-            except (KeyError, TypeError, ValueError):
-                return {"approved": False, "reason": "Invalid Futures trade plan levels"}
-
-            if not all(isfinite(v) and v > 0 for v in (
-                plan_entry, plan_stop, plan_target
-            )):
-                return {"approved": False, "reason": "Non-finite Futures trade plan levels"}
-
-            if direction == "LONG":
-                valid_levels = plan_stop < plan_entry < plan_target
-                reward_risk = (
-                    (plan_target - plan_entry) / (plan_entry - plan_stop)
-                    if valid_levels else 0
-                )
-            else:
-                valid_levels = plan_target < plan_entry < plan_stop
-                reward_risk = (
-                    (plan_entry - plan_target) / (plan_stop - plan_entry)
-                    if valid_levels else 0
-                )
-
-            if not valid_levels or reward_risk < 1.5:
-                return {"approved": False, "reason": "Futures plan levels or reward/risk rejected"}
-
-            # Futures PAPER entries must use the approved plan levels.
-            entry = plan_entry
-            stop_loss = plan_stop
-            take_profit = plan_target
-
-        if domain == "alpha" and direction != "BUY":
-            return {"approved": False, "reason": "Alpha only supports BUY entries"}
-
-        if domain == "futures" and direction not in ("LONG", "SHORT"):
-            return {"approved": False, "reason": "Futures requires LONG or SHORT"}
-
-        if domain == "alpha":
-            safety = self._get_alpha_safety(symbol)
-            if str(safety.get("status", "")).upper() != "PASS":
-                return {"approved": False, "reason": "Alpha token safety is not PASS"}
-
-        execution_direction = "BUY" if direction == "BUY" else direction
-
-        try:
-            result = self.paper.open_position(
-                domain=domain,
-                symbol=symbol,
-                direction=execution_direction,
-                price=entry,
-                quantity=quantity,
-                leverage=leverage,
-                stop_loss=stop_loss,
-                take_profit=take_profit,
-            )
-        except Exception as error:
-            return {"approved": False, "reason": str(error)}
-
-        return {
-            "approved": bool(result.get("success")),
-            "mode": "PAPER",
-            **result,
-        }
-
-    def close_paper_trade(self, position_id, exit_price, quantity=None, reason='MANUAL'):
-        try:
-            result = self.paper.close_position(
-                position_id=position_id,
-                price=exit_price,
-                quantity=quantity,
-                reason=reason,
-            )
-        except Exception as error:
-            return {"success": False, "reason": str(error)}
-
-        if result.get("success") and result.get("remaining_quantity") == "0":
-            trade = result.get("trade", {})
-            domain = trade.get("domain")
-            pnl = float(result.get("realized_pnl", 0))
-
-            if domain in self.agents:
-                self.agents[domain].record_trade({
-                    "trade_id": position_id,
-                    "result": (
-                        "WIN" if pnl > 0
-                        else "LOSS" if pnl < 0
-                        else "BREAKEVEN"
-                    ),
-                    "realized_pnl": pnl,
-                })
-
-        return result
-
-    def close_paper_position_at_market(self, position_id, quantity=None):
-        """Close one open PAPER position using a fresh Binance bid/ask quote."""
-        position_id = str(position_id).strip()
-        if not position_id:
-            return {"success": False, "reason": "Missing position_id"}
-
-        positions = self.paper.get_status().get("open_positions", [])
-        position = next(
-            (item for item in positions if str(item.get("id")) == position_id),
-            None,
-        )
-        if position is None:
-            return {"success": False, "reason": "Position not found or already closed"}
-
-        try:
-            domain = str(position["domain"]).lower()
-            symbol = str(position["symbol"]).upper()
-            direction = str(position["direction"]).upper()
-
-            market = "spot" if domain in ("spot", "alpha") else "futures"
-            quote = self.paper_price_feed.fetch_book_ticker(market, symbol)
-
-            # A BUY/LONG exits at bid; a SHORT exits at ask.
-            exit_price = quote["ask"] if direction == "SHORT" else quote["bid"]
-            if not isinstance(exit_price, (int, float)) or exit_price <= 0:
-                return {"success": False, "reason": "Invalid market exit quote"}
-
-            result = self.close_paper_trade(
-                position_id=position_id,
-                exit_price=exit_price,
-                quantity=quantity,
-                reason="MANUAL",
-            )
-            if result.get("success"):
-                result["exit_quote"] = {
-                    "market": market,
-                    "symbol": symbol,
-                    "bid": quote["bid"],
-                    "ask": quote["ask"],
-                    "selected_price": exit_price,
-                }
-            return result
-        except Exception as error:
-            return {"success": False, "reason": str(error)}
-
-    def monitor_paper_positions(self):
-        """Check open PAPER positions against Binance bid/ask prices."""
-        positions = self.paper.get_status().get("open_positions", [])
-        results = []
-        price_cache = {}
-
-        for position in positions:
-            try:
-                domain = str(position["domain"]).lower()
-                symbol = str(position["symbol"]).upper()
-                direction = str(position["direction"]).upper()
-
-                market = "spot" if domain in ("spot", "alpha") else "futures"
-                cache_key = (market, symbol)
-
-                if cache_key not in price_cache:
-                    price_cache[cache_key] = (
-                        self.paper_price_feed.fetch_book_ticker(market, symbol)
-                    )
-
-                quote = price_cache[cache_key]
-
-                # Exit a long/spot BUY at bid; exit a futures SHORT at ask.
-                exit_price = (
-                    quote["ask"] if direction == "SHORT" else quote["bid"]
-                )
-
-                stop = position.get("stop_loss")
-                target = position.get("take_profit")
-                if stop is None and target is None:
-                    continue
-
-                stop = float(stop) if stop is not None else None
-                target = float(target) if target is not None else None
-
-                reason = None
-                if direction in ("BUY", "LONG"):
-                    if stop is not None and exit_price <= stop:
-                        reason = "STOP_LOSS"
-                    elif target is not None and exit_price >= target:
-                        reason = "TAKE_PROFIT"
-                elif direction == "SHORT":
-                    if stop is not None and exit_price >= stop:
-                        reason = "STOP_LOSS"
-                    elif target is not None and exit_price <= target:
-                        reason = "TAKE_PROFIT"
-
-                if reason:
-                    result = self.close_paper_trade(
-                        position_id=position["id"],
-                        exit_price=exit_price,
-                        reason=reason,
-                    )
-                    if result.get("success"):
-                        results.append({
-                            "position_id": position["id"],
-                            "symbol": symbol,
-                            "reason": reason,
-                            "result": result,
-                        })
-                    else:
-                        results.append({
-                            "position_id": position["id"],
-                            "symbol": symbol,
-                            "close_failed": True,
-                            "error": result.get("reason", "Close operation failed"),
-                        })
-
-            except Exception as error:
-                results.append({
-                    "position_id": position.get("id"),
-                    "symbol": position.get("symbol"),
-                    "error": str(error),
-                })
-
-        return {
-            "checked": len(positions),
-            "events": results,
-        }
-
-    def get_paper_status(self):
-        return self.paper.get_status()
-
     def close_trade(self, trade_id, realized_pnl):
         result = self.risk.close_trade(trade_id, realized_pnl)
 
@@ -1119,7 +1030,6 @@ class TradingCoordinator:
     def get_system_status(self):
         return {
             "risk": self.risk.get_status(),
-            "paper": self.paper.get_status(),
             "mode": self.mode,
             "demo": self.get_demo_positions(),
             "agents": {

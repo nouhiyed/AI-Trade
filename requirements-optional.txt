@@ -1,0 +1,3 @@
+# Optional: PNG trade-chart snapshots sent to Telegram.
+# Termux: pkg install python-pillow   (pip build is slow there)
+Pillow>=10.0

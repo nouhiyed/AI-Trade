@@ -53,13 +53,15 @@ class ApiService {
     required String symbol,
     String interval = '5m',
     int limit = 200,
+    bool live = false,
   }) =>
       _request(
         'GET',
         '/market/candles?market=${Uri.encodeQueryComponent(market)}'
         '&symbol=${Uri.encodeQueryComponent(symbol)}'
         '&interval=${Uri.encodeQueryComponent(interval)}'
-        '&limit=$limit',
+        '&limit=$limit'
+        '${live ? '&live=1' : ''}',
       );
 
   static Future<bool> health() async {
@@ -149,4 +151,27 @@ class ApiService {
 
   static Future<Map<String, dynamic>> paperHistory() =>
       _request('GET', '/paper/history');
+
+  static Future<Map<String, dynamic>> performance() =>
+      _request('GET', '/performance');
+
+  static Future<Map<String, dynamic>> learning() =>
+      _request('GET', '/learning');
+
+  static Future<Map<String, dynamic>> journal({int limit = 30}) =>
+      _request('GET', '/journal?limit=$limit');
+
+  static Future<Map<String, dynamic>> autopilot() =>
+      _request('GET', '/autopilot');
+
+  static Future<Map<String, dynamic>> autopilotUpdate(
+    Map<String, dynamic> changes,
+  ) =>
+      _request('POST', '/autopilot', body: changes);
+
+  static Future<Map<String, dynamic>> autopilotRun() =>
+      _request('POST', '/autopilot/run');
+
+  static Future<Map<String, dynamic>> enableSetup(String setup) =>
+      _request('POST', '/learning/enable', body: {'setup': setup});
 }

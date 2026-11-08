@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'screens/performance_screen.dart';
+import 'screens/pro_chart_screen.dart';
 import 'services/api_service.dart';
 
 void main() => runApp(const AITradeApp());
@@ -1285,8 +1287,8 @@ class _TradeShellState extends State<TradeShell>
 
                       if (!mounted) return;
 
-                      final success = result['success'] == true ||
-                          result['ok'] == true;
+                      final success = result['approved'] == true ||
+                          result['success'] == true;
 
                       notify(
                         success
@@ -1414,6 +1416,62 @@ class _TradeShellState extends State<TradeShell>
         ],
       );
 
+  void _openProChart() {
+    final raw = paperData['open_positions'];
+    final positions = raw is List
+        ? raw
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList()
+        : <Map<String, dynamic>>[];
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ProChartScreen(
+          english: en,
+          bg: widget.bg,
+          panel: widget.panel,
+          text: widget.text,
+          muted: widget.muted,
+          positions: positions,
+        ),
+      ),
+    );
+  }
+
+  void _openPerformance() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => PerformanceScreen(
+          english: en,
+          bg: widget.bg,
+          panel: widget.panel,
+          text: widget.text,
+          muted: widget.muted,
+        ),
+      ),
+    );
+  }
+
+  Widget _proTools() => Row(
+        children: [
+          Expanded(
+            child: FilledButton.icon(
+              onPressed: _openProChart,
+              icon: const Icon(Icons.candlestick_chart, size: 18),
+              label: Text(tr('تشارت احترافي', 'Pro Chart')),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: _openPerformance,
+              icon: const Icon(Icons.insights, size: 18),
+              label: Text(tr('الأداء والآلي', 'Autopilot')),
+            ),
+          ),
+        ],
+      );
+
   Widget _markets() => ListView(
     padding: const EdgeInsets.all(15),
     children: [
@@ -1421,6 +1479,8 @@ class _TradeShellState extends State<TradeShell>
         tr('مركز الأسواق', 'MARKET INTELLIGENCE'),
         'LIVE BINANCE DATA',
       ),
+      const SizedBox(height: 12),
+      _proTools(),
       const SizedBox(height: 12),
       _marketPanel('futures', tr('العقود الآجلة', 'FUTURES'), cyan),
       const SizedBox(height: 13),

@@ -29,3 +29,7 @@ __pycache__/
 
 # Generated APK output
 apk-output/
+
+# Demo runtime state
+config/demo_state.json
+config/autopilot.json
