@@ -937,7 +937,7 @@ class TradingCoordinator(SpotDemoMixin):
         if domain == "alpha":
             try:
                 token = self.alpha_feed.token(symbol)
-                signal = self.analyze_alpha(token)
+                signal = self.analyze_alpha(token, preferred_timeframe=timeframe)
             except Exception as error:
                 return {"success": False, "reason": "Alpha analysis failed: " + str(error),
                         "opened": False}
