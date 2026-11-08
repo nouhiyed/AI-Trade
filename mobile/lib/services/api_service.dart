@@ -130,39 +130,6 @@ class ApiService {
   static Future<Map<String, dynamic>> resumeAll() =>
       _request('POST', '/resume-all');
 
-  static Future<Map<String, dynamic>> openPaperTrade({
-    required String domain,
-    required String symbol,
-    required String direction,
-    required double entry,
-    required double quantity,
-    double leverage = 1,
-    double? stopLoss,
-    double? takeProfit,
-  }) =>
-      _request('POST', '/paper/open', body: {
-        'domain': domain,
-        'symbol': symbol,
-        'direction': direction,
-        'entry': entry,
-        'quantity': quantity,
-        'leverage': leverage,
-        'stop_loss': stopLoss,
-        'take_profit': takeProfit,
-      });
-
-  static Future<Map<String, dynamic>> closePaperTrade({
-    required String positionId,
-    double? quantity,
-  }) =>
-      _request('POST', '/paper/close', body: {
-        'position_id': positionId,
-        if (quantity != null) 'quantity': quantity,
-      });
-
-  static Future<Map<String, dynamic>> paperHistory() =>
-      _request('GET', '/paper/history');
-
   static Future<Map<String, dynamic>> performance() =>
       _request('GET', '/performance');
 
