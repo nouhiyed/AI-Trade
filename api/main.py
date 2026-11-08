@@ -3,9 +3,17 @@ import os
 import math
 import threading
 import time
+import sys
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 from uuid import uuid4
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+os.chdir(PROJECT_ROOT)
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from core.coordinator import TradingCoordinator
 from core.autopilot import Autopilot
 from core.market_context import MarketContext
@@ -16,8 +24,39 @@ if not math.isfinite(initial_balance) or initial_balance <= 0:
     raise ValueError("DEMO_INITIAL_BALANCE must be a finite positive number")
 coordinator = TradingCoordinator(initial_balance=initial_balance)
 autopilot = Autopilot(coordinator, context=MarketContext())
+submission_store_path = PROJECT_ROOT / "data" / "agent_submissions.json"
 submission_jobs = {}
 submission_jobs_lock = threading.Lock()
+
+
+def _save_submission_jobs_locked():
+    submission_store_path.parent.mkdir(parents=True, exist_ok=True)
+    temp = submission_store_path.with_suffix(".tmp")
+    temp.write_text(json.dumps(submission_jobs, indent=2, default=str))
+    temp.replace(submission_store_path)
+
+
+def _load_submission_jobs():
+    try:
+        raw = json.loads(submission_store_path.read_text())
+        if not isinstance(raw, dict):
+            return {}
+        now = time.time()
+        jobs = {}
+        for key, value in raw.items():
+            if not isinstance(value, dict) or now - float(value.get("created_at", now)) > 7 * 86400:
+                continue
+            job = dict(value)
+            if job.get("status") == "PROCESSING":
+                job["status"] = "FAILED"
+                job["reason"] = "Server restarted before the agent decision was saved"
+            jobs[str(key)] = job
+        return jobs
+    except (FileNotFoundError, ValueError, TypeError):
+        return {}
+
+
+submission_jobs = _load_submission_jobs()
 
 
 def _process_agent_submission(request_id, payload):
@@ -43,6 +82,7 @@ def _process_agent_submission(request_id, payload):
             job["status"] = "COMPLETED"
             job["result"] = result
             job["completed_at"] = time.time()
+            _save_submission_jobs_locked()
 
 
 class APIHandler(BaseHTTPRequestHandler):
@@ -67,14 +107,18 @@ class APIHandler(BaseHTTPRequestHandler):
                 market = params.get("market", ["spot"])[0].lower()
                 if market == "alpha":
                     symbols = coordinator.alpha_feed.symbols()
+                    source = "binance_alpha"
                 elif market in {"spot", "futures"}:
                     symbols = coordinator.market_feed.fetch_symbols(market)
+                    source = "binance_rest"
                 else:
                     return self.send_json({"error": "Unsupported market"}, 400)
                 return self.send_json({
                     "market": market,
                     "symbols": symbols,
-                    "source": "binance_rest"
+                    "count": len(symbols),
+                    "source": source,
+                    "received_at": time.time(),
                 })
 
             if path == "/market/candles":
@@ -126,7 +170,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 if not trade_id:
                     return self.send_json({"success": False, "reason": "Missing trade_id"}, 400)
                 trade = next(
-                    (item for item in coordinator.journal.recent(500)
+                    (item for item in coordinator.journal.closed_trades()
                      if str(item.get("trade_id")) == trade_id),
                     None,
                 )
@@ -253,9 +297,17 @@ class APIHandler(BaseHTTPRequestHandler):
                     "success": True,
                     "request_id": request_id,
                     "request_status": snapshot["status"],
+                    "created_at": snapshot.get("created_at"),
+                    "completed_at": snapshot.get("completed_at"),
+                    "message": (
+                        "Agent decision is ready" if snapshot["status"] == "COMPLETED"
+                        else snapshot.get("reason") or "Request is being processed"
+                    ),
                 }
                 if snapshot["status"] == "COMPLETED":
                     response["result"] = snapshot.get("result")
+                if snapshot["status"] == "FAILED":
+                    response["reason"] = snapshot.get("reason", "Agent request failed")
                 return self.send_json(response)
             if path == "/health":
                 return self.send_json({"ok": True, "mode": coordinator.mode})
@@ -298,15 +350,22 @@ class APIHandler(BaseHTTPRequestHandler):
                 with submission_jobs_lock:
                     expired = [
                         key for key, value in submission_jobs.items()
-                        if value.get("status") == "COMPLETED"
-                        and now - value.get("completed_at", now) > 900
+                        if now - value.get("created_at", now) > 7 * 86400
                     ]
                     for key in expired:
                         submission_jobs.pop(key, None)
+                    while len(submission_jobs) >= 500:
+                        oldest = min(
+                            submission_jobs,
+                            key=lambda key: submission_jobs[key].get("created_at", 0),
+                        )
+                        submission_jobs.pop(oldest, None)
                     submission_jobs[request_id] = {
-                        "status": "RECEIVED",
+                        "status": "PROCESSING",
                         "created_at": now,
+                        "payload": dict(data),
                     }
+                    _save_submission_jobs_locked()
                 threading.Thread(
                     target=_process_agent_submission,
                     args=(request_id, dict(data)),
