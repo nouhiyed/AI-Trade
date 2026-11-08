@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
@@ -439,7 +441,14 @@ class _ProChartScreenState extends State<ProChartScreen> {
               onPressed: _fitChart, icon: const Icon(Icons.fit_screen, size: 19)),
           ]),
         ),
-        Expanded(child: WebViewWidget(controller: _controller)),
+        Expanded(
+          child: WebViewWidget(
+            controller: _controller,
+            gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
+              Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
+            },
+          ),
+        ),
       ],
     );
 
@@ -538,9 +547,14 @@ class _AgentSubmissionScreenState extends State<AgentSubmissionScreen> {
       ));
       return;
     }
-    setState(() { _sending = true; _requestReceived = true; _error = null; _result = null; });
+    setState(() {
+      _sending = true;
+      _requestReceived = false;
+      _error = null;
+      _result = null;
+    });
     try {
-      final result = await ApiService.submitChartSignal(
+      final acknowledgement = await ApiService.submitChartSignal(
         domain: widget.domain,
         symbol: widget.symbol,
         timeframe: widget.timeframe,
@@ -548,7 +562,32 @@ class _AgentSubmissionScreenState extends State<AgentSubmissionScreen> {
         takeProfit: target,
         stopLoss: stop,
       );
-      if (mounted) setState(() => _result = result);
+      final requestId = '${acknowledgement['request_id'] ?? ''}';
+      if (acknowledgement['request_status'] != 'RECEIVED' || requestId.isEmpty) {
+        throw Exception(t(
+          'لم يؤكد الخادم استلام الطلب.',
+          'The server did not confirm receipt of the request.',
+        ));
+      }
+      if (mounted) setState(() => _requestReceived = true);
+
+      Map<String, dynamic>? decision;
+      for (var attempt = 0; attempt < 60; attempt++) {
+        await Future.delayed(const Duration(seconds: 2));
+        if (!mounted) return;
+        final progress = await ApiService.agentSubmissionStatus(requestId);
+        if (progress['request_status'] == 'COMPLETED' && progress['result'] is Map) {
+          decision = Map<String, dynamic>.from(progress['result'] as Map);
+          break;
+        }
+      }
+      if (decision == null) {
+        throw Exception(t(
+          'انتهت مهلة انتظار قرار الوكيل. تحقق من اتصال الخادم.',
+          'Timed out waiting for the agent decision. Check the server connection.',
+        ));
+      }
+      if (mounted) setState(() => _result = decision);
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
     } finally {
