@@ -103,6 +103,7 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
         });
       }
     } catch (e) {
+      if (mounted) setState(() => _autoSaving = false);
       _toast('$e');
       // Refresh the server value after a rejected/failed change.
       await _load();
@@ -188,11 +189,11 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
             min: min,
             max: max,
             divisions: divisions,
-            onChanged: _serverOnline ? (v) => setState(() {
+            onChanged: _serverOnline && !_autoSaving ? (v) => setState(() {
               cfg[key] = asInt ? v.round() : v;
               _auto['config'] = cfg;
             }) : null,
-            onChangeEnd: _serverOnline
+            onChangeEnd: _serverOnline && !_autoSaving
                 ? (v) => _setAuto({key: asInt ? v.round() : v})
                 : null,
           ),
@@ -241,7 +242,7 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
                 label: Text(m.toUpperCase(), style: const TextStyle(fontSize: 11)),
                 selected: cfg['trade_$m'] != false,
                 visualDensity: VisualDensity.compact,
-                onSelected: _serverOnline ? (v) {
+                onSelected: _serverOnline && !_autoSaving ? (v) {
                   setState(() {
                     cfg['trade_$m'] = v;
                     _auto['config'] = cfg;
@@ -258,7 +259,7 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
         Row(
           children: [
             OutlinedButton.icon(
-              onPressed: _serverOnline ? () async {
+              onPressed: _serverOnline && !_autoSaving ? () async {
                 try {
                   final r = await ApiService.autopilotRun();
                   final n = r['opened'] is List ? (r['opened'] as List).length : 0;
