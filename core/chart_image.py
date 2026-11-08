@@ -24,7 +24,7 @@ def render_trade_chart(candles, direction, entry, stop_loss, take_profit,
     """candles: list of dicts with open/high/low/close. Returns PNG bytes or None."""
     if Image is None or not candles:
         return None
-    candles = candles[-90:]
+    candles = candles[-300:]
     levels = [float(entry), float(stop_loss), float(take_profit)]
     if exit_price is not None:
         levels.append(float(exit_price))
