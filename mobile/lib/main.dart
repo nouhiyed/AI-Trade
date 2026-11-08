@@ -191,6 +191,7 @@ class _TradeShellState extends State<TradeShell>
   bool running = true;
   bool apiOnline = false;
   bool apiBusy = false;
+  int _statusFailures = 0;
   Map<String, dynamic> demoData = {};
   Map<String, dynamic> agentControls = {};
   final Set<String> closingPositionIds = {};
@@ -229,7 +230,7 @@ class _TradeShellState extends State<TradeShell>
       await _refreshMarketData(loadSymbols: true);
     }();
     // Poll position state separately so automatic closes leave the live portfolio promptly.
-    _statusTimer = Timer.periodic(const Duration(seconds: 3), (_) async {
+    _statusTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
       if (!mounted) return;
       await _refreshStatus();
     });
@@ -245,10 +246,17 @@ class _TradeShellState extends State<TradeShell>
     try {
       final data = await ApiService.status();
       if (!mounted) return;
+      _statusFailures = 0;
       _applyStatus(data);
       setState(() => apiOnline = true);
     } catch (_) {
-      if (mounted) setState(() => apiOnline = false);
+      if (mounted) {
+        // Keep the last good snapshot through a single transient poll failure.
+        _statusFailures++;
+        if (_statusFailures >= 3) {
+          setState(() => apiOnline = false);
+        }
+      }
     } finally {
       if (mounted) setState(() => apiBusy = false);
     }
@@ -1229,7 +1237,7 @@ class _TradeShellState extends State<TradeShell>
           ),
           const SizedBox(height: 9),
           Text(
-            apiOnline ? equity : '—',
+            equity,
             style: TextStyle(
               color: widget.text,
               fontSize: 34,
@@ -1243,26 +1251,26 @@ class _TradeShellState extends State<TradeShell>
           const SizedBox(height: 18),
           Row(
             children: [
-              _metric(tr('المتاح', 'AVAILABLE'), apiOnline ? available : '—', widget.text),
-              _metric(tr('المحفظة', 'WALLET'), apiOnline ? wallet : '—', widget.text),
-              _metric(tr('الهامش المحجوز', 'LOCKED MARGIN'), apiOnline ? margin : '—', widget.text),
+              _metric(tr('المتاح', 'AVAILABLE'), available, widget.text),
+              _metric(tr('المحفظة', 'WALLET'), wallet, widget.text),
+              _metric(tr('الهامش المحجوز', 'LOCKED MARGIN'), margin, widget.text),
             ],
           ),
           const SizedBox(height: 12),
           Row(
             children: [
-              _metric(tr('ربح عائم', 'UNREALIZED PNL'), apiOnline ? unrealized : '—', widget.text),
-              _metric(tr('ربح محقق', 'REALIZED PNL'), apiOnline ? realized : '—', widget.text),
-              _metric(tr('الرسوم', 'FEES'), apiOnline ? fees : '—', widget.text),
+              _metric(tr('ربح عائم', 'UNREALIZED PNL'), unrealized, widget.text),
+              _metric(tr('ربح محقق', 'REALIZED PNL'), realized, widget.text),
+              _metric(tr('الرسوم', 'FEES'), fees, widget.text),
             ],
           ),
           const SizedBox(height: 12),
           Row(
             children: [
               _metric(tr('المراكز المفتوحة', 'OPEN POSITIONS'),
-                  apiOnline ? '$openCount' : '—', widget.text),
+                  '$openCount', widget.text),
               _metric(tr('إجمالي الصفقات', 'TOTAL TRADES'),
-                  apiOnline ? '$totalTrades' : '—', widget.text),
+                  '$totalTrades', widget.text),
             ],
           ),
             const SizedBox(height: 14),
