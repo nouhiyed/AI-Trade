@@ -195,7 +195,7 @@ class TradingCoordinator(SpotDemoMixin):
 
         # The SQLite journal is the durable archive for manual and automatic closes.
         try:
-            for trade in self.journal.recent(200):
+            for trade in self.journal.closed_trades():
                 if str(trade.get("status", "")).upper() != "CLOSED":
                     continue
                 trade_id = str(trade.get("trade_id", "")).strip()
@@ -288,12 +288,20 @@ class TradingCoordinator(SpotDemoMixin):
         (learning input) and to the notifier.
         """
         net = float(record.get("net_pnl", "0"))
+        record["closed_at_ms"] = int(time.time() * 1000)
+        record["exit_price"] = record.get("close_price")
+        record["net_pnl"] = str(net)
+        record["status"] = "DEMO_CLOSED"
         settled = self.close_trade(position_id, net)
         try:
-            self.journal.record_close(
+            journaled = self.journal.record_close(
                 position_id, net,
                 exit_price=record.get("close_price"),
                 reason=reason or record.get("close_reason") or "MANUAL")
+            if not journaled:
+                self.journal.record_closed_snapshot(
+                    record, net, reason or record.get("close_reason") or "MANUAL")
+            self._save_demo_state()
             disabled = self.learning.evaluate()
             self._notify_close(record, net, reason)
             for item in disabled:
@@ -301,6 +309,13 @@ class TradingCoordinator(SpotDemoMixin):
                     "Learning: setup disabled " + item["setup"] + " - " + item["reason"])
         except Exception as error:
             record["journal_error"] = str(error)
+            try:
+                self.journal.record_closed_snapshot(
+                    record, net, reason or record.get("close_reason") or "MANUAL")
+                record.pop("journal_error", None)
+                self._save_demo_state()
+            except Exception as archive_error:
+                record["journal_error"] = str(archive_error)
         if not self.risk.reservations:
             try:
                 self.risk.sync_balance(float(
@@ -344,6 +359,9 @@ class TradingCoordinator(SpotDemoMixin):
                 record["direction"], confidence,
                 context["reward_risk"], domain)
             record["setup_key"] = key
+            record["confidence"] = confidence
+            record["risk_amount"] = reservation.get("risk")
+            record["context"] = context
             self.journal.record_open(
                 record["trade_id"], record.get("domain", "futures"),
                 record["symbol"], record["direction"],
