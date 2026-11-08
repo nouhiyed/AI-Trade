@@ -900,7 +900,7 @@ class TradingCoordinator(SpotDemoMixin):
 
 
     def submit_chart_signal(self, domain, symbol, timeframe):
-        """Analyze a chart-selected market with its specialist; never opens a trade."""
+        """Send a chart opportunity to its agent; open only after full agent and risk approval."""
         domain = str(domain).strip().lower()
         symbol = str(symbol).strip().upper()
         timeframe = str(timeframe).strip().lower()
@@ -929,8 +929,11 @@ class TradingCoordinator(SpotDemoMixin):
             except Exception as error:
                 return {"success": False, "reason": "Alpha analysis failed: " + str(error),
                         "opened": False}
-        if not isinstance(signal, dict) or signal.get("error"):
-            return {"success": False, "reason": signal.get("error", "Analysis unavailable"),
+        if not isinstance(signal, dict):
+            return {"success": False, "reason": "Analysis unavailable",
+                    "opened": False, "analysis": analysis}
+        if signal.get("error"):
+            return {"success": False, "reason": signal.get("error"),
                     "opened": False, "analysis": analysis}
         signal = dict(signal)
         signal["chart_timeframe"] = timeframe
@@ -955,16 +958,36 @@ class TradingCoordinator(SpotDemoMixin):
         elif not isinstance(plan, dict) or plan.get("success") is not True:
             decision = "REJECTED: " + str((plan or {}).get("reason", "No valid trade plan"))
         else:
-            decision = "ANALYZED: eligible for the normal DEMO risk checks"
+            try:
+                if domain == "futures":
+                    execution = self.request_demo_futures_trade(
+                        symbol, signal["direction"])
+                else:
+                    execution = self.request_demo_spot_trade(
+                        symbol, domain=domain)
+                opened = bool(execution.get("approved"))
+                decision = (
+                    "APPROVED: DEMO position opened"
+                    if opened else
+                    "REJECTED: " + str(execution.get("reason", "Risk or execution check failed"))
+                )
+            except Exception as error:
+                execution = {"approved": False, "reason": str(error)}
+                opened = False
+                decision = "REJECTED: " + str(error)
+        if "execution" not in locals():
+            execution = {"approved": False, "reason": decision}
+            opened = False
         return {
             "success": True,
-            "opened": False,
+            "opened": opened,
             "domain": domain,
             "symbol": symbol,
             "timeframe": timeframe,
             "decision": decision,
             "signal": signal,
             "trade_plan": plan,
+            "execution": execution,
             "token_safety": safety if domain == "alpha" else None,
         }
 
