@@ -886,21 +886,7 @@ class _TradeShellState extends State<TradeShell>
           const SizedBox(height: 15),
           _portfolioCard(),
           const SizedBox(height: 20),
-          _heading(
-            tr('نبض السوق', 'MARKET PULSE'),
-            (_marketCandles['futures:${_selectedSymbols['futures'] ?? 'BTCUSDT'}:${_selectedIntervals['futures'] ?? '5m'}']?.isNotEmpty ?? false) ? 'BINANCE LIVE' : tr('بانتظار بيانات Binance', 'WAITING FOR BINANCE'),
-            Icons.candlestick_chart,
-          ),
-          const SizedBox(height: 10),
           _chart(true),
-          const SizedBox(height: 18),
-          _heading(
-            tr('مركز التنفيذ', 'EXECUTION CENTER'),
-            widget.mode,
-            Icons.bolt,
-          ),
-          const SizedBox(height: 9),
-          _quickTrade(),
           const SizedBox(height: 18),
           _heading(
             tr('فريق الوكلاء', 'AGENT NETWORK'),
