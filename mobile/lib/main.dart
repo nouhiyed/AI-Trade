@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'screens/performance_screen.dart';
 import 'screens/pro_chart_screen.dart';
+import 'screens/closed_trade_detail_screen.dart';
 import 'services/api_service.dart';
 
 void main() => runApp(const AITradeApp());
@@ -1488,6 +1489,11 @@ class _TradeShellState extends State<TradeShell>
             final domain = '${trade['domain'] ?? '—'}'.toUpperCase();
             final entry = trade['entry_price'] ?? trade['entry'] ?? '—';
             final exit = trade['close_price'] ?? trade['exit_price'] ?? '—';
+            final timeframe = trade['timeframe'] ??
+                (trade['context'] is Map
+                    ? (trade['context'] as Map)['chart_timeframe'] ??
+                        (trade['context'] as Map)['timeframe']
+                    : null) ?? '5m';
             final pnlValue = double.tryParse(
               '${trade['net_pnl'] ?? trade['realized_pnl'] ?? 0}',
             ) ?? 0;
@@ -1509,58 +1515,82 @@ class _TradeShellState extends State<TradeShell>
             }
             return Padding(
               padding: const EdgeInsets.only(bottom: 9),
-              child: _panel(
-                border: (pnlValue >= 0 ? green : red).withOpacity(.22),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            symbol,
-                            style: TextStyle(
-                              color: widget.text,
-                              fontWeight: FontWeight.w900,
-                              fontSize: 15,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(18),
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => ClosedTradeDetailScreen(
+                        trade: trade,
+                        english: en,
+                        bg: widget.bg,
+                        panel: widget.panel,
+                        text: widget.text,
+                        muted: widget.muted,
+                      ),
+                    ),
+                  );
+                },
+                child: _panel(
+                  border: (pnlValue >= 0 ? green : red).withOpacity(.22),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              symbol,
+                              style: TextStyle(
+                                color: widget.text,
+                                fontWeight: FontWeight.w900,
+                                fontSize: 15,
+                              ),
                             ),
                           ),
-                        ),
-                        _pill(direction, direction == 'SHORT' ? red : green),
-                        const SizedBox(width: 6),
-                        _pill(domain, blue),
-                      ],
-                    ),
-                    const SizedBox(height: 11),
-                    Row(
-                      children: [
-                        Expanded(child: _metric(tr('الدخول', 'ENTRY'), '$entry', widget.text)),
-                        Expanded(child: _metric(tr('الخروج', 'EXIT'), '$exit', widget.text)),
-                        Expanded(
-                          child: _metric(
-                            tr('النتيجة الصافية', 'NET PNL'),
-                            '${pnlValue >= 0 ? '+' : ''}${pnlValue.toStringAsFixed(4)} USDT',
-                            pnlValue >= 0 ? green : red,
+                          _pill(direction, direction == 'SHORT' ? red : green),
+                          const SizedBox(width: 6),
+                          _pill(domain, blue),
+                          const SizedBox(width: 5),
+                          Icon(Icons.open_in_new, color: widget.muted, size: 15),
+                        ],
+                      ),
+                      const SizedBox(height: 11),
+                      Row(
+                        children: [
+                          Expanded(child: _metric(tr('الدخول', 'ENTRY'), '$entry', widget.text)),
+                          Expanded(child: _metric(tr('الخروج', 'EXIT'), '$exit', widget.text)),
+                          Expanded(
+                            child: _metric(
+                              tr('النتيجة الصافية', 'NET PNL'),
+                              '${pnlValue >= 0 ? '+' : ''}${pnlValue.toStringAsFixed(4)} USDT',
+                              pnlValue >= 0 ? green : red,
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 9),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            '${tr('سبب الإغلاق', 'CLOSE REASON')}: $reason',
+                        ],
+                      ),
+                      const SizedBox(height: 9),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              '${tr('الإطار', 'TIMEFRAME')}: $timeframe  •  ${tr('سبب الإغلاق', 'CLOSE REASON')}: $reason',
+                              style: TextStyle(color: widget.muted, fontSize: 10),
+                            ),
+                          ),
+                          Text(
+                            closedLabel,
                             style: TextStyle(color: widget.muted, fontSize: 10),
                           ),
-                        ),
-                        Text(
-                          closedLabel,
-                          style: TextStyle(color: widget.muted, fontSize: 10),
-                        ),
-                      ],
-                    ),
-                  ],
+                        ],
+                      ),
+                      const SizedBox(height: 7),
+                      Text(
+                        tr('اضغط لعرض التشارت التاريخي وخطوط الصفقة', 'Tap to view historical chart and trade levels'),
+                        style: const TextStyle(color: cyan, fontSize: 10, fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             );
