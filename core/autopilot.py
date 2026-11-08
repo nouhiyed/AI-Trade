@@ -107,8 +107,6 @@ class Autopilot:
             slots = int(cfg["max_concurrent"]) - len(open_symbols)
             if slots <= 0:
                 result["skipped"].append({"reason": "Max concurrent trades reached"})
-                self.last_result = result
-                return result
 
             sources = []
             limit = int(cfg["scan_limit"])
