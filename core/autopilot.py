@@ -121,9 +121,9 @@ class Autopilot:
 
             result["scanned"] = 0
             result["actionable"] = 0
+            # Keep every enabled market scanner running even when entry slots
+            # are full; only execution is blocked by the shared slot limit.
             for domain, scan_fn in sources:
-                if slots <= 0:
-                    break
                 try:
                     scan = scan_fn()
                 except Exception as error:
