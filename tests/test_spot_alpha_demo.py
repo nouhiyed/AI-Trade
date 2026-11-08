@@ -157,6 +157,26 @@ class TestAlpha(Base):
 
 
 class TestAutopilotMarkets(Base):
+    def test_all_agents_are_scanned_when_entry_slots_are_full(self):
+        self.c.demo_positions["already-open"] = {
+            "symbol": "BTCUSDT", "status": "DEMO_OPEN"}
+        calls = []
+        def scan(name):
+            def run(**kwargs):
+                calls.append(name)
+                return {"success": True, "scanned": 1, "actionable": 0,
+                        "opportunities": [], "rejections": {}}
+            return run
+        self.c.scan_futures = scan("futures")
+        self.c.scan_spot = scan("spot")
+        self.c.scan_alpha = scan("alpha")
+        ap = Autopilot(self.c, config_path="config/ap-full.json")
+        ap.update({"enabled": True, "max_concurrent": 1,
+                   "use_context": False})
+        result = ap.tick()
+        self.assertEqual(calls, ["futures", "spot", "alpha"])
+        self.assertEqual(result["opened"], [])
+
     def test_trades_all_three_markets(self):
         self.feed.prices.update({"BTCUSDT": 100.0, "ETHUSDT": 100.0})
 
