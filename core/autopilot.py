@@ -132,6 +132,11 @@ class Autopilot:
                     continue
                 result["scanned"] += scan.get("scanned") or 0
                 result["actionable"] += scan.get("actionable") or 0
+                if scan.get("rejections"):
+                    result.setdefault("rejections", {})[domain] = scan["rejections"]
+                if scan.get("rejection_samples"):
+                    result.setdefault("rejection_samples", []).extend(
+                        scan["rejection_samples"][:8])
                 if not scan.get("success"):
                     result["skipped"].append(
                         {"domain": domain, "reason": scan.get("reason", "Scan failed")})
@@ -179,9 +184,10 @@ class Autopilot:
             self.c.last_signals[domain] = signal
 
             if domain == "futures":
+                selected_leverage = self.c.select_futures_leverage(signal, plan)
                 trade = self.c.request_demo_futures_trade(
                     symbol, direction, risk_pct=float(cfg["risk_pct"]),
-                    leverage=int(cfg["leverage"]))
+                    leverage=selected_leverage)
             else:
                 trade = self.c.request_demo_spot_trade(
                     symbol, domain=domain, risk_pct=float(cfg["risk_pct"]))
@@ -191,6 +197,7 @@ class Autopilot:
                 self._cooldown[symbol] = self.clock() + cfg["cooldown_min"] * 60
                 result["opened"].append({"domain": domain, "symbol": symbol,
                                          "direction": direction,
+                                         "leverage": trade.get("leverage", selected_leverage if domain == "futures" else 1),
                                          "trade_id": trade.get("trade_id")})
             else:
                 skip(trade.get("reason", "Rejected"))
