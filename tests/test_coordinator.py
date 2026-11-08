@@ -55,7 +55,7 @@ class TestTradingCoordinator(unittest.TestCase):
         self.assertTrue(closed["success"])
         self.assertAlmostEqual(self.system.risk.balance, 1010)
 
-    def test_chart_submission_analyzes_without_opening(self):
+    def test_chart_submission_routes_approved_trade_to_executor(self):
         self.system.analyze_live = lambda symbol: {
             "signals": {
                 "futures": {
@@ -70,11 +70,30 @@ class TestTradingCoordinator(unittest.TestCase):
                 }
             }
         }
+        calls = []
+        self.system.request_demo_futures_trade = lambda symbol, direction: (
+            calls.append((symbol, direction)) or
+            {"approved": True, "position_id": "demo-test"}
+        )
         result = self.system.submit_chart_signal("futures", "BTCUSDT", "5m")
         self.assertTrue(result["success"], result)
-        self.assertFalse(result["opened"])
-        self.assertEqual(self.system.demo_positions, {})
+        self.assertTrue(result["opened"])
+        self.assertEqual(calls, [("BTCUSDT", "LONG")])
         self.assertEqual(result["signal"]["chart_timeframe"], "5m")
+
+    def test_chart_submission_does_not_execute_rejected_signal(self):
+        self.system.analyze_live = lambda symbol: {
+            "signals": {"futures": {
+                "symbol": symbol, "direction": "WAIT", "confidence": 12,
+                "reason": "No directional edge",
+            }}
+        }
+        self.system.request_demo_futures_trade = lambda *a, **k: self.fail(
+            "Rejected chart signal must not reach execution")
+        result = self.system.submit_chart_signal("futures", "BTCUSDT", "5m")
+        self.assertTrue(result["success"])
+        self.assertFalse(result["opened"])
+        self.assertIn("WAIT", result["decision"])
 
     def test_futures_leverage_is_confidence_and_volatility_aware(self):
         plan = {"entry": 100, "atr": 0.5}
