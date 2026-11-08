@@ -37,6 +37,7 @@ class _ProChartScreenState extends State<ProChartScreen> {
   Timer? _timer;
   bool _pageReady = false;
   bool _loading = false;
+  bool _submitting = false;
   String? _error;
   String _market = 'futures';
   late String _symbol;
@@ -165,10 +166,9 @@ class _ProChartScreenState extends State<ProChartScreen> {
   }
 
   Future<void> _submitToAgent() async {
+    if (_submitting) return;
+    setState(() => _submitting = true);
     final domain = _market;
-    if (domain == 'alpha' && !_symbol.endsWith('USDT')) {
-      // Alpha symbols are still represented as USDT quotes by the feed.
-    }
     try {
       final result = await ApiService.submitChartSignal(
         domain: domain,
@@ -249,6 +249,8 @@ class _ProChartScreenState extends State<ProChartScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('${t('تعذر إرسال التحليل: ', 'Agent request failed: ')}$e')),
       );
+    } finally {
+      if (mounted) setState(() => _submitting = false);
     }
   }
 
@@ -429,9 +431,9 @@ class _ProChartScreenState extends State<ProChartScreen> {
               child: SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
-                  onPressed: _loading ? null : _submitToAgent,
+                  onPressed: _submitting ? null : _submitToAgent,
                   icon: const Icon(Icons.psychology_alt, size: 18),
-                  label: Text(t('إرسال للوكيل', 'SEND TO AGENT')),
+                  label: Text(_submitting ? t('جارٍ التحليل...', 'ANALYZING...') : t('إرسال للوكيل', 'SEND TO AGENT')),
                 ),
               ),
             ),
