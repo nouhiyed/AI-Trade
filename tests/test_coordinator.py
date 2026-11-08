@@ -82,7 +82,7 @@ class TestTradingCoordinator(unittest.TestCase):
         self.assertEqual(result["signal"]["chart_timeframe"], "5m")
 
     def test_chart_submission_does_not_execute_rejected_signal(self):
-        self.system.analyze_live = lambda symbol: {
+        self.system.analyze_live = lambda symbol, preferred_timeframe=None: {
             "signals": {"futures": {
                 "symbol": symbol, "direction": "WAIT", "confidence": 12,
                 "reason": "No directional edge",
