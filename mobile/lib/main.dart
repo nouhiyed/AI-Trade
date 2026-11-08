@@ -291,7 +291,7 @@ class _TradeShellState extends State<TradeShell>
     try {
       final result = await ApiService.marketSymbols(market);
       if (!mounted) return;
-      _marketSymbolErrors.remove(market);
+      setState(() => _marketSymbolErrors.remove(market));
       dynamic raw = result['symbols'] ?? result['data'] ?? result['items'];
       if (raw is Map) {
         raw = raw['symbols'] ?? raw['items'] ?? raw['data'];
@@ -322,10 +322,12 @@ class _TradeShellState extends State<TradeShell>
           }
         });
       } else {
-        _marketSymbolErrors[market] = tr('لم تُرجع Binance أي أزواج لهذا السوق.', 'Binance returned no symbols for this market.');
+        if (mounted) setState(() {
+          _marketSymbolErrors[market] = tr('لم تُرجع Binance أي أزواج لهذا السوق.', 'Binance returned no symbols for this market.');
+        });
       }
     } catch (error) {
-      _marketSymbolErrors[market] = '$error';
+      if (mounted) setState(() => _marketSymbolErrors[market] = '$error');
     }
   }
 
@@ -1203,7 +1205,7 @@ class _TradeShellState extends State<TradeShell>
         borderRadius: BorderRadius.circular(16),
         child: Stack(
           children: [
-            const Positioned.fill(
+            Positioned.fill(
               child: IgnorePointer(child: CustomPaint(painter: _BalanceAiPainter(dark: widget.dark, english: en))),
             ),
             Column(
