@@ -60,6 +60,21 @@ class TestRiskManager(unittest.TestCase):
         )
         self.assertFalse(result["approved"])
 
+    def test_futures_leverage_hard_cap(self):
+        result = self.risk.reserve_trade(
+            domain="futures", symbol="BTCUSDT", direction="LONG",
+            entry=100, stop_loss=99, risk_pct=0.5, leverage=6)
+        self.assertFalse(result["approved"])
+        self.assertIn("5x", result["reason"])
+
+    def test_spot_and_alpha_are_unleveraged(self):
+        for domain in ("spot", "alpha"):
+            result = self.risk.reserve_trade(
+                domain=domain, symbol="ETHUSDT", direction="LONG",
+                entry=100, stop_loss=99, risk_pct=0.5, leverage=2)
+            self.assertFalse(result["approved"], domain)
+            self.assertIn("1x", result["reason"])
+
     def test_unknown_trade_close(self):
         result = self.risk.close_trade("missing_trade", 10)
         self.assertFalse(result["success"])
