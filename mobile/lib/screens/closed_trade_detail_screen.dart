@@ -195,6 +195,7 @@ class _ClosedTradeDetailScreenState extends State<ClosedTradeDetailScreen> {
     final symbol = '${trade['symbol'] ?? '—'}';
     final direction = '${trade['direction'] ?? '—'}'.toUpperCase();
     final pnl = double.tryParse('${trade['net_pnl'] ?? trade['realized_pnl'] ?? 0}') ?? 0;
+    final outcome = pnl > 0 ? t('صفقة رابحة', 'PROFIT') : pnl < 0 ? t('صفقة خاسرة', 'LOSS') : t('تعادل', 'BREAKEVEN');
     final timeframe = '${_chart['timeframe'] ?? trade['timeframe'] ?? (trade['context'] is Map ? (trade['context'] as Map)['timeframe'] : null) ?? '5m'}';
 
     return Directionality(
@@ -228,7 +229,25 @@ class _ClosedTradeDetailScreenState extends State<ClosedTradeDetailScreen> {
                       fontWeight: FontWeight.w900,
                     )),
                   ]),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 10),
+                  Align(
+                    alignment: AlignmentDirectional.centerStart,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: (pnl > 0 ? const Color(0xFF21D6A1) : pnl < 0 ? const Color(0xFFFF647C) : const Color(0xFFF5A623)).withOpacity(.13),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: (pnl > 0 ? const Color(0xFF21D6A1) : pnl < 0 ? const Color(0xFFFF647C) : const Color(0xFFF5A623)).withOpacity(.45),
+                        ),
+                      ),
+                      child: Text(outcome, style: TextStyle(
+                        color: pnl > 0 ? const Color(0xFF21D6A1) : pnl < 0 ? const Color(0xFFFF647C) : const Color(0xFFF5A623),
+                        fontWeight: FontWeight.w900, fontSize: 11,
+                      )),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
                   Row(children: [
                     _metric(t('الدخول', 'ENTRY'), trade['entry_price'] ?? trade['entry'], const Color(0xFF4287F5)),
                     _metric(t('الخروج', 'EXIT'), trade['close_price'] ?? trade['exit_price'], const Color(0xFFF5A623)),
@@ -248,7 +267,7 @@ class _ClosedTradeDetailScreenState extends State<ClosedTradeDetailScreen> {
               ),
             ),
             const SizedBox(height: 16),
-            Text(t('صورة التشارت وقت الصفقة', 'TRADE-TIME CHART SNAPSHOT'),
+            Text(t('التشارت التاريخي ومستويات الصفقة', 'HISTORICAL TRADE CHART & LEVELS'),
               style: TextStyle(color: widget.text, fontWeight: FontWeight.w900)),
             const SizedBox(height: 8),
             Container(
