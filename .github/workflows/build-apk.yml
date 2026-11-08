@@ -55,6 +55,23 @@ jobs:
         working-directory: mobile
         run: flutter create --platforms=android --project-name ai_trade .
 
+      - name: Configure Gradle distribution download
+        working-directory: mobile
+        run: |
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          import re
+
+          p = Path("android/gradle/wrapper/gradle-wrapper.properties")
+          s = p.read_text()
+          url = r"distributionUrl=https\://downloads.gradle.org/distributions/gradle-9.3.1-bin.zip"
+          s, count = re.subn(r"(?m)^distributionUrl=.*$", url, s)
+          if count != 1:
+              raise SystemExit("ERROR: Expected one Gradle distributionUrl")
+          p.write_text(s)
+          print("Gradle 9.3.1 BIN download configured")
+          PYTHON
+
       - name: Configure Android network access
         working-directory: mobile
         run: |
