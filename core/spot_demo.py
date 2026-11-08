@@ -149,7 +149,7 @@ class SpotDemoMixin:
         cache[key] = (time.time(), result)
         return result
 
-    def analyze_alpha(self, token):
+    def analyze_alpha(self, token, preferred_timeframe=None):
         """Run the Alpha agent on real Alpha candles with automatic safety."""
         symbol = token["symbol"]
         live = {"symbol": symbol, "timeframes": {"alpha": {}},
@@ -162,7 +162,9 @@ class SpotDemoMixin:
         data["token_safety"] = self._alpha_safety(token)
         signal = self.agents["alpha"].analyze(data)
         if isinstance(signal, dict) and str(signal.get("direction")).upper() == "BUY":
-            signal["trade_plan"] = self.trade_planner.create(data, "LONG")
+            signal["trade_plan"] = self.trade_planner.create(
+                data, "LONG", preferred_timeframe=preferred_timeframe
+            )
         return signal
 
     def scan_alpha(self, limit=6):
