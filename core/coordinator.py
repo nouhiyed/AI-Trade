@@ -922,6 +922,13 @@ class TradingCoordinator(SpotDemoMixin):
 
         analysis = self.analyze_live(symbol)
         signal = analysis.get("signals", {}).get(domain, {})
+        if domain == "alpha":
+            try:
+                token = self.alpha_feed.token(symbol)
+                signal = self.analyze_alpha(token)
+            except Exception as error:
+                return {"success": False, "reason": "Alpha analysis failed: " + str(error),
+                        "opened": False}
         if not isinstance(signal, dict) or signal.get("error"):
             return {"success": False, "reason": signal.get("error", "Analysis unavailable"),
                     "opened": False, "analysis": analysis}
@@ -929,11 +936,8 @@ class TradingCoordinator(SpotDemoMixin):
         signal["chart_timeframe"] = timeframe
         signal["chart_market"] = domain
         if domain == "alpha":
-            try:
-                token = self.alpha_feed.token(symbol)
-                safety = self._alpha_safety(token)
-            except Exception:
-                safety = {"status": "UNKNOWN", "passed": False, "critical": False}
+            safety = signal.get("token_safety") or {
+                "status": "UNKNOWN", "passed": False, "critical": False}
             signal["token_safety"] = safety
             signal["execution_enabled"] = (
                 self.mode == "DEMO"
