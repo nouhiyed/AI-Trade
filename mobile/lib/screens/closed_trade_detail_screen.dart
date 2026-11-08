@@ -75,7 +75,7 @@ class HistoricalTradeChartPainter extends CustomPainter {
     }
 
     final step = plotW / candles.length;
-    final bodyWidth = (step * .62).clamp(1.0, 9.0);
+    final bodyWidth = (step * .62).clamp(1.0, 9.0).toDouble();
     final wickPaint = Paint()..strokeWidth = 1;
     for (var i = 0; i < candles.length; i++) {
       final c = candles[i];
