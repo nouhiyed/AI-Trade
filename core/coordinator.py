@@ -553,6 +553,35 @@ class TradingCoordinator(SpotDemoMixin):
 
         return {"checked": len(positions), "events": results}
 
+    @staticmethod
+    def select_futures_leverage(signal, plan):
+        """Choose conservative leverage from signal strength and ATR volatility."""
+        try:
+            confidence = float(signal.get("confidence_adjusted",
+                                          signal.get("confidence", 0)) or 0)
+            entry = float(plan.get("entry") or 0)
+            atr = float(plan.get("atr") or 0)
+            if entry <= 0 or atr <= 0:
+                return 1
+            volatility_pct = atr / entry * 100
+            if confidence >= 80:
+                leverage = 5
+            elif confidence >= 70:
+                leverage = 3
+            elif confidence >= 60:
+                leverage = 2
+            else:
+                leverage = 1
+            if volatility_pct >= 2.5:
+                leverage = min(leverage, 1)
+            elif volatility_pct >= 1.5:
+                leverage = min(leverage, 2)
+            elif volatility_pct >= 0.8:
+                leverage = min(leverage, 3)
+            return max(1, min(5, int(leverage)))
+        except (TypeError, ValueError, AttributeError):
+            return 1
+
     def request_demo_futures_trade(self, symbol, direction, risk_pct=0.5, leverage=1):
         with self._demo_lock:
             return self._request_demo_futures_trade_locked(symbol, direction, risk_pct, leverage)
@@ -596,6 +625,9 @@ class TradingCoordinator(SpotDemoMixin):
             return {"approved": False, "reason": "No approved Futures trade plan"}
         if str(plan.get("direction", "")).upper() != direction:
             return {"approved": False, "reason": "Trade plan direction mismatch"}
+
+        # Ignore caller-supplied leverage: the backend is the authority.
+        leverage = self.select_futures_leverage(signal, plan)
 
         trade_id = None
         try:
@@ -845,6 +877,59 @@ class TradingCoordinator(SpotDemoMixin):
         }
 
 
+    def submit_chart_signal(self, domain, symbol, timeframe):
+        """Analyze a chart-selected market with its specialist; never opens a trade."""
+        domain = str(domain).strip().lower()
+        symbol = str(symbol).strip().upper()
+        timeframe = str(timeframe).strip().lower()
+        allowed_timeframes = {
+            "futures": {"1m", "5m", "15m", "1h"},
+            "spot": {"5m", "15m", "1h", "4h"},
+            "alpha": {"5m", "15m", "1h"},
+        }
+        if domain not in self.agents:
+            return {"success": False, "reason": "Unknown agent", "opened": False}
+        if not symbol or not symbol.endswith("USDT"):
+            return {"success": False, "reason": "Invalid USDT symbol", "opened": False}
+        if timeframe not in allowed_timeframes[domain]:
+            return {"success": False, "reason": "Unsupported timeframe for this agent",
+                    "opened": False}
+        if not self._agent_enabled(domain):
+            return {"success": False, "reason": domain.title() + " agent is stopped",
+                    "opened": False}
+
+        analysis = self.analyze_live(symbol)
+        signal = analysis.get("signals", {}).get(domain, {})
+        if not isinstance(signal, dict) or signal.get("error"):
+            return {"success": False, "reason": signal.get("error", "Analysis unavailable"),
+                    "opened": False, "analysis": analysis}
+        signal = dict(signal)
+        signal["chart_timeframe"] = timeframe
+        signal["chart_market"] = domain
+        plan = signal.get("trade_plan")
+        safety = signal.get("token_safety") or {}
+        if domain == "alpha" and str(safety.get("status", "")).upper() != "PASS":
+            decision = "REJECTED: Alpha token safety is not PASS"
+        elif domain == "futures" and signal.get("direction") not in ("LONG", "SHORT"):
+            decision = "REJECTED: Agent returned WAIT"
+        elif domain == "spot" and signal.get("direction") != "BUY":
+            decision = "REJECTED: Spot agent did not return BUY"
+        elif not isinstance(plan, dict) or plan.get("success") is not True:
+            decision = "REJECTED: " + str((plan or {}).get("reason", "No valid trade plan"))
+        else:
+            decision = "ANALYZED: eligible for the normal DEMO risk checks"
+        return {
+            "success": True,
+            "opened": False,
+            "domain": domain,
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "decision": decision,
+            "signal": signal,
+            "trade_plan": plan,
+            "token_safety": safety if domain == "alpha" else None,
+        }
+
     def scan_futures(self, limit=12, min_quote_volume=None):
         """Scan liquid USDT perpetuals and rank actionable Futures signals."""
         if not self._agent_enabled("futures"):
@@ -868,6 +953,14 @@ class TradingCoordinator(SpotDemoMixin):
 
         opportunities = []
         errors = {}
+        rejections = {}
+        rejection_samples = []
+
+        def reject(reason, symbol):
+            key = str(reason or "No actionable signal")
+            rejections[key] = rejections.get(key, 0) + 1
+            if len(rejection_samples) < 12:
+                rejection_samples.append({"symbol": symbol, "reason": key})
 
         for item in universe:
             symbol = item["symbol"]
@@ -875,18 +968,22 @@ class TradingCoordinator(SpotDemoMixin):
                 analysis = self.analyze_live(symbol)
                 signal = analysis.get("signals", {}).get("futures", {})
                 if not isinstance(signal, dict):
+                    reject("Missing Futures analysis", symbol)
                     continue
 
                 direction = str(signal.get("direction", "WAIT")).upper()
                 confidence = float(signal.get("confidence", 0) or 0)
 
                 if direction not in ("LONG", "SHORT"):
+                    reject(signal.get("reason") or "Signal is WAIT", symbol)
                     continue
 
                 trade_plan = signal.get("trade_plan")
                 if not isinstance(trade_plan, dict):
+                    reject("Trade plan was not generated", symbol)
                     continue
                 if trade_plan.get("success") is not True:
+                    reject(trade_plan.get("reason") or "Trade plan rejected", symbol)
                     continue
 
                 opportunities.append({
@@ -920,6 +1017,8 @@ class TradingCoordinator(SpotDemoMixin):
             ),
             "opportunities": opportunities,
             "errors": errors,
+            "rejections": rejections,
+            "rejection_samples": rejection_samples,
         }
 
     def analyze_all(self, market_data):
