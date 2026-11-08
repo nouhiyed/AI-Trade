@@ -5,6 +5,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
+from uuid import uuid4
 from core.coordinator import TradingCoordinator
 from core.autopilot import Autopilot
 from core.market_context import MarketContext
@@ -15,6 +16,34 @@ if not math.isfinite(initial_balance) or initial_balance <= 0:
     raise ValueError("DEMO_INITIAL_BALANCE must be a finite positive number")
 coordinator = TradingCoordinator(initial_balance=initial_balance)
 autopilot = Autopilot(coordinator, context=MarketContext())
+submission_jobs = {}
+submission_jobs_lock = threading.Lock()
+
+
+def _process_agent_submission(request_id, payload):
+    try:
+        result = coordinator.submit_chart_signal(
+            domain=payload.get("domain", ""),
+            symbol=payload.get("symbol", ""),
+            timeframe=payload.get("timeframe", "5m"),
+            entry_price=payload.get("entry_price"),
+            take_profit=payload.get("take_profit"),
+            stop_loss=payload.get("stop_loss"),
+        )
+    except Exception as error:
+        result = {
+            "success": False,
+            "decision_status": "ERROR",
+            "decision_reason": str(error),
+            "reason": str(error),
+        }
+    with submission_jobs_lock:
+        job = submission_jobs.get(request_id)
+        if job is not None:
+            job["status"] = "COMPLETED"
+            job["result"] = result
+            job["completed_at"] = time.time()
+
 
 class APIHandler(BaseHTTPRequestHandler):
     def send_json(self, data, code=200):
@@ -209,6 +238,25 @@ class APIHandler(BaseHTTPRequestHandler):
                 return self.send_json(coordinator.learning.report())
             if path == "/autopilot":
                 return self.send_json(autopilot.status())
+            if path == "/agent/submission":
+                request_id = str(params.get("id", [""])[0]).strip()
+                with submission_jobs_lock:
+                    job = submission_jobs.get(request_id)
+                    snapshot = dict(job) if job else None
+                if snapshot is None:
+                    return self.send_json({
+                        "success": False,
+                        "request_status": "NOT_FOUND",
+                        "reason": "Agent submission request was not found",
+                    }, 404)
+                response = {
+                    "success": True,
+                    "request_id": request_id,
+                    "request_status": snapshot["status"],
+                }
+                if snapshot["status"] == "COMPLETED":
+                    response["result"] = snapshot.get("result")
+                return self.send_json(response)
             if path == "/health":
                 return self.send_json({"ok": True, "mode": coordinator.mode})
             if path == "/status":
@@ -245,17 +293,33 @@ class APIHandler(BaseHTTPRequestHandler):
                 return self.send_json(coordinator.analyze_live(symbol))
 
             if path == "/agent/submit":
-                result = coordinator.submit_chart_signal(
-                    domain=data.get("domain", ""),
-                    symbol=data.get("symbol", ""),
-                    timeframe=data.get("timeframe", "5m"),
-                    entry_price=data.get("entry_price"),
-                    take_profit=data.get("take_profit"),
-                    stop_loss=data.get("stop_loss"),
-                )
-                # A rejection is a valid, completed agent decision.
-                # Return its structured status/reason instead of hiding it as an HTTP error.
-                return self.send_json(result, 200)
+                request_id = uuid4().hex
+                now = time.time()
+                with submission_jobs_lock:
+                    expired = [
+                        key for key, value in submission_jobs.items()
+                        if value.get("status") == "COMPLETED"
+                        and now - value.get("completed_at", now) > 900
+                    ]
+                    for key in expired:
+                        submission_jobs.pop(key, None)
+                    submission_jobs[request_id] = {
+                        "status": "RECEIVED",
+                        "created_at": now,
+                    }
+                threading.Thread(
+                    target=_process_agent_submission,
+                    args=(request_id, dict(data)),
+                    name="agent-submission-" + request_id[:8],
+                    daemon=True,
+                ).start()
+                return self.send_json({
+                    "success": True,
+                    "request_id": request_id,
+                    "request_status": "RECEIVED",
+                    "decision_status": "PROCESSING",
+                    "message": "Agent submission received and queued",
+                }, 202)
 
             if path == "/emergency-stop":
                 return self.send_json(coordinator.emergency_stop_all())
