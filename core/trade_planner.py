@@ -24,7 +24,7 @@ class TradePlanner:
                     pass
         return None
 
-    def create(self, agent_data, direction, min_reward_risk=1.5):
+    def create(self, agent_data, direction, min_reward_risk=1.5, preferred_timeframe=None):
         direction = str(direction).strip().upper()
         if direction not in ("LONG", "SHORT"):
             return {"success": False, "reason": "Invalid direction"}
@@ -37,7 +37,11 @@ class TradePlanner:
             return {"success": False, "reason": "Invalid minimum reward/risk"}
 
         selected = None
-        for tf in self.TIMEFRAME_PRIORITY:
+        preferred = str(preferred_timeframe or "").strip().lower()
+        timeframe_order = ((preferred,) if preferred in self.TIMEFRAME_PRIORITY else ()) + tuple(
+            tf for tf in self.TIMEFRAME_PRIORITY if tf != preferred
+        )
+        for tf in timeframe_order:
             frame = agent_data.get(tf)
             entry = self._value(frame, ("close",))
             atr = self._value(frame, ("atr", "atr_14", "atr14"))
