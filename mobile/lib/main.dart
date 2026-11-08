@@ -1841,6 +1841,38 @@ class _TradeShellState extends State<TradeShell>
         ),
       );
 
+  Future<void> _submitHomeChartToAgent(String symbol, String timeframe) async {
+    if (!apiOnline || apiBusy) {
+      notify(tr('اتصل بالخادم أولاً لإرسال الفرصة.', 'Connect to the backend before submitting the chart.'));
+      return;
+    }
+    setState(() => apiBusy = true);
+    try {
+      final result = await ApiService.submitChartSignal(
+        domain: 'futures',
+        symbol: symbol,
+        timeframe: timeframe,
+      );
+      if (!mounted) return;
+      final signal = result['signal'] is Map
+          ? Map<String, dynamic>.from(result['signal'] as Map)
+          : <String, dynamic>{};
+      final plan = result['trade_plan'] is Map
+          ? Map<String, dynamic>.from(result['trade_plan'] as Map)
+          : <String, dynamic>{};
+      final decision = result['decision'] ?? result['reason'] ?? 'No decision';
+      notify(
+        '${decision} · ${signal['direction'] ?? 'WAIT'} · ${tr('الثقة', 'Confidence')} ${signal['confidence'] ?? 0}%'
+        '${plan['success'] == true ? ' · R/R ${plan['reward_risk']}' : ''}'
+        ' · ${tr('لم تُفتح صفقة', 'No trade opened')}',
+      );
+    } catch (error) {
+      if (mounted) notify('${tr('تعذر إرسال الفرصة: ', 'Submit failed: ')}$error');
+    } finally {
+      if (mounted) setState(() => apiBusy = false);
+    }
+  }
+
   Widget _chart(bool compact) {
     final symbol = _selectedSymbols['futures'] ?? 'BTCUSDT';
     final interval = _selectedIntervals['futures'] ?? '5m';
@@ -1924,6 +1956,17 @@ class _TradeShellState extends State<TradeShell>
               ),
             ],
           ),
+          if (compact) ...[
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: apiBusy ? null : () => _submitHomeChartToAgent(symbol, interval),
+                icon: const Icon(Icons.psychology_alt, size: 17),
+                label: Text(tr('إرسال للوكيل', 'SEND TO AGENT')),
+              ),
+            ),
+          ],
         ],
       ),
     );
