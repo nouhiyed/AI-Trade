@@ -737,9 +737,12 @@ class _AgentSubmissionScreenState extends State<AgentSubmissionScreen> {
               Container(
                 padding: const EdgeInsets.all(13),
                 decoration: BoxDecoration(color: widget.panel, borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: const Color(0xFF4287F5).withOpacity(.45))),
+                  border: Border.all(color: (_result == null ? const Color(0xFF4287F5) : (_result!['decision_status'] == 'APPROVED' ? _up : const Color(0xFFFFC857))).withOpacity(.45))),
                 child: Row(children: [
-                  const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+                  if (_result == null)
+                    const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                  else
+                    Icon(Icons.verified, color: decisionColor, size: 20),
                   const SizedBox(width: 10),
                   Expanded(child: Text(
                     '${_result != null ? t('وصل قرار الوكيل.', 'Agent decision received.') : _sending ? t('تم استلام الطلب من الخادم وإرساله للوكيل المختص. يجري التحليل الآن.', 'Server confirmed receipt and forwarded the request to the selected agent. Analysis is running.') : t('تم تأكيد الاستلام، لكن تعذر جلب القرار حتى الآن.', 'Receipt is confirmed, but the decision has not been retrieved yet.')}'
@@ -759,7 +762,7 @@ class _AgentSubmissionScreenState extends State<AgentSubmissionScreen> {
                 decoration: BoxDecoration(
                   color: widget.panel,
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: (approved ? _up : _down).withOpacity(.45)),
+                  border: Border.all(color: decisionColor.withOpacity(.45)),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
