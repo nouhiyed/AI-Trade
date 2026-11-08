@@ -17,7 +17,6 @@ DEFAULTS = {
     "min_confidence": 60.0,
     "max_concurrent": 3,
     "risk_pct": 0.5,
-    "leverage": 2,
     "cooldown_min": 30,
     "use_context": True,
     "trade_futures": True,
@@ -27,7 +26,7 @@ DEFAULTS = {
 LIMITS = {
     "interval_sec": (30, 3600), "scan_limit": (3, 40),
     "min_confidence": (25.0, 100.0), "max_concurrent": (1, 5),
-    "risk_pct": (0.05, 1.0), "leverage": (1, 5), "cooldown_min": (0, 1440),
+    "risk_pct": (0.05, 1.0), "cooldown_min": (0, 1440),
 }
 
 
