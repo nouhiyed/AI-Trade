@@ -36,7 +36,7 @@ class Feed:
 def plan(symbol, direction="LONG", entry=100, stop=99, target=102):
     return {"symbol": symbol, "direction": direction, "confidence": 80,
             "trade_plan": {"success": True, "direction": direction, "entry": entry,
-                           "stop_loss": stop, "take_profit": target, "reward_risk": 2.0}}
+                           "stop_loss": stop, "take_profit": target, "reward_risk": 2.0, "atr": 0.5}}
 
 
 class Base(unittest.TestCase):
@@ -167,7 +167,7 @@ class TestAutopilot(Base):
     def test_config_is_clamped(self):
         ap = Autopilot(self.c, config_path="config/ap.json")
         ap.update({"leverage": 500, "max_concurrent": 99, "risk_pct": "x"})
-        self.assertEqual(ap.config["leverage"], 5)
+        self.assertNotIn("leverage", ap.config)
         self.assertEqual(ap.config["max_concurrent"], 5)
         self.assertEqual(ap.config["risk_pct"], 0.5)
 
