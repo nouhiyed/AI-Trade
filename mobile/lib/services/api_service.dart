@@ -98,7 +98,13 @@ class ApiService {
         'entry_price': entryPrice,
         'take_profit': takeProfit,
         'stop_loss': stopLoss,
-      }, requestTimeout: const Duration(seconds: 90));
+      }, requestTimeout: const Duration(seconds: 25));
+
+  static Future<Map<String, dynamic>> agentSubmissionStatus(String requestId) =>
+      _request(
+        'GET',
+        '/agent/submission?id=${Uri.encodeQueryComponent(requestId)}',
+      );
 
   static Future<Map<String, dynamic>> tradeChart({
     required String tradeId,
