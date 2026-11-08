@@ -37,6 +37,42 @@ class ClosedTradeArchiveTests(unittest.TestCase):
             self.assertEqual(trades[0]["close_reason"], "MANUAL")
             self.assertEqual(trades[0]["context"]["timeframe"], "5m")
 
+    def test_closed_snapshot_backfills_missing_levels_on_existing_row(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = TradeJournal(Path(tmp) / "journal.db")
+            journal.record_open(
+                "futures_trade_3", "futures", "BTCUSDT", "LONG",
+                "setup-3", 0.7, 0, 0, 0, 15, {},
+            )
+            with journal._connect() as db:
+                db.execute(
+                    "UPDATE trades SET entry=NULL, stop_loss=NULL, take_profit=NULL WHERE trade_id=?",
+                    ("futures_trade_3",),
+                )
+            snapshot = {
+                "trade_id": "futures_trade_3",
+                "domain": "futures",
+                "symbol": "BTCUSDT",
+                "direction": "LONG",
+                "entry_price": 65000,
+                "close_price": 65200,
+                "stop_loss": 64500,
+                "take_profit": 66000,
+                "opened_at_ms": 1000,
+                "closed_at_ms": 2000,
+                "risk_amount": 15,
+                "context": {"timeframe": "5m"},
+            }
+
+            journal.record_closed_snapshot(snapshot, 7.5, "MANUAL")
+            trade = journal.closed_trades()[0]
+
+            self.assertEqual(trade["entry"], 65000)
+            self.assertEqual(trade["stop_loss"], 64500)
+            self.assertEqual(trade["take_profit"], 66000)
+            self.assertEqual(trade["exit_price"], 65200)
+            self.assertEqual(trade["status"], "CLOSED")
+
     def test_closed_snapshot_upgrades_existing_open_row(self):
         with tempfile.TemporaryDirectory() as tmp:
             journal = TradeJournal(Path(tmp) / "journal.db")
