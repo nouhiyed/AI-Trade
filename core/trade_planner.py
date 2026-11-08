@@ -3,6 +3,7 @@ from math import isfinite
 
 class TradePlanner:
     TIMEFRAME_PRIORITY = ("15m", "5m", "1h", "1m")
+    MIN_STOP_ATR = 0.75
 
     @staticmethod
     def _value(frame, aliases):
@@ -28,12 +29,19 @@ class TradePlanner:
         if direction not in ("LONG", "SHORT"):
             return {"success": False, "reason": "Invalid direction"}
 
+        try:
+            min_reward_risk = float(min_reward_risk)
+        except (TypeError, ValueError):
+            return {"success": False, "reason": "Invalid minimum reward/risk"}
+        if not isfinite(min_reward_risk) or min_reward_risk <= 0:
+            return {"success": False, "reason": "Invalid minimum reward/risk"}
+
         selected = None
         for tf in self.TIMEFRAME_PRIORITY:
             frame = agent_data.get(tf)
             entry = self._value(frame, ("close",))
             atr = self._value(frame, ("atr", "atr_14", "atr14"))
-            if entry and atr:
+            if entry is not None and atr is not None:
                 selected = (tf, frame, entry, atr)
                 break
 
@@ -53,38 +61,53 @@ class TradePlanner:
         )
 
         buffer = 0.15 * atr
+        atr_distance = 1.5 * atr
 
         if direction == "LONG":
-            stop = entry - 1.5 * atr
+            stop = entry - atr_distance
             if support is not None and support < entry:
-                stop = min(stop, support - buffer)
+                structural_stop = support - buffer
+                structural_distance = entry - structural_stop
+                if structural_distance >= self.MIN_STOP_ATR * atr:
+                    stop = max(stop, structural_stop)
 
             risk = entry - stop
-            target = entry + 2 * risk
-
+            target = entry + 2.0 * risk
             if resistance is not None and resistance > entry:
                 target = resistance - buffer
-
         else:
-            stop = entry + 1.5 * atr
+            stop = entry + atr_distance
             if resistance is not None and resistance > entry:
-                stop = max(stop, resistance + buffer)
+                structural_stop = resistance + buffer
+                structural_distance = structural_stop - entry
+                if structural_distance >= self.MIN_STOP_ATR * atr:
+                    stop = min(stop, structural_stop)
 
             risk = stop - entry
-            target = entry - 2 * risk
-
+            target = entry - 2.0 * risk
             if support is not None and support < entry:
                 target = support + buffer
 
-        if risk <= 0 or target <= 0:
+        if not isfinite(risk) or risk <= 0 or not isfinite(target) or target <= 0:
             return {"success": False, "reason": "Invalid calculated levels"}
 
-        ratio = abs(target - entry) / risk
-        if ratio < float(min_reward_risk):
+        if direction == "LONG" and not stop < entry < target:
             return {
                 "success": False,
-                "reason": "Reward/risk below minimum",
-                "reward_risk": round(ratio, 3),
+                "reason": "Resistance leaves no valid LONG target",
+            }
+        if direction == "SHORT" and not target < entry < stop:
+            return {
+                "success": False,
+                "reason": "Support leaves no valid SHORT target",
+            }
+
+        ratio = abs(target - entry) / risk
+        if not isfinite(ratio) or ratio < min_reward_risk:
+            return {
+                "success": False,
+                "reason": "Reward/risk below minimum after structural levels",
+                "reward_risk": round(ratio, 3) if isfinite(ratio) else None,
             }
 
         return {
