@@ -1,5 +1,6 @@
 import json
 import os
+import math
 import threading
 
 from pathlib import Path
@@ -182,17 +183,25 @@ class RiskManager:
             if not self.domains[domain]["enabled"]:
                 return {"approved": False, "reason": "Domain disabled"}
 
+            try:
+                entry = float(entry)
+                stop_loss = float(stop_loss)
+                risk_pct = float(risk_pct)
+                leverage_value = float(leverage)
+                leverage = int(leverage_value)
+            except (TypeError, ValueError, OverflowError):
+                return {"approved": False, "reason": "Invalid risk settings"}
+
+            if not all(math.isfinite(v) for v in
+                       (entry, stop_loss, risk_pct, leverage_value)):
+                return {"approved": False, "reason": "Prices and risk settings must be finite"}
+            if leverage_value != leverage:
+                return {"approved": False, "reason": "Leverage must be a whole number"}
             if entry <= 0 or stop_loss <= 0:
                 return {"approved": False, "reason": "Invalid prices"}
 
             if direction not in ["LONG", "SHORT"]:
                 return {"approved": False, "reason": "Invalid direction"}
-
-            try:
-                risk_pct = float(risk_pct)
-                leverage = int(leverage)
-            except (TypeError, ValueError):
-                return {"approved": False, "reason": "Invalid risk settings"}
 
             if risk_pct <= 0 or leverage < 1:
                 return {"approved": False, "reason": "Invalid risk settings"}
