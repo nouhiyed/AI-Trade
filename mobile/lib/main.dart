@@ -1483,6 +1483,8 @@ class _TradeShellState extends State<TradeShell>
                       children: [
                         Expanded(child: _metric(tr('سعر الدخول', 'ENTRY'), entry, widget.text)),
                         Expanded(child: _metric(tr('الكمية المتبقية', 'REMAINING QTY'), quantity, widget.text)),
+                        if (domain == 'FUTURES')
+                          Expanded(child: _metric('LEVERAGE', '${position['leverage'] ?? 1}x', widget.text)),
                       ],
                     ),
                     const SizedBox(height: 12),
