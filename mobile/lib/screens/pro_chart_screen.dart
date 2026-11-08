@@ -593,7 +593,8 @@ class _AgentSubmissionScreenState extends State<AgentSubmissionScreen> {
             break;
           }
           if (requestStatus == 'NOT_FOUND' || requestStatus == 'FAILED') {
-            throw Exception(progress['reason'] ?? requestStatus);
+            lastPollingError = Exception(progress['reason'] ?? requestStatus);
+            break;
           }
           lastPollingError = null;
         } catch (error) {
