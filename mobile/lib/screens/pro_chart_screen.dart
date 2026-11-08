@@ -187,6 +187,16 @@ class _ProChartScreenState extends State<ProChartScreen> {
           : <String, dynamic>{};
       final confidence = signal['confidence'];
       final reason = signal['reason'] ?? plan['reason'] ?? '';
+      final execution = result['execution'] is Map
+          ? Map<String, dynamic>.from(result['execution'] as Map)
+          : <String, dynamic>{};
+      if (result['opened'] == true && execution['position_id'] != null) {
+        final id = '${execution['position_id']}';
+        if (!widget.positions.any((p) => '${p['position_id']}' == id)) {
+          widget.positions.add(execution);
+          _pushLevels();
+        }
+      }
       await showDialog<void>(
         context: context,
         builder: (ctx) => AlertDialog(
@@ -228,10 +238,16 @@ class _ProChartScreenState extends State<ProChartScreen> {
                 ],
                 const SizedBox(height: 10),
                 Text(
-                  t('تم إرسال التشارت للتحليل فقط؛ لم تُفتح أي صفقة.',
-                    'Chart sent for analysis only; no trade was opened.'),
-                  style: const TextStyle(color: _up, fontSize: 12,
-                      fontWeight: FontWeight.bold),
+                  result['opened'] == true
+                      ? t('وافق الوكيل وفتح صفقة DEMO بعد اجتياز فحوصات المخاطر.',
+                          'Agent approved and opened a DEMO position after risk checks.')
+                      : t('لم تُفتح صفقة؛ قرار الوكيل أو فحوصات المخاطر رفضت الدخول.',
+                          'No position opened; the agent or backend risk checks rejected entry.'),
+                  style: TextStyle(
+                    color: result['opened'] == true ? _up : widget.muted,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ],
             ),
