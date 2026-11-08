@@ -54,7 +54,11 @@ class _ProChartScreenState extends State<ProChartScreen> {
     'macd': false,
   };
 
-  static const _intervals = ['1m', '5m', '15m', '1h', '4h', '1d'];
+  List<String> get _availableIntervals {
+    if (_market == 'futures') return ['1m', '5m', '15m', '1h'];
+    if (_market == 'spot') return ['5m', '15m', '1h', '4h'];
+    return ['5m', '15m', '1h'];
+  }
   static const _markets = ['futures', 'spot', 'alpha'];
 
   String t(String ar, String en) => widget.english ? en : ar;
@@ -384,12 +388,15 @@ class _ProChartScreenState extends State<ProChartScreen> {
                         if (m == 'futures' || m == 'spot') {
                           _symbol = 'BTCUSDT';
                         }
+                        if (!_availableIntervals.contains(_interval)) {
+                          _interval = '5m';
+                        }
                       });
                       _loadSymbols();
                       _loadCandles(fit: true);
                     }),
                   const SizedBox(width: 10),
-                  for (final i in _intervals)
+                  for (final i in _availableIntervals)
                     _chip(i, _interval == i, () {
                       setState(() => _interval = i);
                       _loadCandles(fit: true);
