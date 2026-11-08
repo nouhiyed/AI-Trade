@@ -53,6 +53,7 @@ class _ProChartScreenState extends State<ProChartScreen> {
   late String _symbol;
   late String _interval;
   List<String> _symbols = [];
+  final Map<String, String> _symbolNames = {};
   double? _lastPrice;
 
   final Map<String, bool> _indicators = {
@@ -107,12 +108,16 @@ class _ProChartScreenState extends State<ProChartScreen> {
       final result = await ApiService.marketSymbols(_market);
       final raw = result['symbols'];
       final list = <String>[];
+      final names = <String, String>{};
       if (raw is List) {
         for (final item in raw) {
           if (item is String) {
             list.add(item);
           } else if (item is Map && item['symbol'] != null) {
-            list.add('${item['symbol']}');
+            final symbol = '${item['symbol']}';
+            list.add(symbol);
+            final name = '${item['name'] ?? item['display'] ?? item['ticker'] ?? ''}'.trim();
+            if (name.isNotEmpty && name != symbol) names[symbol] = name;
           }
         }
       }
@@ -120,6 +125,7 @@ class _ProChartScreenState extends State<ProChartScreen> {
         list.sort();
         setState(() {
           _symbols = list;
+          _symbolNames..clear()..addAll(names);
           if (!_symbols.contains(_symbol)) _symbol = _symbols.first;
         });
         if (_pageReady) _loadCandles(fit: true);
@@ -181,6 +187,16 @@ class _ProChartScreenState extends State<ProChartScreen> {
     _controller.runJavaScript('setLevels(${jsonEncode(levels)});');
   }
 
+  Future<void> _chartZoom(double factor) async {
+    if (!_pageReady) return;
+    try { await _controller.runJavaScript('zoomTimeScale($factor);'); } catch (_) {}
+  }
+
+  Future<void> _fitChart() async {
+    if (!_pageReady) return;
+    try { await _controller.runJavaScript('resetChartView();'); } catch (_) {}
+  }
+
   void _pushIndicators() {
     if (!_pageReady) return;
     _controller.runJavaScript('setIndicators(${jsonEncode(_indicators)});');
@@ -217,7 +233,8 @@ class _ProChartScreenState extends State<ProChartScreen> {
         return StatefulBuilder(
           builder: (ctx, setSheet) {
             final shown = _symbols
-                .where((s) => s.toUpperCase().contains(filter.toUpperCase()))
+                .where((s) => s.toUpperCase().contains(filter.toUpperCase()) ||
+                    (_symbolNames[s] ?? '').toUpperCase().contains(filter.toUpperCase()))
                 .take(80)
                 .toList();
             return Padding(
@@ -245,10 +262,9 @@ class _ProChartScreenState extends State<ProChartScreen> {
                         children: [
                           for (final s in shown)
                             ListTile(
-                              title: Text(
-                                s,
-                                style: TextStyle(color: widget.text),
-                              ),
+                              title: Text(_symbolNames[s] ?? s,
+                                style: TextStyle(color: widget.text, fontWeight: FontWeight.w700)),
+                              subtitle: Text(s, style: TextStyle(color: widget.muted, fontSize: 11)),
                               onTap: () => Navigator.pop(ctx, s),
                             ),
                         ],
@@ -343,7 +359,7 @@ class _ProChartScreenState extends State<ProChartScreen> {
                 TextButton.icon(
                   onPressed: _pickSymbol,
                   icon: const Icon(Icons.swap_horiz, size: 17),
-                  label: Text(_symbol.isEmpty ? t('اختر العملة', 'Select asset') : _symbol),
+                  label: Text(_symbol.isEmpty ? t('اختر العملة', 'Select asset') : (_symbolNames[_symbol] ?? _symbol)),
                 ),
                 const SizedBox(width: 8),
                 for (final i in _availableIntervals)
@@ -412,6 +428,17 @@ class _ProChartScreenState extends State<ProChartScreen> {
               ),
             ),
           ),
+        Padding(
+          padding: const EdgeInsetsDirectional.only(start: 8, end: 8, bottom: 3),
+          child: Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+            IconButton(tooltip: t('تكبير', 'Zoom in'), visualDensity: VisualDensity.compact,
+              onPressed: () => _chartZoom(0.72), icon: const Icon(Icons.add_circle_outline, size: 21)),
+            IconButton(tooltip: t('تصغير', 'Zoom out'), visualDensity: VisualDensity.compact,
+              onPressed: () => _chartZoom(1.38), icon: const Icon(Icons.remove_circle_outline, size: 21)),
+            IconButton(tooltip: t('ملاءمة كامل التشارت', 'Fit chart'), visualDensity: VisualDensity.compact,
+              onPressed: _fitChart, icon: const Icon(Icons.fit_screen, size: 19)),
+          ]),
+        ),
         Expanded(child: WebViewWidget(controller: _controller)),
       ],
     );
@@ -473,6 +500,7 @@ class _AgentSubmissionScreenState extends State<AgentSubmissionScreen> {
   final TextEditingController _target = TextEditingController();
   final TextEditingController _stop = TextEditingController();
   bool _sending = false;
+  bool _requestReceived = false;
   Map<String, dynamic>? _result;
   String? _error;
 
@@ -510,7 +538,7 @@ class _AgentSubmissionScreenState extends State<AgentSubmissionScreen> {
       ));
       return;
     }
-    setState(() { _sending = true; _error = null; _result = null; });
+    setState(() { _sending = true; _requestReceived = true; _error = null; _result = null; });
     try {
       final result = await ApiService.submitChartSignal(
         domain: widget.domain,
@@ -642,6 +670,22 @@ class _AgentSubmissionScreenState extends State<AgentSubmissionScreen> {
                     : t('إرسال للتحليل واتخاذ القرار', 'SEND FOR AGENT DECISION')),
               ),
             ),
+            if (_sending && _requestReceived) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(13),
+                decoration: BoxDecoration(color: widget.panel, borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xFF4287F5).withOpacity(.45))),
+                child: Row(children: [
+                  const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+                  const SizedBox(width: 10),
+                  Expanded(child: Text(
+                    t('تم استلام طلبك وإرساله للوكيل. يجري تحليل السوق ومراجعة الأسعار والمخاطر الآن...',
+                      'Request received and sent to the agent. Market, price levels and risk checks are running...'),
+                    style: TextStyle(color: widget.text, fontSize: 12, height: 1.45))),
+                ]),
+              ),
+            ],
             if (_error != null) ...[
               const SizedBox(height: 10),
               Text(_error!, style: const TextStyle(color: _down, fontSize: 12)),
@@ -712,7 +756,7 @@ const String _chartHtml = r'''
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <style>
   html, body { margin:0; padding:0; height:100%; background:#0d1117; overflow:hidden; }
-  #c { position:absolute; inset:0; }
+  #c { position:absolute; inset:0; touch-action:none; }
 </style>
 <script src="https://unpkg.com/lightweight-charts@5.0.0/dist/lightweight-charts.standalone.production.js"></script>
 </head>
@@ -725,7 +769,12 @@ var chart = LW.createChart(document.getElementById('c'), {
   layout: { background: { type: 'solid', color: '#0d1117' }, textColor: '#c9d1d9' },
   grid: { vertLines: { color: '#1c2128' }, horzLines: { color: '#1c2128' } },
   crosshair: { mode: 0 },
-  rightPriceScale: { borderColor: '#2b3139' },
+  handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true },
+  handleScale: {
+    axisPressedMouseMove: { time: true, price: true },
+    axisDoubleClickReset: true, mouseWheel: true, pinch: true
+  },
+  rightPriceScale: { borderColor: '#2b3139', autoScale: true },
   timeScale: { borderColor: '#2b3139', timeVisible: true, secondsVisible: false }
 });
 var candle = chart.addSeries(LW.CandlestickSeries, {
@@ -873,6 +922,17 @@ function setCandles(arr, fit) {
   }));
   drawIndicators();
   if (fit) chart.timeScale().fitContent();
+}
+function zoomTimeScale(factor) {
+  var range = chart.timeScale().getVisibleLogicalRange();
+  if (!range) return;
+  var center = (range.from + range.to) / 2;
+  var half = Math.max(3, (range.to - range.from) * factor / 2);
+  chart.timeScale().setVisibleLogicalRange({ from: center - half, to: center + half });
+}
+function resetChartView() {
+  chart.timeScale().fitContent();
+  candle.priceScale().applyOptions({ autoScale: true });
 }
 function setIndicators(f) { flags = f; drawIndicators(); }
 function setLevels(levels) {

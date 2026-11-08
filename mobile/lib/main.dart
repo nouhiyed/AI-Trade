@@ -651,13 +651,8 @@ class _TradeShellState extends State<TradeShell>
           children: [
             _topBar(),
             Expanded(
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 300),
-                child: KeyedSubtree(
-                  key: ValueKey(page),
-                  child: pages[page],
-                ),
-              ),
+              // Keep pages mounted so navigation never resets autopilot controls.
+              child: IndexedStack(index: page, children: pages),
             ),
             _bottomBar(titles),
           ],

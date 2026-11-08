@@ -63,9 +63,13 @@ class AlphaFeed:
             if not alpha_id or not price or price <= 0:
                 continue
             symbol = alpha_id.upper() + "USDT"
+            ticker = str(token.get("symbol") or "").strip().upper()
+            token_name = str(token.get("name") or ticker or alpha_id).strip()
             rows[symbol] = {
                 "symbol": symbol,
-                "display": str(token.get("symbol", "")).upper(),
+                "name": token_name,
+                "ticker": ticker,
+                "display": ticker or token_name.upper(),
                 "price": price,
                 "volume_24h": _f(token.get("volume24h"), 0.0),
                 "liquidity": _f(token.get("liquidity"), 0.0),
@@ -77,6 +81,19 @@ class AlphaFeed:
         with self._lock:
             self._cache = (now, rows)
         return rows
+
+    def symbols(self):
+        """Return Binance Alpha token names and symbols for the mobile selector."""
+        items = []
+        for row in self._tokens().values():
+            items.append({
+                "symbol": row["symbol"],
+                "name": row.get("name") or row.get("display") or row["symbol"],
+                "display": row.get("display") or row["symbol"],
+                "ticker": row.get("ticker") or row.get("display") or "",
+                "chain_id": row.get("chain_id", ""),
+            })
+        return sorted(items, key=lambda item: (str(item["name"]).casefold(), item["symbol"]))
 
     def token(self, symbol):
         row = self._tokens().get(str(symbol).upper())

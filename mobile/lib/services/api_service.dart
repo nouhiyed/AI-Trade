@@ -9,19 +9,20 @@ class ApiService {
     String method,
     String path, {
     Map<String, dynamic>? body,
+    Duration? requestTimeout,
   }) async {
     final uri = Uri.parse('$baseUrl$path');
     late http.Response response;
 
     try {
       if (method == 'GET') {
-        response = await http.get(uri).timeout(timeout);
+        response = await http.get(uri).timeout(requestTimeout ?? timeout);
       } else {
         response = await http.post(
           uri,
           headers: {'Content-Type': 'application/json'},
           body: jsonEncode(body ?? {}),
-        ).timeout(timeout);
+        ).timeout(requestTimeout ?? timeout);
       }
 
       final decoded = jsonDecode(response.body);
@@ -97,7 +98,7 @@ class ApiService {
         'entry_price': entryPrice,
         'take_profit': takeProfit,
         'stop_loss': stopLoss,
-      });
+      }, requestTimeout: const Duration(seconds: 90));
 
   static Future<Map<String, dynamic>> tradeChart({
     required String tradeId,

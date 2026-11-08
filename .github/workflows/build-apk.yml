@@ -56,6 +56,13 @@ jobs:
         working-directory: mobile
         run: flutter create --platforms=android --project-name ai_trade .
 
+      - name: Install persistent Android background service
+        working-directory: mobile
+        run: |
+          mkdir -p android/app/src/main/kotlin/com/example/ai_trade
+          cp android_templates/MainActivity.kt android/app/src/main/kotlin/com/example/ai_trade/MainActivity.kt
+          cp android_templates/TradingKeepAliveService.kt android/app/src/main/kotlin/com/example/ai_trade/TradingKeepAliveService.kt
+
       - name: Configure Gradle distribution download
         working-directory: mobile
         run: |
@@ -88,9 +95,16 @@ jobs:
           p = Path("android/app/src/main/AndroidManifest.xml")
           s = p.read_text()
 
-          permission = '<uses-permission android:name="android.permission.INTERNET" />'
-          if permission not in s:
-              s = s.replace("<application", permission + "\n    <application", 1)
+          permissions = [
+              '<uses-permission android:name="android.permission.INTERNET" />',
+              '<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />',
+              '<uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />',
+              '<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />',
+              '<uses-permission android:name="android.permission.WAKE_LOCK" />',
+          ]
+          for permission in permissions:
+              if permission not in s:
+                  s = s.replace("<application", permission + "\n    <application", 1)
 
           match = re.search(r'<application\b[^>]*', s)
           if not match:
@@ -99,6 +113,19 @@ jobs:
           tag = match.group(0)
           if "android:usesCleartextTraffic=" not in tag:
               s = s[:match.end()] + ' android:usesCleartextTraffic="true"' + s[match.end():]
+
+          service = """        <service
+              android:name=".TradingKeepAliveService"
+              android:enabled="true"
+              android:exported="false"
+              android:foregroundServiceType="specialUse">
+              <property
+                  android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                  android:value="Keeps AI-Trader market monitoring and risk monitoring active while the app is in the background" />
+          </service>
+          """
+          if 'android:name=".TradingKeepAliveService"' not in s:
+              s = s.replace("</application>", service + "    </application>", 1)
 
           p.write_text(s)
           print("Android network permissions configured")

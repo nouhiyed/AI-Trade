@@ -37,7 +37,7 @@ class APIHandler(BaseHTTPRequestHandler):
             if path == "/market/symbols":
                 market = params.get("market", ["spot"])[0].lower()
                 if market == "alpha":
-                    symbols = coordinator.market_feed.fetch_alpha_symbols()
+                    symbols = coordinator.alpha_feed.symbols()
                 elif market in {"spot", "futures"}:
                     symbols = coordinator.market_feed.fetch_symbols(market)
                 else:
@@ -253,9 +253,9 @@ class APIHandler(BaseHTTPRequestHandler):
                     take_profit=data.get("take_profit"),
                     stop_loss=data.get("stop_loss"),
                 )
-                return self.send_json(
-                    result, 200 if result.get("success") else 400
-                )
+                # A rejection is a valid, completed agent decision.
+                # Return its structured status/reason instead of hiding it as an HTTP error.
+                return self.send_json(result, 200)
 
             if path == "/emergency-stop":
                 return self.send_json(coordinator.emergency_stop_all())
