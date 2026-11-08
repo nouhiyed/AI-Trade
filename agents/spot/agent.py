@@ -194,6 +194,19 @@ class SpotAgent(BaseAgent):
             if confidence < 25:
                 direction = "WAIT"
 
+        if direction == "WAIT":
+            if total == 0:
+                reason = "No valid BUY or SELL evidence across the required timeframes"
+            elif scores["BUY"] == scores["SELL"]:
+                reason = "BUY and SELL scores are balanced"
+            else:
+                reason = (
+                    f"Directional confidence {confidence:.2f}% is below "
+                    "the 25% decision threshold"
+                )
+        else:
+            reason = "Spot technical + SMC + Order Book analysis"
+
         return self.record_signal({
             "symbol": market_data.get("symbol", "UNKNOWN"),
             "direction": direction,
@@ -204,6 +217,6 @@ class SpotAgent(BaseAgent):
                 "used": orderbook_used,
                 "imbalance": imbalance
             },
-            "reason": "Spot technical + SMC + Order Book analysis"
+            "reason": reason
         })
 
