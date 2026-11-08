@@ -157,6 +157,22 @@ class TestAlpha(Base):
 
 
 class TestAutopilotMarkets(Base):
+    def test_autopilot_config_persists_across_backend_restart(self):
+        config_path = "config/autopilot-persist.json"
+        first = Autopilot(self.c, config_path=config_path)
+        first.update({
+            "enabled": True,
+            "trade_futures": False,
+            "trade_alpha": True,
+            "risk_pct": 0.35,
+        })
+
+        restored = Autopilot(self.c, config_path=config_path)
+        self.assertTrue(restored.config["enabled"])
+        self.assertFalse(restored.config["trade_futures"])
+        self.assertTrue(restored.config["trade_alpha"])
+        self.assertAlmostEqual(restored.config["risk_pct"], 0.35)
+
     def test_all_agents_are_scanned_when_entry_slots_are_full(self):
         self.c.demo_positions["already-open"] = {
             "symbol": "BTCUSDT", "status": "DEMO_OPEN"}
