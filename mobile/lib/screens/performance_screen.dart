@@ -149,6 +149,10 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
     final risk = (double.tryParse('${cfg['risk_pct']}') ?? 0.5).clamp(0.1, 1.0).toDouble();
     final last = _map(_auto['last_result']);
     final opened = last['opened'] is List ? (last['opened'] as List).length : 0;
+    final rejections = _map(last['rejections']);
+    final skipped = last['skipped'] is List
+        ? (last['skipped'] as List).whereType<Map>().take(4).toList()
+        : <Map>[];
 
     Widget slider(String label, double value, double min, double max,
         int? divisions, String key, {bool asInt = false}) {
@@ -238,6 +242,33 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
             ),
           ],
         ),
+        if (last.isNotEmpty) ...[
+          const SizedBox(height: 9),
+          Text(
+            '${t('فُحص', 'Scanned')} ${last['scanned'] ?? 0} · '
+            '${t('فرص قابلة للتنفيذ', 'Actionable')} ${last['actionable'] ?? 0}',
+            style: TextStyle(color: widget.muted, fontSize: 10),
+          ),
+          for (final domainEntry in rejections.entries)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                '${domainEntry.key.toString().toUpperCase()}: '
+                '${_map(domainEntry.value).entries.map((e) => '${e.key} (${e.value})').join(' · ')}',
+                style: TextStyle(color: widget.muted, fontSize: 10),
+              ),
+            ),
+          for (final item in skipped)
+            Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child: Text(
+                '${item['domain'] ?? ''} ${item['symbol'] ?? ''}: ${item['reason'] ?? ''}',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: _red, fontSize: 10),
+              ),
+            ),
+        ],
       ],
     ));
   }
