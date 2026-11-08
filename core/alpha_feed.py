@@ -64,7 +64,13 @@ class AlphaFeed:
                 continue
             symbol = alpha_id.upper() + "USDT"
             ticker = str(token.get("symbol") or "").strip().upper()
-            token_name = str(token.get("name") or ticker or alpha_id).strip()
+            token_name = str(
+                token.get("name")
+                or token.get("tokenName")
+                or token.get("cexCoinName")
+                or ticker
+                or alpha_id
+            ).strip()
             rows[symbol] = {
                 "symbol": symbol,
                 "name": token_name,
