@@ -1,7 +1,122 @@
-import 'dart:convert';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
+
+double? _price(dynamic value) {
+  final parsed = double.tryParse('${value ?? ''}');
+  return parsed != null && parsed.isFinite && parsed > 0 ? parsed : null;
+}
+
+class HistoricalTradeChartPainter extends CustomPainter {
+  final List<Map<String, dynamic>> candles;
+  final String symbol, direction, timeframe;
+  final double? entry, exit, stopLoss, takeProfit;
+
+  HistoricalTradeChartPainter({
+    required this.candles,
+    required this.symbol,
+    required this.direction,
+    required this.timeframe,
+    required this.entry,
+    required this.exit,
+    required this.stopLoss,
+    required this.takeProfit,
+  });
+
+  static const Color up = Color(0xFF26A69A);
+  static const Color down = Color(0xFFEF5350);
+  static const Color entryColor = Color(0xFF4287F5);
+  static const Color exitColor = Color(0xFFF5A623);
+  static const Color grid = Color(0xFF252D39);
+  static const Color foreground = Color(0xFFD5DEEA);
+
+  void _text(Canvas canvas, String value, Offset offset, Color color, {double size = 10}) {
+    final painter = TextPainter(
+      text: TextSpan(text: value, style: TextStyle(
+        color: color, fontSize: size, fontWeight: FontWeight.w700,
+      )),
+      textDirection: TextDirection.ltr,
+      maxLines: 1,
+    )..layout(maxWidth: 150);
+    painter.paint(canvas, offset);
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (candles.isEmpty || size.width <= 0 || size.height <= 0) return;
+    const left = 10.0, right = 105.0, top = 34.0, bottom = 25.0;
+    final plotW = size.width - left - right;
+    final plotH = size.height - top - bottom;
+    if (plotW <= 0 || plotH <= 0) return;
+
+    final values = <double>[];
+    for (final candle in candles) {
+      for (final key in ['high', 'low']) {
+        final value = _price(candle[key]);
+        if (value != null) values.add(value);
+      }
+    }
+    for (final value in [entry, exit, stopLoss, takeProfit]) {
+      if (value != null) values.add(value);
+    }
+    if (values.isEmpty) return;
+    var minPrice = values.reduce((a, b) => a < b ? a : b);
+    var maxPrice = values.reduce((a, b) => a > b ? a : b);
+    final padding = (maxPrice - minPrice) * .06;
+    minPrice -= padding == 0 ? minPrice * .001 : padding;
+    maxPrice += padding == 0 ? maxPrice * .001 : padding;
+
+    double y(double price) => top + (maxPrice - price) / (maxPrice - minPrice) * plotH;
+    final gridPaint = Paint()..color = grid..strokeWidth = 1;
+    for (var i = 0; i <= 5; i++) {
+      final gy = top + plotH * i / 5;
+      canvas.drawLine(Offset(left, gy), Offset(left + plotW, gy), gridPaint);
+      final price = maxPrice - (maxPrice - minPrice) * i / 5;
+      _text(canvas, price.toStringAsPrecision(6), Offset(left + plotW + 5, gy - 6), foreground, size: 8);
+    }
+
+    final step = plotW / candles.length;
+    final bodyWidth = (step * .62).clamp(1.0, 9.0);
+    final wickPaint = Paint()..strokeWidth = 1;
+    for (var i = 0; i < candles.length; i++) {
+      final c = candles[i];
+      final o = _price(c['open']), h = _price(c['high']);
+      final l = _price(c['low']), close = _price(c['close']);
+      if (o == null || h == null || l == null || close == null) continue;
+      final x = left + step * (i + .5);
+      final color = close >= o ? up : down;
+      wickPaint.color = color;
+      canvas.drawLine(Offset(x, y(h)), Offset(x, y(l)), wickPaint);
+      final topBody = y(o) < y(close) ? y(o) : y(close);
+      final bottomBody = y(o) > y(close) ? y(o) : y(close);
+      final rect = Rect.fromLTRB(
+        x - bodyWidth / 2, topBody, x + bodyWidth / 2,
+        bottomBody > topBody ? bottomBody : topBody + 1,
+      );
+      canvas.drawRect(rect, Paint()..color = color);
+    }
+
+    void level(String label, double? price, Color color) {
+      if (price == null) return;
+      final py = y(price);
+      final paint = Paint()..color = color..strokeWidth = 1.7;
+      canvas.drawLine(Offset(left, py), Offset(left + plotW, py), paint);
+      final labelRect = Rect.fromLTWH(left + plotW + 2, py - 8, right - 7, 16);
+      canvas.drawRect(labelRect, Paint()..color = color);
+      _text(canvas, '$label ${price.toStringAsPrecision(7)}',
+        Offset(left + plotW + 5, py - 5), Colors.white, size: 8);
+    }
+
+    _text(canvas, '$symbol  $direction  $timeframe',
+      const Offset(left, 8), foreground, size: 11);
+    level('TP', takeProfit, up);
+    level('ENTRY', entry, entryColor);
+    level('EXIT', exit, exitColor);
+    level('SL', stopLoss, down);
+  }
+
+  @override
+  bool shouldRepaint(covariant HistoricalTradeChartPainter oldDelegate) => true;
+}
 
 class ClosedTradeDetailScreen extends StatefulWidget {
   final Map<String, dynamic> trade;
@@ -23,7 +138,7 @@ class ClosedTradeDetailScreen extends StatefulWidget {
 }
 
 class _ClosedTradeDetailScreenState extends State<ClosedTradeDetailScreen> {
-  Uint8List? _image;
+  List<Map<String, dynamic>> _candles = [];
   bool _loading = true;
   String? _error;
   Map<String, dynamic> _chart = {};
@@ -44,14 +159,15 @@ class _ClosedTradeDetailScreenState extends State<ClosedTradeDetailScreen> {
     }
     try {
       final result = await ApiService.tradeChart(tradeId: id);
-      final encoded = result['image_base64'];
-      if (encoded is! String || encoded.isEmpty) {
-        throw Exception(t('لم تصل صورة التشارت من الخادم.', 'Chart image was not returned.'));
+      final raw = result['candles'];
+      if (raw is! List || raw.isEmpty) {
+        throw Exception(t('لا توجد شموع تاريخية لهذه الصفقة.', 'No historical candles were returned.'));
       }
       if (!mounted) return;
       setState(() {
         _chart = result;
-        _image = base64Decode(encoded);
+        _candles = raw.whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item)).toList();
         _loading = false;
       });
     } catch (e) {
@@ -146,10 +262,24 @@ class _ClosedTradeDetailScreenState extends State<ClosedTradeDetailScreen> {
               ),
               child: _loading
                   ? const SizedBox(height: 250, child: Center(child: CircularProgressIndicator()))
-                  : _image != null
+                  : _candles.isNotEmpty
                       ? ClipRRect(
                           borderRadius: BorderRadius.circular(10),
-                          child: Image.memory(_image!, fit: BoxFit.contain),
+                          child: AspectRatio(
+                            aspectRatio: 1.45,
+                            child: CustomPaint(
+                              painter: HistoricalTradeChartPainter(
+                                candles: _candles,
+                                symbol: symbol,
+                                direction: direction,
+                                timeframe: timeframe,
+                                entry: _price(_chart['entry'] ?? trade['entry'] ?? trade['entry_price']),
+                                exit: _price(_chart['exit'] ?? trade['exit_price'] ?? trade['close_price']),
+                                stopLoss: _price(_chart['stop_loss'] ?? trade['stop_loss']),
+                                takeProfit: _price(_chart['take_profit'] ?? trade['take_profit']),
+                              ),
+                            ),
+                          ),
                         )
                       : Padding(
                           padding: const EdgeInsets.all(18),
@@ -165,6 +295,15 @@ class _ClosedTradeDetailScreenState extends State<ClosedTradeDetailScreen> {
                 'Blue = entry, orange = exit, red = stop loss, green = take profit.'),
               style: TextStyle(color: widget.muted, fontSize: 11, height: 1.5),
             ),
+            if (_chart['timeframe_recorded'] == false)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  t('هذه صفقة قديمة لم يكن إطارها الزمني محفوظاً؛ يظهر 5m كقيمة افتراضية وليست مؤكدة.',
+                    'This legacy trade has no saved timeframe; 5m is shown as a fallback, not a verified value.'),
+                  style: const TextStyle(color: Color(0xFFF5A623), fontSize: 10),
+                ),
+              ),
           ],
         ),
       ),
