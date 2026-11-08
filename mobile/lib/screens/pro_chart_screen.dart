@@ -510,6 +510,7 @@ class _AgentSubmissionScreenState extends State<AgentSubmissionScreen> {
   final TextEditingController _stop = TextEditingController();
   bool _sending = false;
   bool _requestReceived = false;
+  String? _requestId;
   Map<String, dynamic>? _result;
   String? _error;
 
@@ -550,6 +551,7 @@ class _AgentSubmissionScreenState extends State<AgentSubmissionScreen> {
     setState(() {
       _sending = true;
       _requestReceived = false;
+      _requestId = null;
       _error = null;
       _result = null;
     });
@@ -569,23 +571,42 @@ class _AgentSubmissionScreenState extends State<AgentSubmissionScreen> {
           'The server did not confirm receipt of the request.',
         ));
       }
-      if (mounted) setState(() => _requestReceived = true);
+      if (mounted) {
+        setState(() {
+          _requestReceived = true;
+          _requestId = requestId;
+        });
+      }
 
       Map<String, dynamic>? decision;
-      for (var attempt = 0; attempt < 60; attempt++) {
+      Object? lastPollingError;
+      // Keep waiting through brief mobile-network interruptions; one failed poll
+      // must not erase the server's acknowledgement or the pending request.
+      for (var attempt = 0; attempt < 90; attempt++) {
         await Future.delayed(const Duration(seconds: 2));
         if (!mounted) return;
-        final progress = await ApiService.agentSubmissionStatus(requestId);
-        if (progress['request_status'] == 'COMPLETED' && progress['result'] is Map) {
-          decision = Map<String, dynamic>.from(progress['result'] as Map);
-          break;
+        try {
+          final progress = await ApiService.agentSubmissionStatus(requestId);
+          final requestStatus = '${progress['request_status'] ?? ''}'.toUpperCase();
+          if (requestStatus == 'COMPLETED' && progress['result'] is Map) {
+            decision = Map<String, dynamic>.from(progress['result'] as Map);
+            break;
+          }
+          if (requestStatus == 'NOT_FOUND' || requestStatus == 'FAILED') {
+            throw Exception(progress['reason'] ?? requestStatus);
+          }
+          lastPollingError = null;
+        } catch (error) {
+          lastPollingError = error;
+          // Retry transient transport errors until the full wait window expires.
         }
       }
       if (decision == null) {
-        throw Exception(t(
-          'انتهت مهلة انتظار قرار الوكيل. تحقق من اتصال الخادم.',
-          'Timed out waiting for the agent decision. Check the server connection.',
-        ));
+        throw Exception(
+          '${t('لم يصل قرار الوكيل خلال المهلة. رقم الطلب: ', 'No agent decision arrived before timeout. Request ID: ')}'
+          '${requestId}'
+          '${lastPollingError == null ? '' : ' • $lastPollingError'}',
+        );
       }
       if (mounted) setState(() => _result = decision);
     } catch (e) {
@@ -619,7 +640,7 @@ class _AgentSubmissionScreenState extends State<AgentSubmissionScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final status = '${_result?['decision_status'] ?? ''}'.toUpperCase();
+    final status = '${_result?['decision_status'] ?? (_result?['opened'] == true ? 'APPROVED' : 'REJECTED')}'.toUpperCase();
     final approved = status == 'APPROVED';
     final direction = _result?['signal'] is Map
         ? ((_result!['signal'] as Map)['direction'] ?? '—')
@@ -719,8 +740,8 @@ class _AgentSubmissionScreenState extends State<AgentSubmissionScreen> {
                   const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
                   const SizedBox(width: 10),
                   Expanded(child: Text(
-                    t('تم استلام طلبك وإرساله للوكيل. يجري تحليل السوق ومراجعة الأسعار والمخاطر الآن...',
-                      'Request received and sent to the agent. Market, price levels and risk checks are running...'),
+                    '${t('تم استلام الطلب من الخادم وإرساله للوكيل المختص. يجري التحليل الآن.', 'Server confirmed receipt and forwarded the request to the selected agent. Analysis is running.')}'
+                    '${_requestId == null ? '' : '\\nID: $_requestId'}',
                     style: TextStyle(color: widget.text, fontSize: 12, height: 1.45))),
                 ]),
               ),
