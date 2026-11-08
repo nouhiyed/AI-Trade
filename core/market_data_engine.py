@@ -16,8 +16,8 @@ class MarketDataEngine:
 
         self.timeframes = {
             "futures": ["1m", "5m", "15m", "1h"],
-            "spot": ["5m", "15m", "1h", "4h"],
-            "alpha": ["5m", "15m", "1h"],
+            "spot": ["1m", "5m", "15m", "1h", "4h"],
+            "alpha": ["1m", "5m", "15m", "1h"],
         }
 
         self.structure_columns = [
