@@ -93,7 +93,7 @@ class _TradeShellState extends State<TradeShell>
   bool running = true;
   bool apiOnline = false;
   bool apiBusy = false;
-  Map<String, dynamic> paperData = {};
+  Map<String, dynamic> demoData = {};
   Map<String, dynamic> agentControls = {};
   final Set<String> closingPositionIds = {};
   Timer? _refreshTimer;
@@ -282,7 +282,7 @@ class _TradeShellState extends State<TradeShell>
         await _loadMarketCandles(market);
       }
 
-      final rawPositions = paperData['open_positions'];
+      final rawPositions = demoData['open_positions'];
       if (rawPositions is List) {
         final refreshed = <String>{};
         for (final item in rawPositions) {
@@ -465,7 +465,7 @@ class _TradeShellState extends State<TradeShell>
     );
   }
 
-  Future<void> _closePaperPosition(Map<String, dynamic> position) async {
+  Future<void> _closeDemoPosition(Map<String, dynamic> position) async {
     final id = '${position['id'] ?? position['position_id'] ?? position['trade_id'] ?? ''}';
     if (id.isEmpty || closingPositionIds.contains(id)) return;
 
@@ -534,12 +534,12 @@ class _TradeShellState extends State<TradeShell>
     final demo = data['demo'];
     final controls = data['controls'];
     apiOnline = true;
-    paperData = demo is Map
+    demoData = demo is Map
         ? Map<String, dynamic>.from(demo)
         : <String, dynamic>{};
-    final raw = paperData['open_positions'] ??
-        paperData['positions'] ??
-        paperData['items'];
+    final raw = demoData['open_positions'] ??
+        demoData['positions'] ??
+        demoData['items'];
     final positions = raw is List
         ? raw.whereType<Map>().map((item) {
             final position = Map<String, dynamic>.from(item);
@@ -550,7 +550,7 @@ class _TradeShellState extends State<TradeShell>
             return position;
           }).where((item) => item['id'].toString().isNotEmpty).toList()
         : <Map<String, dynamic>>[];
-    paperData['open_positions'] = positions;
+    demoData['open_positions'] = positions;
     agentControls = controls is Map
         ? Map<String, dynamic>.from(controls)
         : <String, dynamic>{};
@@ -1060,14 +1060,14 @@ class _TradeShellState extends State<TradeShell>
 
 
   Widget _portfolioCard() {
-    final rawSummary = paperData['account_summary'];
+    final rawSummary = demoData['account_summary'];
     final summary = rawSummary is Map
         ? Map<String, dynamic>.from(rawSummary)
         : <String, dynamic>{};
 
     String money(List<String> keys) {
       for (final key in keys) {
-        final value = summary[key] ?? paperData[key];
+        final value = summary[key] ?? demoData[key];
         final number = double.tryParse('$value');
         if (number != null) {
           return '\$${number.toStringAsFixed(2)}';
@@ -1083,11 +1083,11 @@ class _TradeShellState extends State<TradeShell>
     final unrealized = money(['unrealized_pnl', 'unrealized_profit']);
     final realized = money(['realized_pnl', 'realized_profit']);
     final fees = money(['total_fees', 'fees']);
-    final openCount = paperData['open_count'] ??
-        (paperData['open_positions'] is List
-            ? (paperData['open_positions'] as List).length
+    final openCount = demoData['open_count'] ??
+        (demoData['open_positions'] is List
+            ? (demoData['open_positions'] as List).length
             : 0);
-    final totalTrades = paperData['total_trades'] ?? 0;
+    final totalTrades = demoData['total_trades'] ?? 0;
 
     return _panel(
       child: Column(
@@ -1403,7 +1403,7 @@ class _TradeShellState extends State<TradeShell>
       );
 
   void _openProChart() {
-    final raw = paperData['open_positions'];
+    final raw = demoData['open_positions'];
     final positions = raw is List
         ? raw
             .whereType<Map>()
@@ -1559,7 +1559,7 @@ class _TradeShellState extends State<TradeShell>
   }
 
   Widget _openPositionsSection() {
-    final raw = paperData['open_positions'];
+    final raw = demoData['open_positions'];
     final positions = raw is List
         ? raw
             .whereType<Map>()
@@ -1648,7 +1648,7 @@ class _TradeShellState extends State<TradeShell>
                         ),
                         onPressed: !apiOnline || isClosing
                             ? null
-                            : () => _closePaperPosition(position),
+                            : () => _closeDemoPosition(position),
                         icon: isClosing
                             ? const SizedBox(
                                 width: 17,
