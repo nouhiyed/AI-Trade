@@ -1,4 +1,5 @@
 import json
+import base64
 import os
 import math
 import threading
@@ -9,6 +10,7 @@ from core.coordinator import TradingCoordinator
 from core.autopilot import Autopilot
 from core.market_context import MarketContext
 from core import performance
+from core.chart_image import render_trade_chart
 
 initial_balance = float(os.environ.get("DEMO_INITIAL_BALANCE", "1000"))
 if not math.isfinite(initial_balance) or initial_balance <= 0:
@@ -86,6 +88,107 @@ class APIHandler(BaseHTTPRequestHandler):
                     "source": candles.attrs.get("source", "binance_rest"),
                     "received_at": candles.attrs.get("received_at")
                 })
+            if path == "/journal/chart":
+                trade_id = str(params.get("trade_id", [""])[0]).strip()
+                if not trade_id:
+                    return self.send_json({"success": False, "reason": "Missing trade_id"}, 400)
+                trade = next(
+                    (item for item in coordinator.journal.recent(500)
+                     if str(item.get("trade_id")) == trade_id),
+                    None,
+                )
+                if trade is None:
+                    return self.send_json({"success": False, "reason": "Trade not found in journal"}, 404)
+
+                context = trade.get("context") or {}
+                if not isinstance(context, dict):
+                    context = {}
+                timeframe = str(
+                    trade.get("timeframe")
+                    or context.get("chart_timeframe")
+                    or context.get("timeframe")
+                    or "5m"
+                ).lower()
+                interval_ms = {
+                    "1m": 60000, "3m": 180000, "5m": 300000,
+                    "15m": 900000, "30m": 1800000, "1h": 3600000,
+                    "2h": 7200000, "4h": 14400000, "6h": 21600000,
+                    "8h": 28800000, "12h": 43200000, "1d": 86400000,
+                }
+                if timeframe not in interval_ms:
+                    timeframe = "5m"
+                step = interval_ms[timeframe]
+
+                def stamp(value):
+                    number = int(value or 0)
+                    return number * 1000 if 0 < number < 1000000000000 else number
+
+                opened = stamp(trade.get("opened_at") or trade.get("opened_at_ms"))
+                closed = stamp(trade.get("closed_at") or trade.get("closed_at_ms"))
+                if opened:
+                    start_time = max(0, opened - 35 * step)
+                    end_time = (closed or opened + 120 * step) + 35 * step
+                    if end_time - start_time > 999 * step:
+                        start_time = max(0, end_time - 999 * step)
+                else:
+                    start_time = end_time = None
+
+                domain = str(trade.get("domain", "futures")).lower()
+                market = "spot" if domain == "spot" else "futures"
+                symbol = str(trade.get("symbol", "")).upper()
+                if not symbol:
+                    return self.send_json({"success": False, "reason": "Trade symbol is missing"}, 400)
+
+                if domain == "alpha":
+                    candles_frame = coordinator.market_feed.fetch_alpha_candles(
+                        symbol, timeframe, limit=1000,
+                        start_time=start_time, end_time=end_time,
+                    )
+                else:
+                    candles_frame = coordinator.market_feed.fetch_candles(
+                        market, symbol, timeframe, limit=1000,
+                        closed_only=False, start_time=start_time, end_time=end_time,
+                    )
+                candles = candles_frame[["open", "high", "low", "close"]].to_dict("records")
+                entry = trade.get("entry")
+                stop = trade.get("stop_loss")
+                target = trade.get("take_profit")
+                exit_price = trade.get("exit_price")
+                if entry is None or stop is None or target is None:
+                    return self.send_json({
+                        "success": False,
+                        "reason": "This archived trade is missing entry or protection levels",
+                    }, 422)
+                opened_label = str(opened) if opened else "unknown"
+                png = render_trade_chart(
+                    candles, trade.get("direction", "LONG"), float(entry),
+                    float(stop), float(target), symbol=symbol,
+                    exit_price=float(exit_price) if exit_price is not None else None,
+                    timeframe=timeframe, opened_at=opened_label,
+                    closed_at=str(closed) if closed else None,
+                )
+                if not png:
+                    return self.send_json({
+                        "success": False,
+                        "reason": "PNG chart rendering is unavailable (Pillow is not installed)",
+                    }, 503)
+                return self.send_json({
+                    "success": True,
+                    "trade_id": trade_id,
+                    "symbol": symbol,
+                    "market": domain,
+                    "timeframe": timeframe,
+                    "image_base64": base64.b64encode(png).decode("ascii"),
+                    "entry": entry,
+                    "exit": exit_price,
+                    "stop_loss": stop,
+                    "take_profit": target,
+                    "net_pnl": trade.get("net_pnl"),
+                    "close_reason": trade.get("close_reason"),
+                    "opened_at": opened,
+                    "closed_at": closed,
+                })
+
             if path == "/performance":
                 return self.send_json(
                     performance.compute(coordinator.journal.closed_trades()))
@@ -136,6 +239,9 @@ class APIHandler(BaseHTTPRequestHandler):
                     domain=data.get("domain", ""),
                     symbol=data.get("symbol", ""),
                     timeframe=data.get("timeframe", "5m"),
+                    entry_price=data.get("entry_price"),
+                    take_profit=data.get("take_profit"),
+                    stop_loss=data.get("stop_loss"),
                 )
                 return self.send_json(
                     result, 200 if result.get("success") else 400
