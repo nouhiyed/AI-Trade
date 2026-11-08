@@ -642,8 +642,8 @@ class _TradeShellState extends State<TradeShell>
 
       if (success) {
         notify(tr(
-          'تم إرسال طلب إغلاق المركز.',
-          'Position close request submitted.',
+          'تم إغلاق الصفقة وحفظها في الأرشيف.',
+          'Trade closed and saved to the archive.',
         ));
         await _refreshStatus();
       } else {
@@ -1689,6 +1689,9 @@ class _TradeShellState extends State<TradeShell>
               '${trade['net_pnl'] ?? trade['realized_pnl'] ?? 0}',
             ) ?? 0;
             final reason = '${trade['close_reason'] ?? 'CLOSED'}'.toUpperCase();
+            final outcomeLabel = pnlValue > 0
+                ? tr('رابحة', 'WIN')
+                : pnlValue < 0 ? tr('خاسرة', 'LOSS') : tr('تعادل', 'BREAKEVEN');
             final closedAt = trade['closed_at'] ?? trade['closed_at_ms'];
             String closedLabel = '—';
             if (closedAt != null) {
@@ -1742,6 +1745,8 @@ class _TradeShellState extends State<TradeShell>
                           _pill(direction, direction == 'SHORT' ? red : green),
                           const SizedBox(width: 6),
                           _pill(domain, blue),
+                          const SizedBox(width: 5),
+                          _pill(outcomeLabel, pnlValue >= 0 ? green : red),
                           const SizedBox(width: 5),
                           Icon(Icons.open_in_new, color: widget.muted, size: 15),
                         ],
