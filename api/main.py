@@ -1,5 +1,4 @@
 import json
-import base64
 import os
 import math
 import threading
@@ -10,7 +9,6 @@ from core.coordinator import TradingCoordinator
 from core.autopilot import Autopilot
 from core.market_context import MarketContext
 from core import performance
-from core.chart_image import render_trade_chart
 
 initial_balance = float(os.environ.get("DEMO_INITIAL_BALANCE", "1000"))
 if not math.isfinite(initial_balance) or initial_balance <= 0:
@@ -167,28 +165,16 @@ class APIHandler(BaseHTTPRequestHandler):
                         "success": False,
                         "reason": "This archived trade is missing entry or protection levels",
                     }, 422)
-                def readable_stamp(value):
-                    if not value:
-                        return None
-                    from datetime import datetime, timezone
-                    return datetime.fromtimestamp(
-                        value / 1000, tz=timezone.utc
-                    ).strftime("%Y-%m-%d %H:%M UTC")
-
-                opened_label = readable_stamp(opened) or "unknown"
-                closed_label = readable_stamp(closed)
-                png = render_trade_chart(
-                    candles, trade.get("direction", "LONG"), float(entry),
-                    float(stop), float(target), symbol=symbol,
-                    exit_price=float(exit_price) if exit_price is not None else None,
-                    timeframe=timeframe, opened_at=opened_label,
-                    closed_at=closed_label,
-                )
-                if not png:
-                    return self.send_json({
-                        "success": False,
-                        "reason": "PNG chart rendering is unavailable (Pillow is not installed)",
-                    }, 503)
+                candle_records = []
+                for row in candles_frame.itertuples(index=False):
+                    candle_records.append({
+                        "time": int(row.open_time.timestamp()),
+                        "open": float(row.open),
+                        "high": float(row.high),
+                        "low": float(row.low),
+                        "close": float(row.close),
+                        "volume": float(row.volume),
+                    })
                 return self.send_json({
                     "success": True,
                     "trade_id": trade_id,
@@ -196,7 +182,7 @@ class APIHandler(BaseHTTPRequestHandler):
                     "market": domain,
                     "timeframe": timeframe,
                     "timeframe_recorded": timeframe_recorded,
-                    "image_base64": base64.b64encode(png).decode("ascii"),
+                    "candles": candle_records,
                     "entry": entry,
                     "exit": exit_price,
                     "stop_loss": stop,
