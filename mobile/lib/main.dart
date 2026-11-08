@@ -65,155 +65,101 @@ class _AITradeAppState extends State<AITradeApp> {
 
 
 class _BalanceAiPainter extends CustomPainter {
-  const _BalanceAiPainter();
+  final bool dark;
+  final bool english;
+  const _BalanceAiPainter({required this.dark, required this.english});
 
   @override
   void paint(Canvas canvas, Size size) {
-    // Compact holographic AI trading core, confined to the right side.
-    final center = Offset(size.width * .79, size.height * .49);
-    final radius = size.height * .37;
+    // Keep the illustration on the side opposite the balance text.
+    final x = size.width * (english ? .82 : .18);
+    final center = Offset(x, size.height * .50);
+    final radius = size.height * .25;
+    final accentA = const Color(0xFF36AFA4).withOpacity(dark ? .16 : .10);
+    final accentB = const Color(0xFF668CCB).withOpacity(dark ? .13 : .08);
+
     final glow = Paint()
       ..shader = RadialGradient(
-        colors: [
-          const Color(0xFF00E5C3).withOpacity(.20),
-          const Color(0xFF258BFF).withOpacity(.09),
-          Colors.transparent,
-        ],
-        stops: const [0, .48, 1],
-      ).createShader(Rect.fromCircle(center: center, radius: radius * 1.8));
-    canvas.drawCircle(center, radius * 1.8, glow);
+        colors: [accentA, accentB, Colors.transparent],
+        stops: const [0, .55, 1],
+      ).createShader(Rect.fromCircle(center: center, radius: radius * 2.0));
+    canvas.drawCircle(center, radius * 2.0, glow);
 
-    final orbitPaint = Paint()
-      ..color = const Color(0xFF57C9FF).withOpacity(.25)
+    final orbit = Paint()
+      ..color = accentB
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.15;
+      ..strokeWidth = 1.0;
     canvas.save();
     canvas.translate(center.dx, center.dy);
-    canvas.rotate(-.48);
+    canvas.rotate(-.42);
     canvas.drawOval(
       Rect.fromCenter(center: Offset.zero, width: radius * 2.65, height: radius * .92),
-      orbitPaint,
+      orbit,
     );
-    canvas.rotate(1.02);
-    orbitPaint.color = const Color(0xFF00E5C3).withOpacity(.22);
+    canvas.rotate(1.0);
+    orbit.color = accentA;
     canvas.drawOval(
-      Rect.fromCenter(center: Offset.zero, width: radius * 2.35, height: radius * 1.02),
-      orbitPaint,
+      Rect.fromCenter(center: Offset.zero, width: radius * 2.25, height: radius * .82),
+      orbit,
     );
     canvas.restore();
 
-    final coreFill = Paint()
-      ..shader = const RadialGradient(
-        colors: [Color(0xFF1B6380), Color(0xFF142B48), Color(0xFF101A30)],
-      ).createShader(Rect.fromCircle(center: center, radius: radius * .78));
-    canvas.drawCircle(center, radius * .77, coreFill);
-    canvas.drawCircle(
-      center,
-      radius * .77,
-      Paint()
-        ..color = const Color(0xFF53D8FF).withOpacity(.42)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.25,
-    );
-
     final nodes = <Offset>[
-      Offset(size.width * .57, size.height * .20),
-      Offset(size.width * .72, size.height * .10),
-      Offset(size.width * .94, size.height * .18),
-      Offset(size.width * .98, size.height * .48),
-      Offset(size.width * .91, size.height * .79),
-      Offset(size.width * .70, size.height * .88),
-      Offset(size.width * .55, size.height * .65),
+      Offset(size.width * (english ? .62 : .08), size.height * .22),
+      Offset(size.width * (english ? .78 : .24), size.height * .12),
+      Offset(size.width * (english ? .95 : .38), size.height * .29),
+      Offset(size.width * (english ? .91 : .34), size.height * .72),
+      Offset(size.width * (english ? .70 : .14), size.height * .84),
     ];
-    final links = <(int, int)>[(0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 0), (0, 3), (1, 4), (2, 5)];
+    final links = <(int, int)>[(0, 1), (1, 2), (2, 3), (3, 4), (4, 0), (0, 3)];
     final linkPaint = Paint()
-      ..color = const Color(0xFF56C8FF).withOpacity(.20)
-      ..strokeWidth = 1;
+      ..color = accentB
+      ..strokeWidth = 1.0;
     for (final edge in links) {
       canvas.drawLine(nodes[edge.$1], nodes[edge.$2], linkPaint);
     }
     for (var i = 0; i < nodes.length; i++) {
       canvas.drawCircle(
         nodes[i],
-        i.isEven ? 3.1 : 2.1,
-        Paint()..color = const Color(0xFF00E5C3).withOpacity(.72),
+        i.isEven ? 2.6 : 1.8,
+        Paint()..color = accentA,
       );
       canvas.drawCircle(
         nodes[i],
-        i.isEven ? 6.0 : 4.5,
+        i.isEven ? 5.5 : 4.2,
         Paint()
-          ..color = const Color(0xFF00E5C3).withOpacity(.12)
+          ..color = accentB
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 1,
+          ..strokeWidth = .8,
       );
     }
 
     final trace = Path()
-      ..moveTo(size.width * .57, size.height * .60)
-      ..cubicTo(size.width * .65, size.height * .55, size.width * .66, size.height * .43, size.width * .73, size.height * .47)
-      ..cubicTo(size.width * .79, size.height * .50, size.width * .82, size.height * .29, size.width * .91, size.height * .32);
+      ..moveTo(nodes[0].dx, size.height * .60)
+      ..cubicTo(
+        size.width * (english ? .67 : .13), size.height * .54,
+        size.width * (english ? .72 : .18), size.height * .43,
+        size.width * (english ? .80 : .26), size.height * .48,
+      )
+      ..cubicTo(
+        size.width * (english ? .86 : .32), size.height * .52,
+        size.width * (english ? .88 : .34), size.height * .34,
+        nodes[2].dx, size.height * .36,
+      );
     canvas.drawPath(
       trace,
       Paint()
-        ..color = const Color(0xFF00E5C3).withOpacity(.62)
+        ..color = accentA
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 2.1
+        ..strokeWidth = 1.5
         ..strokeCap = StrokeCap.round,
-    );
-    final candleXs = [size.width * .61, size.width * .69, size.width * .77, size.width * .85, size.width * .93];
-    final candleData = [
-      [0.68, 0.56, 0.62, 0.49],
-      [0.60, 0.46, 0.52, 0.39],
-      [0.54, 0.38, 0.45, 0.32],
-      [0.48, 0.30, 0.39, 0.25],
-      [0.41, 0.23, 0.33, 0.18],
-    ];
-    for (var i = 0; i < candleXs.length; i++) {
-      final color = i == 1 || i == 3 || i == 4
-          ? const Color(0xFF00E5C3).withOpacity(.82)
-          : const Color(0xFF52AFFF).withOpacity(.75);
-      final p = Paint()..color = color..strokeWidth = 1.6;
-      canvas.drawLine(
-        Offset(candleXs[i], size.height * candleData[i][0]),
-        Offset(candleXs[i], size.height * candleData[i][3]),
-        p,
-      );
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(
-          Rect.fromLTRB(
-            candleXs[i] - 3.1,
-            size.height * candleData[i][1],
-            candleXs[i] + 3.1,
-            size.height * candleData[i][2],
-          ),
-          const Radius.circular(2),
-        ),
-        p,
-      );
-    }
-
-    final scan = Paint()
-      ..color = const Color(0xFF00E5C3).withOpacity(.30)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.2;
-    canvas.drawArc(
-      Rect.fromCircle(center: center, radius: radius * .91),
-      -.95,
-      1.18,
-      false,
-      scan,
-    );
-    canvas.drawCircle(
-      Offset(size.width * .88, size.height * .16),
-      2.8,
-      Paint()..color = const Color(0xFF00E5C3),
     );
   }
 
   @override
-  bool shouldRepaint(covariant _BalanceAiPainter oldDelegate) => false;
+  bool shouldRepaint(covariant _BalanceAiPainter oldDelegate) =>
+      oldDelegate.dark != dark || oldDelegate.english != english;
 }
-
 class TradeShell extends StatefulWidget {
   final bool dark, english;
   final String mode;
@@ -253,6 +199,7 @@ class _TradeShellState extends State<TradeShell>
   final Map<String, List<Map<String, double>>> _marketCandles = {};
   final Map<String, List<String>> _marketSymbols = {};
   final Map<String, Map<String, String>> _marketSymbolNames = {};
+  final Map<String, String> _marketSymbolErrors = {};
   final Map<String, String> _selectedSymbols = {
     'futures': 'BTCUSDT',
     'spot': 'BTCUSDT',
@@ -344,6 +291,7 @@ class _TradeShellState extends State<TradeShell>
     try {
       final result = await ApiService.marketSymbols(market);
       if (!mounted) return;
+      _marketSymbolErrors.remove(market);
       dynamic raw = result['symbols'] ?? result['data'] ?? result['items'];
       if (raw is Map) {
         raw = raw['symbols'] ?? raw['items'] ?? raw['data'];
@@ -373,8 +321,12 @@ class _TradeShellState extends State<TradeShell>
             _selectedSymbols[market] = _marketSymbols[market]!.first;
           }
         });
+      } else {
+        _marketSymbolErrors[market] = tr('لم تُرجع Binance أي أزواج لهذا السوق.', 'Binance returned no symbols for this market.');
       }
-    } catch (_) {}
+    } catch (error) {
+      _marketSymbolErrors[market] = '$error';
+    }
   }
 
   Future<void> _loadMarketCandles(String market) async {
@@ -556,6 +508,22 @@ class _TradeShellState extends State<TradeShell>
           ]),
           if (market == 'alpha') ...[
             const SizedBox(height: 7),
+            if (_marketSymbolErrors[market] != null) ...[
+              Text(
+                _marketSymbolErrors[market]!,
+                style: const TextStyle(color: red, fontSize: 10),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: TextButton.icon(
+                  onPressed: () => _loadMarketSymbols(market),
+                  icon: const Icon(Icons.refresh, size: 15),
+                  label: Text(tr('إعادة جلب القائمة', 'Retry token list')),
+                ),
+              ),
+            ],
             Row(children: [
               Expanded(
                 child: Text(
@@ -1236,7 +1204,7 @@ class _TradeShellState extends State<TradeShell>
         child: Stack(
           children: [
             const Positioned.fill(
-              child: IgnorePointer(child: CustomPaint(painter: _BalanceAiPainter())),
+              child: IgnorePointer(child: CustomPaint(painter: _BalanceAiPainter(dark: widget.dark, english: en))),
             ),
             Column(
         crossAxisAlignment: CrossAxisAlignment.start,
