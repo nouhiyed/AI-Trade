@@ -203,11 +203,13 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
             min: min,
             max: max,
             divisions: divisions,
-            onChanged: (v) => setState(() {
+            onChanged: _serverOnline ? (v) => setState(() {
               cfg[key] = asInt ? v.round() : v;
               _auto['config'] = cfg;
-            }),
-            onChangeEnd: (v) => _setAuto({key: asInt ? v.round() : v}),
+            }) : null,
+            onChangeEnd: _serverOnline
+                ? (v) => _setAuto({key: asInt ? v.round() : v})
+                : null,
           ),
         ],
       );
