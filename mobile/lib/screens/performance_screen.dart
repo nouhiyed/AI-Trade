@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/api_service.dart';
 
@@ -33,14 +35,17 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
   Map<String, dynamic> _auto = {};
   List<Map<String, dynamic>> _trades = [];
   bool _busy = false;
+  bool _serverOnline = false;
   String? _error;
   Timer? _timer;
+  static const String _autoCacheKey = 'ai_trade_autopilot_config_v1';
 
   String t(String ar, String en) => widget.english ? en : ar;
 
   @override
   void initState() {
     super.initState();
+    _restoreAutoCache();
     _load();
     _timer = Timer.periodic(const Duration(seconds: 10), (_) => _load());
   }
@@ -53,6 +58,27 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
 
   Map<String, dynamic> _map(dynamic v) =>
       v is Map ? Map<String, dynamic>.from(v) : <String, dynamic>{};
+
+  Future<void> _restoreAutoCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_autoCacheKey);
+      if (raw == null || raw.isEmpty || !mounted || _auto.isNotEmpty) return;
+      final decoded = jsonDecode(raw);
+      if (decoded is Map) {
+        setState(() => _auto = Map<String, dynamic>.from(decoded));
+      }
+    } catch (_) {
+      // The backend remains the source of truth; cache is only a UI fallback.
+    }
+  }
+
+  Future<void> _saveAutoCache(Map<String, dynamic> value) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_autoCacheKey, jsonEncode(value));
+    } catch (_) {}
+  }
 
   Future<void> _load() async {
     if (_busy) return;
@@ -68,13 +94,18 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
         _perf = perf;
         _learning = learning;
         _auto = auto;
+        _serverOnline = true;
         _trades = rows is List
             ? rows.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
             : <Map<String, dynamic>>[];
         _error = null;
       });
+      await _saveAutoCache(auto);
     } catch (e) {
-      if (mounted) setState(() => _error = '$e');
+      if (mounted) setState(() {
+        _error = '$e';
+        _serverOnline = false;
+      });
     } finally {
       _busy = false;
     }
@@ -83,7 +114,13 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
   Future<void> _setAuto(Map<String, dynamic> changes) async {
     try {
       final result = await ApiService.autopilotUpdate(changes);
-      if (mounted) setState(() => _auto = result);
+      if (mounted) {
+        setState(() {
+          _auto = result;
+          _serverOnline = true;
+        });
+        await _saveAutoCache(result);
+      }
     } catch (e) {
       _toast('$e');
     }
@@ -185,7 +222,7 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
             Switch(
               value: enabled,
               activeColor: _green,
-              onChanged: (v) => _setAuto({'enabled': v}),
+              onChanged: _serverOnline ? (v) => _setAuto({'enabled': v}) : null,
             ),
           ],
         ),
@@ -205,13 +242,13 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
                 label: Text(m.toUpperCase(), style: const TextStyle(fontSize: 11)),
                 selected: cfg['trade_$m'] != false,
                 visualDensity: VisualDensity.compact,
-                onSelected: (v) {
+                onSelected: _serverOnline ? (v) {
                   setState(() {
                     cfg['trade_$m'] = v;
                     _auto['config'] = cfg;
                   });
                   _setAuto({'trade_$m': v});
-                },
+                } : null,
               ),
           ],
         ),
@@ -222,7 +259,7 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
         Row(
           children: [
             OutlinedButton.icon(
-              onPressed: () async {
+              onPressed: _serverOnline ? () async {
                 try {
                   final r = await ApiService.autopilotRun();
                   final n = r['opened'] is List ? (r['opened'] as List).length : 0;
@@ -231,7 +268,7 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
                 } catch (e) {
                   _toast('$e');
                 }
-              },
+              } : null,
               icon: const Icon(Icons.radar, size: 16),
               label: Text(t('افحص الآن', 'Scan now')),
             ),
