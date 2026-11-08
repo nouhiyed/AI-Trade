@@ -191,6 +191,7 @@ class _TradeShellState extends State<TradeShell>
   bool running = true;
   bool apiOnline = false;
   bool apiBusy = false;
+  bool _statusInFlight = false;
   int _statusFailures = 0;
   Map<String, dynamic> demoData = {};
   Map<String, dynamic> agentControls = {};
@@ -241,8 +242,9 @@ class _TradeShellState extends State<TradeShell>
   }
 
   Future<void> _refreshStatus() async {
-    if (apiBusy) return;
-    setState(() => apiBusy = true);
+    // Status polling has its own lock; unrelated actions must not suppress it.
+    if (_statusInFlight) return;
+    _statusInFlight = true;
     try {
       final data = await ApiService.status();
       if (!mounted) return;
@@ -251,14 +253,14 @@ class _TradeShellState extends State<TradeShell>
       setState(() => apiOnline = true);
     } catch (_) {
       if (mounted) {
-        // Keep the last good snapshot through a single transient poll failure.
+        // Keep the last good snapshot through transient poll failures.
         _statusFailures++;
         if (_statusFailures >= 3) {
           setState(() => apiOnline = false);
         }
       }
     } finally {
-      if (mounted) setState(() => apiBusy = false);
+      _statusInFlight = false;
     }
   }
 
