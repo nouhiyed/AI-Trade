@@ -355,14 +355,11 @@ class _TradeShellState extends State<TradeShell>
   }
 
   Widget _marketPanel(String market, String title, Color accent) {
-    final symbol = _selectedSymbols[market] ?? '';
-    final interval = _selectedIntervals[market] ?? '5m';
-    final key = '$market:$symbol:$interval';
-    final candles = _marketCandles[key] ?? [];
-    final last = candles.isNotEmpty ? candles.last['close']! : 0.0;
-    final intervals = market == 'alpha'
-        ? ['5m', '15m', '1h']
-        : ['5m', '15m', '1h', '4h'];
+    final raw = demoData['open_positions'];
+    final positions = raw is List
+        ? raw.whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item)).toList()
+        : <Map<String, dynamic>>[];
 
     return _panel(
       child: Column(
@@ -379,86 +376,30 @@ class _TradeShellState extends State<TradeShell>
             ),
             const SizedBox(width: 9),
             Expanded(
-              child: Text(title,
-                style: TextStyle(
-                  color: widget.text,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 15,
-                ),
-              ),
+              child: Text(title, style: TextStyle(
+                color: widget.text,
+                fontWeight: FontWeight.w900,
+                fontSize: 15,
+              )),
             ),
-            Text(
-              market.toUpperCase(),
-              style: TextStyle(color: accent, fontSize: 9,
-                fontWeight: FontWeight.bold),
-            ),
+            Text(market.toUpperCase(), style: TextStyle(
+              color: accent, fontSize: 9, fontWeight: FontWeight.bold,
+            )),
           ]),
-          const SizedBox(height: 12),
-          Row(children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: () => _chooseMarketSymbol(market),
-                icon: const Icon(Icons.swap_horiz, size: 17),
-                label: Text(symbol.isEmpty ? 'Select pair' : symbol,
-                  overflow: TextOverflow.ellipsis),
-              ),
-            ),
-            const SizedBox(width: 8),
-            IconButton(
-              onPressed: () => _loadMarketCandles(market),
-              icon: const Icon(Icons.refresh, color: cyan),
-            ),
-          ]),
-          Row(
-            children: intervals.map((tf) {
-              final active = interval == tf;
-              return Padding(
-                padding: const EdgeInsetsDirectional.only(end: 7),
-                child: ChoiceChip(
-                  label: Text(tf),
-                  selected: active,
-                  onSelected: (_) {
-                    setState(() => _selectedIntervals[market] = tf);
-                    _loadMarketCandles(market);
-                  },
-                  selectedColor: accent.withOpacity(.22),
-                ),
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 8),
-          Row(children: [
-            Expanded(
-              child: Text(
-                last > 0 ? last.toStringAsFixed(6) : '—',
-                style: TextStyle(
-                  color: widget.text,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 18,
-                ),
-              ),
-            ),
-            Text(
-              candles.isEmpty
-                  ? tr('بانتظار بيانات السوق', 'Waiting for market data')
-                  : tr('بيانات Binance', 'Binance market data'),
-              style: TextStyle(color: widget.muted, fontSize: 10),
-            ),
-          ]),
-          const SizedBox(height: 8),
-          SizedBox(
-            height: 190,
-            child: candles.isEmpty
-                ? Center(
-                    child: Text(
-                      tr('لا توجد شموع متاحة حالياً', 'No candles available'),
-                      style: TextStyle(color: widget.muted),
-                    ),
-                  )
-                : CustomPaint(
-                    painter: LiveCandlePainter(candles),
-                    child: const SizedBox.expand(),
-                  ),
+          const SizedBox(height: 10),
+          ProChartScreen(
+            key: ValueKey('market-pro-chart-$market'),
+            embedded: true,
+            initialMarket: market,
+            initialSymbol: (_selectedSymbols[market]?.isNotEmpty ?? false)
+                ? _selectedSymbols[market]!
+                : 'BTCUSDT',
+            english: en,
+            bg: widget.bg,
+            panel: widget.panel,
+            text: widget.text,
+            muted: widget.muted,
+            positions: positions,
           ),
         ],
       ),
@@ -885,9 +826,6 @@ class _TradeShellState extends State<TradeShell>
           _hero(),
           const SizedBox(height: 15),
           _portfolioCard(),
-          const SizedBox(height: 20),
-          _chart(true),
-          const SizedBox(height: 18),
           _heading(
             tr('فريق الوكلاء', 'AGENT NETWORK'),
             '3 AGENTS',
@@ -1258,28 +1196,6 @@ class _TradeShellState extends State<TradeShell>
         ],
       );
 
-  void _openProChart() {
-    final raw = demoData['open_positions'];
-    final positions = raw is List
-        ? raw
-            .whereType<Map>()
-            .map((e) => Map<String, dynamic>.from(e))
-            .toList()
-        : <Map<String, dynamic>>[];
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => ProChartScreen(
-          english: en,
-          bg: widget.bg,
-          panel: widget.panel,
-          text: widget.text,
-          muted: widget.muted,
-          positions: positions,
-        ),
-      ),
-    );
-  }
-
   void _openPerformance() {
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -1294,24 +1210,13 @@ class _TradeShellState extends State<TradeShell>
     );
   }
 
-  Widget _proTools() => Row(
-        children: [
-          Expanded(
-            child: FilledButton.icon(
-              onPressed: _openProChart,
-              icon: const Icon(Icons.candlestick_chart, size: 18),
-              label: Text(tr('تشارت احترافي', 'Pro Chart')),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: OutlinedButton.icon(
-              onPressed: _openPerformance,
-              icon: const Icon(Icons.insights, size: 18),
-              label: Text(tr('الأداء والآلي', 'Autopilot')),
-            ),
-          ),
-        ],
+  Widget _proTools() => Align(
+        alignment: AlignmentDirectional.centerStart,
+        child: OutlinedButton.icon(
+          onPressed: _openPerformance,
+          icon: const Icon(Icons.insights, size: 18),
+          label: Text(tr('الأداء والآلي', 'Autopilot')),
+        ),
       );
 
   Widget _markets() => ListView(
@@ -1698,138 +1603,6 @@ class _TradeShellState extends State<TradeShell>
           ],
         ),
       );
-
-  Future<void> _submitHomeChartToAgent(String symbol, String timeframe) async {
-    if (!apiOnline || apiBusy) {
-      notify(tr('اتصل بالخادم أولاً لإرسال الفرصة.', 'Connect to the backend before submitting the chart.'));
-      return;
-    }
-    setState(() => apiBusy = true);
-    try {
-      final result = await ApiService.submitChartSignal(
-        domain: 'futures',
-        symbol: symbol,
-        timeframe: timeframe,
-      );
-      if (!mounted) return;
-      final signal = result['signal'] is Map
-          ? Map<String, dynamic>.from(result['signal'] as Map)
-          : <String, dynamic>{};
-      final plan = result['trade_plan'] is Map
-          ? Map<String, dynamic>.from(result['trade_plan'] as Map)
-          : <String, dynamic>{};
-      final decision = result['decision'] ?? result['reason'] ?? 'No decision';
-      notify(
-        '${decision} · ${signal['direction'] ?? 'WAIT'} · ${tr('الثقة', 'Confidence')} ${signal['confidence'] ?? 0}%'
-        '${plan['success'] == true ? ' · R/R ${plan['reward_risk']}' : ''}'
-        ' · ${result['opened'] == true ? tr('تم فتح صفقة DEMO', 'DEMO position opened') : tr('لم تُفتح صفقة', 'No trade opened')}',
-      );
-      if (result['opened'] == true) await _refreshStatus();
-    } catch (error) {
-      if (mounted) notify('${tr('تعذر إرسال الفرصة: ', 'Submit failed: ')}$error');
-    } finally {
-      if (mounted) setState(() => apiBusy = false);
-    }
-  }
-
-  Widget _chart(bool compact) {
-    final symbol = _selectedSymbols['futures'] ?? 'BTCUSDT';
-    final interval = _selectedIntervals['futures'] ?? '5m';
-    final key = 'futures:$symbol:$interval';
-    final candles = _marketCandles[key] ?? [];
-    final last = candles.isNotEmpty ? candles.last['close']! : 0.0;
-    final first = candles.isNotEmpty ? candles.first['open']! : 0.0;
-    final change = first > 0 ? ((last - first) / first) * 100 : null;
-
-    return _panel(
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Text(
-                symbol,
-                style: TextStyle(color: widget.text, fontWeight: FontWeight.bold),
-              ),
-              const Spacer(),
-              Text(
-                last > 0 ? last.toStringAsFixed(2) : '—',
-                style: TextStyle(
-                  color: widget.text,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 18,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 5),
-          Row(
-            children: [
-              if (change != null)
-                Text(
-                  '${change >= 0 ? '+' : ''}${change.toStringAsFixed(2)}%',
-                  style: TextStyle(
-                    color: change >= 0 ? green : red,
-                    fontSize: 11,
-                  ),
-                ),
-              const SizedBox(width: 8),
-              Text(
-                apiOnline && candles.isNotEmpty ? 'BINANCE LIVE' : 'DATA UNAVAILABLE',
-                style: TextStyle(
-                  color: apiOnline && candles.isNotEmpty ? green : red,
-                  fontSize: 9,
-                ),
-              ),
-              const Spacer(),
-              Text(
-                '$interval · ${candles.length} ${tr('شمعة', 'candles')}',
-                style: TextStyle(color: widget.muted, fontSize: 9),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            height: compact ? 150 : 235,
-            child: candles.isEmpty
-                ? Center(
-                    child: Text(
-                      tr('بانتظار بيانات Binance الحقيقية', 'Waiting for live Binance candles'),
-                      style: TextStyle(color: widget.muted, fontSize: 11),
-                    ),
-                  )
-                : CustomPaint(
-                    painter: LiveCandlePainter(candles),
-                    child: const SizedBox.expand(),
-                  ),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              _legend(green, 'BULLISH'),
-              const SizedBox(width: 15),
-              _legend(red, 'BEARISH'),
-              const Spacer(),
-              Text(
-                tr('المصدر: Binance REST', 'Source: Binance REST'),
-                style: TextStyle(color: widget.muted, fontSize: 9),
-              ),
-            ],
-          ),
-          if (compact) ...[
-            const SizedBox(height: 10),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: apiBusy ? null : () => _submitHomeChartToAgent(symbol, interval),
-                icon: const Icon(Icons.psychology_alt, size: 17),
-                label: Text(tr('إرسال للوكيل', 'SEND TO AGENT')),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
 
   Widget _coin(String symbol, String pair, String name, String price, String change, Color color) =>
       _panel(
