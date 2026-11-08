@@ -61,7 +61,11 @@ class Autopilot:
                 continue
             default = DEFAULTS[key]
             if isinstance(default, bool):
-                self.config[key] = bool(value)
+                if isinstance(value, bool):
+                    self.config[key] = value
+                elif isinstance(value, int) and value in (0, 1):
+                    self.config[key] = bool(value)
+                # Do not treat strings such as "false" as truthy.
                 continue
             try:
                 number = float(value)
