@@ -146,7 +146,6 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
     final enabled = cfg['enabled'] == true;
     final minConf = (double.tryParse('${cfg['min_confidence']}') ?? 60.0).clamp(25.0, 100.0).toDouble();
     final maxConc = (double.tryParse('${cfg['max_concurrent']}') ?? 3.0).clamp(1.0, 5.0).toDouble();
-    final lev = (double.tryParse('${cfg['leverage']}') ?? 2.0).clamp(1.0, 5.0).toDouble();
     final risk = (double.tryParse('${cfg['risk_pct']}') ?? 0.5).clamp(0.1, 1.0).toDouble();
     final last = _map(_auto['last_result']);
     final opened = last['opened'] is List ? (last['opened'] as List).length : 0;
@@ -215,7 +214,6 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
         slider(t('أدنى ثقة', 'Min confidence'), minConf, 25, 100, 15, 'min_confidence'),
         slider(t('أقصى صفقات متزامنة', 'Max concurrent trades'), maxConc, 1, 5, 4,
             'max_concurrent', asInt: true),
-        slider(t('الرافعة', 'Leverage'), lev, 1, 5, 4, 'leverage', asInt: true),
         slider(t('المخاطرة لكل صفقة %', 'Risk per trade %'), risk, 0.1, 1.0, 9, 'risk_pct'),
         Row(
           children: [
