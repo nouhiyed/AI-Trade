@@ -56,15 +56,21 @@ class APIHandler(BaseHTTPRequestHandler):
                 if interval not in {"1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d"}:
                     return self.send_json({"error": "Unsupported interval"}, 400)
                 live = params.get("live", ["0"])[0] == "1"
+                start_time = params.get("startTime", [None])[0]
+                end_time = params.get("endTime", [None])[0]
+                start_time = int(start_time) if start_time is not None else None
+                end_time = int(end_time) if end_time is not None else None
                 if market == "alpha":
                     candles = coordinator.market_feed.fetch_alpha_candles(
-                        symbol, interval, limit=min(max(limit, 2), 1000)
+                        symbol, interval, limit=min(max(limit, 2), 1000),
+                        start_time=start_time, end_time=end_time,
                     )
                 elif market in {"spot", "futures"}:
                     candles = coordinator.market_feed.fetch_candles(
                         market, symbol, interval,
                         limit=min(max(limit, 2), 1000),
                         closed_only=not live,
+                        start_time=start_time, end_time=end_time,
                     )
                 else:
                     return self.send_json({"error": "Unsupported market"}, 400)
@@ -156,10 +162,10 @@ class APIHandler(BaseHTTPRequestHandler):
                         closed_only=False, start_time=start_time, end_time=end_time,
                     )
                 candles = candles_frame[["open", "high", "low", "close"]].to_dict("records")
-                entry = trade.get("entry", trade.get("entry_price"))
+                entry = trade.get("entry") or trade.get("entry_price")
                 stop = trade.get("stop_loss")
                 target = trade.get("take_profit")
-                exit_price = trade.get("exit_price", trade.get("close_price"))
+                exit_price = trade.get("exit_price") or trade.get("close_price")
                 if entry is None or stop is None or target is None:
                     return self.send_json({
                         "success": False,
