@@ -47,8 +47,8 @@ class TradingCoordinator(SpotDemoMixin):
 
         self.required_timeframes = {
             "futures": ["1m", "5m", "15m", "1h"],
-            "spot": ["5m", "15m", "1h", "4h"],
-            "alpha": ["5m", "15m", "1h"]
+            "spot": ["1m", "5m", "15m", "1h", "4h"],
+            "alpha": ["1m", "5m", "15m", "1h"]
         }
 
         self.last_signals = {}
@@ -206,7 +206,13 @@ class TradingCoordinator(SpotDemoMixin):
                 archived.setdefault("position_id", trade_id)
                 archived.setdefault("close_price", archived.get("exit_price"))
                 archived.setdefault("close_reason", archived.get("close_reason") or "CLOSED")
-                closed_by_id.setdefault(trade_id, archived)
+                existing = closed_by_id.get(trade_id)
+                if existing is None:
+                    closed_by_id[trade_id] = archived
+                else:
+                    for field, value in archived.items():
+                        if existing.get(field) in (None, "", {}):
+                            existing[field] = value
         except Exception:
             # State-backed closed trades remain available if journal access fails.
             pass
@@ -316,11 +322,21 @@ class TradingCoordinator(SpotDemoMixin):
     def _on_demo_open(self, record, signal, reservation):
         """Journal the new trade and (optionally) send a chart snapshot."""
         try:
+            plan = signal.get("trade_plan") or {}
+            timeframe = (
+                signal.get("chart_timeframe")
+                or signal.get("timeframe")
+                or plan.get("timeframe")
+                or "5m"
+            )
+            record["timeframe"] = str(timeframe).lower()
             context = {
                 "confidence": signal.get("confidence"),
                 "scores": signal.get("scores"),
                 "market_context": signal.get("market_context"),
-                "reward_risk": (signal.get("trade_plan") or {}).get("reward_risk"),
+                "reward_risk": plan.get("reward_risk"),
+                "timeframe": record["timeframe"],
+                "chart_timeframe": record["timeframe"],
             }
             confidence = float(signal.get("confidence") or 0)
             domain = record.get("domain", "futures")
@@ -958,26 +974,52 @@ class TradingCoordinator(SpotDemoMixin):
         }
 
 
-    def submit_chart_signal(self, domain, symbol, timeframe):
-        """Send a chart opportunity to its agent; open only after full agent and risk approval."""
+    def submit_chart_signal(
+        self, domain, symbol, timeframe,
+        entry_price=None, take_profit=None, stop_loss=None
+    ):
+        """Review user-proposed chart levels; only an agent-approved plan can reach DEMO execution."""
         domain = str(domain).strip().lower()
         symbol = str(symbol).strip().upper()
         timeframe = str(timeframe).strip().lower()
         allowed_timeframes = {
             "futures": {"1m", "5m", "15m", "1h"},
-            "spot": {"5m", "15m", "1h", "4h"},
-            "alpha": {"5m", "15m", "1h"},
+            "spot": {"1m", "5m", "15m", "1h", "4h"},
+            "alpha": {"1m", "5m", "15m", "1h"},
+        }
+        base = {
+            "success": False, "opened": False, "domain": domain,
+            "symbol": symbol, "timeframe": timeframe,
         }
         if domain not in self.agents:
-            return {"success": False, "reason": "Unknown agent", "opened": False}
+            return {**base, "decision_status": "REJECTED",
+                    "decision_reason": "Unknown agent", "reason": "Unknown agent"}
         if not symbol or not symbol.endswith("USDT"):
-            return {"success": False, "reason": "Invalid USDT symbol", "opened": False}
+            return {**base, "decision_status": "REJECTED",
+                    "decision_reason": "Invalid USDT symbol", "reason": "Invalid USDT symbol"}
         if timeframe not in allowed_timeframes[domain]:
-            return {"success": False, "reason": "Unsupported timeframe for this agent",
-                    "opened": False}
+            return {**base, "decision_status": "REJECTED",
+                    "decision_reason": "Unsupported timeframe for this agent",
+                    "reason": "Unsupported timeframe for this agent"}
         if not self._agent_enabled(domain):
-            return {"success": False, "reason": domain.title() + " agent is stopped",
-                    "opened": False}
+            reason = domain.title() + " agent is stopped"
+            return {**base, "decision_status": "REJECTED",
+                    "decision_reason": reason, "reason": reason}
+
+        try:
+            proposed = {
+                "entry": Decimal(str(entry_price)),
+                "take_profit": Decimal(str(take_profit)),
+                "stop_loss": Decimal(str(stop_loss)),
+            }
+        except Exception:
+            reason = "Entry, take-profit and stop-loss prices are required numeric values"
+            return {**base, "decision_status": "REJECTED",
+                    "decision_reason": reason, "reason": reason}
+        if not all(value.is_finite() and value > 0 for value in proposed.values()):
+            reason = "All proposed prices must be finite positive numbers"
+            return {**base, "decision_status": "REJECTED",
+                    "decision_reason": reason, "reason": reason}
 
         analysis = self.analyze_live(symbol, preferred_timeframe=timeframe)
         signal = analysis.get("signals", {}).get(domain, {})
@@ -986,69 +1028,110 @@ class TradingCoordinator(SpotDemoMixin):
                 token = self.alpha_feed.token(symbol)
                 signal = self.analyze_alpha(token, preferred_timeframe=timeframe)
             except Exception as error:
-                return {"success": False, "reason": "Alpha analysis failed: " + str(error),
-                        "opened": False}
-        if not isinstance(signal, dict):
-            return {"success": False, "reason": "Analysis unavailable",
-                    "opened": False, "analysis": analysis}
-        if signal.get("error"):
-            return {"success": False, "reason": signal.get("error"),
-                    "opened": False, "analysis": analysis}
+                reason = "Alpha analysis failed: " + str(error)
+                return {**base, "success": True, "decision_status": "REJECTED",
+                        "decision_reason": reason, "reason": reason,
+                        "analysis": analysis}
+        if not isinstance(signal, dict) or signal.get("error"):
+            reason = (signal.get("error") if isinstance(signal, dict) else None) or "Analysis unavailable"
+            return {**base, "success": True, "decision_status": "REJECTED",
+                    "decision_reason": str(reason), "reason": str(reason),
+                    "analysis": analysis}
+
         signal = dict(signal)
         signal["chart_timeframe"] = timeframe
         signal["chart_market"] = domain
-        if domain == "alpha":
-            safety = signal.get("token_safety") or {
-                "status": "UNKNOWN", "passed": False, "critical": False}
-            signal["token_safety"] = safety
-            signal["execution_enabled"] = (
-                self.mode == "DEMO"
-                and str(safety.get("status", "")).upper() == "PASS"
-            )
-            self.last_signals[domain] = signal
-        plan = signal.get("trade_plan")
-        safety = signal.get("token_safety") or {}
-        execution = None
-        opened = False
-        if domain == "alpha" and str(safety.get("status", "")).upper() != "PASS":
-            decision = "REJECTED: Alpha token safety is not PASS"
-        elif domain == "futures" and signal.get("direction") not in ("LONG", "SHORT"):
-            decision = "REJECTED: Agent returned WAIT"
-        elif domain == "spot" and signal.get("direction") != "BUY":
-            decision = "REJECTED: Spot agent did not return BUY"
-        elif not isinstance(plan, dict) or plan.get("success") is not True:
-            decision = "REJECTED: " + str((plan or {}).get("reason", "No valid trade plan"))
+        direction = str(signal.get("direction", "WAIT")).strip().upper()
+        if domain == "futures":
+            is_long = direction == "LONG"
+            is_short = direction == "SHORT"
+            if not (is_long or is_short):
+                reason = signal.get("reason") or "Futures agent returned WAIT: no directional edge"
+                return {**base, "success": True, "decision_status": "WAIT",
+                        "decision_reason": str(reason), "reason": str(reason),
+                        "signal": signal}
         else:
-            try:
-                if domain == "futures":
-                    execution = self.request_demo_futures_trade(
-                        symbol, signal["direction"])
-                else:
-                    execution = self.request_demo_spot_trade(
-                        symbol, domain=domain)
-                opened = bool(execution.get("approved"))
-                decision = (
-                    "APPROVED: DEMO position opened"
-                    if opened else
-                    "REJECTED: " + str(execution.get("reason", "Risk or execution check failed"))
-                )
-            except Exception as error:
-                execution = {"approved": False, "reason": str(error)}
-                opened = False
-                decision = "REJECTED: " + str(error)
-        if execution is None:
-            execution = {"approved": False, "reason": decision}
+            if direction != "BUY":
+                reason = signal.get("reason") or domain.title() + " agent did not approve a BUY setup"
+                return {**base, "success": True, "decision_status": "WAIT",
+                        "decision_reason": str(reason), "reason": str(reason),
+                        "signal": signal}
+            is_long, is_short = True, False
+
+        safety = signal.get("token_safety") or {}
+        if domain == "alpha" and str(safety.get("status", "")).upper() != "PASS":
+            reason = "Alpha token safety is not PASS"
+            return {**base, "success": True, "decision_status": "REJECTED",
+                    "decision_reason": reason, "reason": reason,
+                    "signal": signal, "token_safety": safety}
+
+        agent_plan = signal.get("trade_plan")
+        if not isinstance(agent_plan, dict) or agent_plan.get("success") is not True:
+            reason = str((agent_plan or {}).get("reason", "Agent did not produce a valid strategy plan"))
+            return {**base, "success": True, "decision_status": "REJECTED",
+                    "decision_reason": reason, "reason": reason,
+                    "signal": signal, "trade_plan": agent_plan}
+
+        entry = proposed["entry"]
+        target = proposed["take_profit"]
+        stop = proposed["stop_loss"]
+        if is_long and not stop < entry < target:
+            reason = "For LONG/BUY, Stop Loss must be below Entry and Take Profit above Entry"
+            return {**base, "success": True, "decision_status": "REJECTED",
+                    "decision_reason": reason, "reason": reason,
+                    "signal": signal, "trade_plan": agent_plan}
+        if is_short and not target < entry < stop:
+            reason = "For SHORT, Take Profit must be below Entry and Stop Loss above Entry"
+            return {**base, "success": True, "decision_status": "REJECTED",
+                    "decision_reason": reason, "reason": reason,
+                    "signal": signal, "trade_plan": agent_plan}
+
+        risk_distance = abs(entry - stop)
+        reward_distance = abs(target - entry)
+        reward_risk = reward_distance / risk_distance if risk_distance else Decimal("0")
+        if reward_risk < Decimal("1.5"):
+            reason = "Proposed reward/risk is below the strategy minimum of 1.5"
+            return {**base, "success": True, "decision_status": "REJECTED",
+                    "decision_reason": reason, "reason": reason,
+                    "signal": signal, "trade_plan": agent_plan,
+                    "proposed_levels": {k: str(v) for k, v in proposed.items()},
+                    "reward_risk": float(reward_risk)}
+
+        plan = dict(agent_plan)
+        plan.update({
+            "success": True, "direction": "SHORT" if is_short else "LONG",
+            "entry": float(entry), "stop_loss": float(stop),
+            "take_profit": float(target), "reward_risk": round(float(reward_risk), 4),
+            "timeframe": timeframe, "method": "AGENT_REVIEWED_USER_PROPOSAL",
+            "agent_generated_plan": agent_plan,
+        })
+        signal["trade_plan"] = plan
+        self.last_signals[domain] = signal
+
+        try:
+            if domain == "futures":
+                execution = self.request_demo_futures_trade(symbol, direction)
+            else:
+                execution = self.request_demo_spot_trade(symbol, domain=domain)
+            opened = bool(execution.get("approved"))
+            reason = (
+                "Agent accepted the setup and DEMO risk/execution checks passed"
+                if opened else str(execution.get("reason", "Risk or execution checks rejected the setup"))
+            )
+            status = "APPROVED" if opened else "REJECTED"
+        except Exception as error:
+            execution = {"approved": False, "reason": str(error)}
+            opened = False
+            reason = str(error)
+            status = "REJECTED"
+
         return {
-            "success": True,
-            "opened": opened,
-            "domain": domain,
-            "symbol": symbol,
-            "timeframe": timeframe,
-            "decision": decision,
-            "signal": signal,
-            "trade_plan": plan,
-            "execution": execution,
+            **base, "success": True, "opened": opened,
+            "decision_status": status, "decision_reason": reason,
+            "decision": status + ": " + reason,
+            "signal": signal, "trade_plan": plan, "execution": execution,
             "token_safety": safety if domain == "alpha" else None,
+            "proposed_levels": {k: str(v) for k, v in proposed.items()},
         }
 
     def scan_futures(self, limit=12, min_quote_volume=None):
