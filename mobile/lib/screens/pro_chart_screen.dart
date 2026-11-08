@@ -16,6 +16,8 @@ class ProChartScreen extends StatefulWidget {
   final Color bg, panel, text, muted;
   final List<Map<String, dynamic>> positions;
   final String initialSymbol;
+  final String initialMarket;
+  final bool embedded;
 
   const ProChartScreen({
     super.key,
@@ -26,6 +28,8 @@ class ProChartScreen extends StatefulWidget {
     required this.muted,
     required this.positions,
     this.initialSymbol = 'BTCUSDT',
+    this.initialMarket = 'futures',
+    this.embedded = false,
   });
 
   @override
@@ -67,6 +71,7 @@ class _ProChartScreenState extends State<ProChartScreen> {
   void initState() {
     super.initState();
     _symbol = widget.initialSymbol;
+    _market = widget.initialMarket;
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(const Color(0xFF0D1117))
@@ -105,7 +110,12 @@ class _ProChartScreenState extends State<ProChartScreen> {
         }
       }
       if (mounted && list.isNotEmpty) {
-        setState(() => _symbols = list..sort());
+        list.sort();
+        setState(() {
+          _symbols = list;
+          if (!_symbols.contains(_symbol)) _symbol = _symbols.first;
+        });
+        if (_pageReady) _loadCandles(fit: true);
       }
     } catch (_) {
       // The chart still works with the current symbol.
@@ -357,6 +367,125 @@ class _ProChartScreenState extends State<ProChartScreen> {
       'rsi': 'RSI',
       'macd': 'MACD',
     };
+
+    final chartBody = Column(
+      children: [
+        if (!widget.embedded)
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(10, 8, 10, 0),
+            child: Row(
+              children: [
+                for (final m in _markets)
+                  _chip(m.toUpperCase(), _market == m, () {
+                    setState(() {
+                      _market = m;
+                      _symbols = [];
+                      _symbol = m == 'alpha' ? '' : 'BTCUSDT';
+                      if (!_availableIntervals.contains(_interval)) {
+                        _interval = '5m';
+                      }
+                    });
+                    _loadSymbols();
+                    _loadCandles(fit: true);
+                  }),
+                const SizedBox(width: 10),
+                for (final i in _availableIntervals)
+                  _chip(i, _interval == i, () {
+                    setState(() => _interval = i);
+                    _loadCandles(fit: true);
+                  }),
+              ],
+            ),
+          )
+        else
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(10, 8, 10, 0),
+            child: Row(
+              children: [
+                TextButton.icon(
+                  onPressed: _pickSymbol,
+                  icon: const Icon(Icons.swap_horiz, size: 17),
+                  label: Text(_symbol.isEmpty ? t('اختر العملة', 'Select asset') : _symbol),
+                ),
+                const SizedBox(width: 8),
+                for (final i in _availableIntervals)
+                  _chip(i, _interval == i, () {
+                    setState(() => _interval = i);
+                    _loadCandles(fit: true);
+                  }),
+              ],
+            ),
+          ),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.fromLTRB(10, 2, 10, 4),
+          child: Row(
+            children: [
+              for (final entry in indicatorLabels.entries)
+                Padding(
+                  padding: const EdgeInsetsDirectional.only(end: 6),
+                  child: FilterChip(
+                    label: Text(entry.value, style: const TextStyle(fontSize: 11)),
+                    selected: _indicators[entry.key] ?? false,
+                    visualDensity: VisualDensity.compact,
+                    onSelected: (v) {
+                      setState(() => _indicators[entry.key] = v);
+                      _pushIndicators();
+                    },
+                  ),
+                ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+          child: Row(
+            children: [
+              Text(
+                _lastPrice == null ? '—' : _lastPrice!.toStringAsPrecision(8),
+                style: TextStyle(
+                  color: widget.text,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 16,
+                ),
+              ),
+              const Spacer(),
+              if (_error != null)
+                Flexible(
+                  child: Text(
+                    t('تعذّر التحديث', 'Update failed'),
+                    style: const TextStyle(color: _down, fontSize: 10),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+          child: SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: _submitting ? null : _submitToAgent,
+              icon: const Icon(Icons.psychology_alt, size: 18),
+              label: Text(_submitting
+                  ? t('جارٍ التحليل...', 'ANALYZING...')
+                  : t('إرسال للوكيل', 'SEND TO AGENT')),
+            ),
+          ),
+        ),
+        Expanded(child: WebViewWidget(controller: _controller)),
+      ],
+    );
+
+    if (widget.embedded) {
+      return Directionality(
+        textDirection: widget.english ? TextDirection.ltr : TextDirection.rtl,
+        child: SizedBox(height: 540, child: chartBody),
+      );
+    }
+
     return Directionality(
       textDirection: widget.english ? TextDirection.ltr : TextDirection.rtl,
       child: Scaffold(
@@ -373,96 +502,7 @@ class _ProChartScreenState extends State<ProChartScreen> {
             ),
           ],
         ),
-        body: Column(
-          children: [
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.fromLTRB(10, 8, 10, 0),
-              child: Row(
-                children: [
-                  for (final m in _markets)
-                    _chip(m.toUpperCase(), _market == m, () {
-                      setState(() {
-                        _market = m;
-                        _symbols = [];
-                        if (m == 'futures' || m == 'spot') {
-                          _symbol = 'BTCUSDT';
-                        }
-                        if (!_availableIntervals.contains(_interval)) {
-                          _interval = '5m';
-                        }
-                      });
-                      _loadSymbols();
-                      _loadCandles(fit: true);
-                    }),
-                  const SizedBox(width: 10),
-                  for (final i in _availableIntervals)
-                    _chip(i, _interval == i, () {
-                      setState(() => _interval = i);
-                      _loadCandles(fit: true);
-                    }),
-                ],
-              ),
-            ),
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.fromLTRB(10, 2, 10, 4),
-              child: Row(
-                children: [
-                  for (final entry in indicatorLabels.entries)
-                    Padding(
-                      padding: const EdgeInsetsDirectional.only(end: 6),
-                      child: FilterChip(
-                        label: Text(entry.value,
-                            style: const TextStyle(fontSize: 11)),
-                        selected: _indicators[entry.key] ?? false,
-                        visualDensity: VisualDensity.compact,
-                        onSelected: (v) {
-                          setState(() => _indicators[entry.key] = v);
-                          _pushIndicators();
-                        },
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              child: Row(
-                children: [
-                  Text(
-                    _lastPrice == null ? '—' : _lastPrice!.toStringAsPrecision(8),
-                    style: TextStyle(
-                      color: widget.text,
-                      fontWeight: FontWeight.w900,
-                      fontSize: 16,
-                    ),
-                  ),
-                  const Spacer(),
-                  if (_error != null)
-                    Flexible(
-                      child: Text(
-                        t('تعذّر التحديث', 'Update failed'),
-                        style: const TextStyle(color: _down, fontSize: 10),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
-              child: SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: _submitting ? null : _submitToAgent,
-                  icon: const Icon(Icons.psychology_alt, size: 18),
-                  label: Text(_submitting ? t('جارٍ التحليل...', 'ANALYZING...') : t('إرسال للوكيل', 'SEND TO AGENT')),
-                ),
-              ),
-            ),
-            Expanded(child: WebViewWidget(controller: _controller)),
-          ],
-        ),
+        body: chartBody,
       ),
     );
   }
