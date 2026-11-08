@@ -98,6 +98,11 @@ class AlphaFeed:
                 "display": row.get("display") or row["symbol"],
                 "ticker": row.get("ticker") or row.get("display") or "",
                 "chain_id": row.get("chain_id", ""),
+                "price": row.get("price"),
+                "volume_24h": row.get("volume_24h", 0.0),
+                "liquidity": row.get("liquidity", 0.0),
+                "change_24h": row.get("change_24h", 0.0),
+                "offline": row.get("offline", False),
             })
         return sorted(items, key=lambda item: (str(item["name"]).casefold(), item["symbol"]))
 
