@@ -98,17 +98,25 @@ class APIHandler(BaseHTTPRequestHandler):
                     None,
                 )
                 if trade is None:
-                    return self.send_json({"success": False, "reason": "Trade not found in journal"}, 404)
+                    trade = next(
+                        (dict(item) for key, item in coordinator.demo_positions.items()
+                         if str(key) == trade_id
+                         and str(item.get("status", "")).upper() in {"DEMO_CLOSED", "CLOSED"}),
+                        None,
+                    )
+                if trade is None:
+                    return self.send_json({"success": False, "reason": "Trade not found in archive"}, 404)
 
                 context = trade.get("context") or {}
                 if not isinstance(context, dict):
                     context = {}
-                timeframe = str(
+                saved_timeframe = (
                     trade.get("timeframe")
                     or context.get("chart_timeframe")
                     or context.get("timeframe")
-                    or "5m"
-                ).lower()
+                )
+                timeframe_recorded = bool(saved_timeframe)
+                timeframe = str(saved_timeframe or "5m").lower()
                 interval_ms = {
                     "1m": 60000, "3m": 180000, "5m": 300000,
                     "15m": 900000, "30m": 1800000, "1h": 3600000,
@@ -150,22 +158,31 @@ class APIHandler(BaseHTTPRequestHandler):
                         closed_only=False, start_time=start_time, end_time=end_time,
                     )
                 candles = candles_frame[["open", "high", "low", "close"]].to_dict("records")
-                entry = trade.get("entry")
+                entry = trade.get("entry", trade.get("entry_price"))
                 stop = trade.get("stop_loss")
                 target = trade.get("take_profit")
-                exit_price = trade.get("exit_price")
+                exit_price = trade.get("exit_price", trade.get("close_price"))
                 if entry is None or stop is None or target is None:
                     return self.send_json({
                         "success": False,
                         "reason": "This archived trade is missing entry or protection levels",
                     }, 422)
-                opened_label = str(opened) if opened else "unknown"
+                def readable_stamp(value):
+                    if not value:
+                        return None
+                    from datetime import datetime, timezone
+                    return datetime.fromtimestamp(
+                        value / 1000, tz=timezone.utc
+                    ).strftime("%Y-%m-%d %H:%M UTC")
+
+                opened_label = readable_stamp(opened) or "unknown"
+                closed_label = readable_stamp(closed)
                 png = render_trade_chart(
                     candles, trade.get("direction", "LONG"), float(entry),
                     float(stop), float(target), symbol=symbol,
                     exit_price=float(exit_price) if exit_price is not None else None,
                     timeframe=timeframe, opened_at=opened_label,
-                    closed_at=str(closed) if closed else None,
+                    closed_at=closed_label,
                 )
                 if not png:
                     return self.send_json({
@@ -178,6 +195,7 @@ class APIHandler(BaseHTTPRequestHandler):
                     "symbol": symbol,
                     "market": domain,
                     "timeframe": timeframe,
+                    "timeframe_recorded": timeframe_recorded,
                     "image_base64": base64.b64encode(png).decode("ascii"),
                     "entry": entry,
                     "exit": exit_price,
