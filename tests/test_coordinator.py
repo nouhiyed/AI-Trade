@@ -55,6 +55,39 @@ class TestTradingCoordinator(unittest.TestCase):
         self.assertTrue(closed["success"])
         self.assertAlmostEqual(self.system.risk.balance, 1010)
 
+    def test_chart_submission_analyzes_without_opening(self):
+        self.system.analyze_live = lambda symbol: {
+            "signals": {
+                "futures": {
+                    "symbol": symbol,
+                    "direction": "LONG",
+                    "confidence": 82,
+                    "trade_plan": {
+                        "success": True, "direction": "LONG",
+                        "entry": 100, "stop_loss": 99,
+                        "take_profit": 102, "atr": 0.5,
+                    },
+                }
+            }
+        }
+        result = self.system.submit_chart_signal("futures", "BTCUSDT", "5m")
+        self.assertTrue(result["success"], result)
+        self.assertFalse(result["opened"])
+        self.assertEqual(self.system.demo_positions, {})
+        self.assertEqual(result["signal"]["chart_timeframe"], "5m")
+
+    def test_futures_leverage_is_confidence_and_volatility_aware(self):
+        plan = {"entry": 100, "atr": 0.5}
+        self.assertEqual(
+            self.system.select_futures_leverage({"confidence": 85}, plan), 5)
+        self.assertEqual(
+            self.system.select_futures_leverage({"confidence": 72}, plan), 3)
+        self.assertEqual(
+            self.system.select_futures_leverage({"confidence": 72},
+                                                {"entry": 100, "atr": 2.0}), 2)
+        self.assertEqual(
+            self.system.select_futures_leverage({"confidence": 54}, plan), 1)
+
     def test_alpha_execution_remains_disabled(self):
         result = self.system.request_trade(
             domain="alpha",
