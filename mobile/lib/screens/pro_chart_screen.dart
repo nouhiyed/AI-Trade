@@ -164,6 +164,94 @@ class _ProChartScreenState extends State<ProChartScreen> {
     _controller.runJavaScript('setIndicators(${jsonEncode(_indicators)});');
   }
 
+  Future<void> _submitToAgent() async {
+    final domain = _market;
+    if (domain == 'alpha' && !_symbol.endsWith('USDT')) {
+      // Alpha symbols are still represented as USDT quotes by the feed.
+    }
+    try {
+      final result = await ApiService.submitChartSignal(
+        domain: domain,
+        symbol: _symbol,
+        timeframe: _interval,
+      );
+      if (!mounted) return;
+      final signal = result['signal'] is Map
+          ? Map<String, dynamic>.from(result['signal'] as Map)
+          : <String, dynamic>{};
+      final plan = result['trade_plan'] is Map
+          ? Map<String, dynamic>.from(result['trade_plan'] as Map)
+          : <String, dynamic>{};
+      final safety = result['token_safety'] is Map
+          ? Map<String, dynamic>.from(result['token_safety'] as Map)
+          : <String, dynamic>{};
+      final confidence = signal['confidence'];
+      final reason = signal['reason'] ?? plan['reason'] ?? '';
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: widget.panel,
+          title: Text(t('نتيجة تحليل الوكيل', 'Agent analysis result'),
+              style: TextStyle(color: widget.text)),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('${_symbol} • ${domain.toUpperCase()} • ${_interval}',
+                    style: TextStyle(color: widget.text, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                Text('${result['decision'] ?? result['reason'] ?? 'No decision'}',
+                    style: TextStyle(color: widget.text)),
+                Text('${t('الاتجاه', 'Direction')}: ${signal['direction'] ?? '—'}',
+                    style: TextStyle(color: widget.text)),
+                Text('${t('الثقة', 'Confidence')}: ${confidence ?? '—'}%',
+                    style: TextStyle(color: widget.text)),
+                if (plan.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text('Entry: ${plan['entry'] ?? '—'}',
+                      style: TextStyle(color: widget.text)),
+                  Text('SL: ${plan['stop_loss'] ?? '—'}',
+                      style: const TextStyle(color: _down)),
+                  Text('TP: ${plan['take_profit'] ?? '—'}',
+                      style: const TextStyle(color: _up)),
+                  Text('R/R: ${plan['reward_risk'] ?? '—'}',
+                      style: TextStyle(color: widget.text)),
+                ],
+                if (domain == 'alpha')
+                  Text('Token safety: ${safety['status'] ?? 'UNKNOWN'}',
+                      style: TextStyle(color: widget.text)),
+                if (reason.toString().isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(reason.toString(),
+                      style: TextStyle(color: widget.muted, fontSize: 12)),
+                ],
+                const SizedBox(height: 10),
+                Text(
+                  t('تم إرسال التشارت للتحليل فقط؛ لم تُفتح أي صفقة.',
+                    'Chart sent for analysis only; no trade was opened.'),
+                  style: const TextStyle(color: _up, fontSize: 12,
+                      fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(t('إغلاق', 'Close')),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${t('تعذر إرسال التحليل: ', 'Agent request failed: ')}$e')),
+      );
+    }
+  }
+
   Future<void> _pickSymbol() async {
     if (_symbols.isEmpty) await _loadSymbols();
     if (!mounted) return;
@@ -334,6 +422,17 @@ class _ProChartScreenState extends State<ProChartScreen> {
                       ),
                     ),
                 ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+              child: SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: _loading ? null : _submitToAgent,
+                  icon: const Icon(Icons.psychology_alt, size: 18),
+                  label: Text(t('إرسال للوكيل', 'SEND TO AGENT')),
+                ),
               ),
             ),
             Expanded(child: WebViewWidget(controller: _controller)),
