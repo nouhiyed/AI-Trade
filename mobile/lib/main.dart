@@ -69,73 +69,145 @@ class _BalanceAiPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final area = Offset.zero & size;
-    final glow = Paint()..shader = RadialGradient(
-      colors: [const Color(0xFF00DCC0).withOpacity(.18), Colors.transparent],
-    ).createShader(Rect.fromCircle(
-      center: Offset(size.width * .82, size.height * .22),
-      radius: size.width * .72,
-    ));
-    canvas.drawRect(area, glow);
+    // Compact holographic AI trading core, confined to the right side.
+    final center = Offset(size.width * .79, size.height * .49);
+    final radius = size.height * .37;
+    final glow = Paint()
+      ..shader = RadialGradient(
+        colors: [
+          const Color(0xFF00E5C3).withOpacity(.20),
+          const Color(0xFF258BFF).withOpacity(.09),
+          Colors.transparent,
+        ],
+        stops: const [0, .48, 1],
+      ).createShader(Rect.fromCircle(center: center, radius: radius * 1.8));
+    canvas.drawCircle(center, radius * 1.8, glow);
 
-    final linePaint = Paint()
-      ..color = const Color(0xFF46B8FF).withOpacity(.16)
-      ..strokeWidth = 1.1
-      ..style = PaintingStyle.stroke;
+    final orbitPaint = Paint()
+      ..color = const Color(0xFF57C9FF).withOpacity(.25)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.15;
+    canvas.save();
+    canvas.translate(center.dx, center.dy);
+    canvas.rotate(-.48);
+    canvas.drawOval(
+      Rect.fromCenter(center: Offset.zero, width: radius * 2.65, height: radius * .92),
+      orbitPaint,
+    );
+    canvas.rotate(1.02);
+    orbitPaint.color = const Color(0xFF00E5C3).withOpacity(.22);
+    canvas.drawOval(
+      Rect.fromCenter(center: Offset.zero, width: radius * 2.35, height: radius * 1.02),
+      orbitPaint,
+    );
+    canvas.restore();
+
+    final coreFill = Paint()
+      ..shader = const RadialGradient(
+        colors: [Color(0xFF1B6380), Color(0xFF142B48), Color(0xFF101A30)],
+      ).createShader(Rect.fromCircle(center: center, radius: radius * .78));
+    canvas.drawCircle(center, radius * .77, coreFill);
+    canvas.drawCircle(
+      center,
+      radius * .77,
+      Paint()
+        ..color = const Color(0xFF53D8FF).withOpacity(.42)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.25,
+    );
+
     final nodes = <Offset>[
-      Offset(size.width * .60, size.height * .22),
-      Offset(size.width * .77, size.height * .12),
-      Offset(size.width * .91, size.height * .28),
-      Offset(size.width * .72, size.height * .48),
-      Offset(size.width * .91, size.height * .66),
-      Offset(size.width * .57, size.height * .72),
+      Offset(size.width * .57, size.height * .20),
+      Offset(size.width * .72, size.height * .10),
+      Offset(size.width * .94, size.height * .18),
+      Offset(size.width * .98, size.height * .48),
+      Offset(size.width * .91, size.height * .79),
+      Offset(size.width * .70, size.height * .88),
+      Offset(size.width * .55, size.height * .65),
     ];
-    for (final pair in const [(0, 1), (1, 2), (0, 3), (3, 4), (3, 5), (2, 4)]) {
-      canvas.drawLine(nodes[pair.$1], nodes[pair.$2], linePaint);
+    final links = <(int, int)>[(0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 0), (0, 3), (1, 4), (2, 5)];
+    final linkPaint = Paint()
+      ..color = const Color(0xFF56C8FF).withOpacity(.20)
+      ..strokeWidth = 1;
+    for (final edge in links) {
+      canvas.drawLine(nodes[edge.$1], nodes[edge.$2], linkPaint);
     }
     for (var i = 0; i < nodes.length; i++) {
-      canvas.drawCircle(nodes[i], i.isEven ? 3.2 : 2.2,
-        Paint()..color = const Color(0xFF00E5C3).withOpacity(.55));
+      canvas.drawCircle(
+        nodes[i],
+        i.isEven ? 3.1 : 2.1,
+        Paint()..color = const Color(0xFF00E5C3).withOpacity(.72),
+      );
+      canvas.drawCircle(
+        nodes[i],
+        i.isEven ? 6.0 : 4.5,
+        Paint()
+          ..color = const Color(0xFF00E5C3).withOpacity(.12)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1,
+      );
     }
 
-    final chip = RRect.fromRectAndRadius(
-      Rect.fromCenter(
-        center: Offset(size.width * .78, size.height * .43),
-        width: size.width * .19,
-        height: size.height * .30,
-      ),
-      const Radius.circular(12),
+    final trace = Path()
+      ..moveTo(size.width * .57, size.height * .60)
+      ..cubicTo(size.width * .65, size.height * .55, size.width * .66, size.height * .43, size.width * .73, size.height * .47)
+      ..cubicTo(size.width * .79, size.height * .50, size.width * .82, size.height * .29, size.width * .91, size.height * .32);
+    canvas.drawPath(
+      trace,
+      Paint()
+        ..color = const Color(0xFF00E5C3).withOpacity(.62)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.1
+        ..strokeCap = StrokeCap.round,
     );
-    canvas.drawRRect(chip, Paint()
-      ..color = const Color(0xFF39A8FF).withOpacity(.045)
-      ..style = PaintingStyle.fill);
-    canvas.drawRRect(chip, Paint()
-      ..color = const Color(0xFF39A8FF).withOpacity(.22)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1);
-
-    final candleXs = [size.width * .57, size.width * .64, size.width * .71,
-      size.width * .87, size.width * .94];
-    final candleYs = [
-      [size.height * .61, size.height * .46, size.height * .53, size.height * .39],
-      [size.height * .55, size.height * .37, size.height * .45, size.height * .31],
-      [size.height * .48, size.height * .34, size.height * .40, size.height * .26],
-      [size.height * .58, size.height * .40, size.height * .48, size.height * .32],
-      [size.height * .49, size.height * .30, size.height * .39, size.height * .23],
+    final candleXs = [size.width * .61, size.width * .69, size.width * .77, size.width * .85, size.width * .93];
+    final candleData = [
+      [0.68, 0.56, 0.62, 0.49],
+      [0.60, 0.46, 0.52, 0.39],
+      [0.54, 0.38, 0.45, 0.32],
+      [0.48, 0.30, 0.39, 0.25],
+      [0.41, 0.23, 0.33, 0.18],
     ];
     for (var i = 0; i < candleXs.length; i++) {
-      final color = i == 1 || i == 4
-          ? const Color(0xFF00E5C3).withOpacity(.48)
-          : const Color(0xFF39A8FF).withOpacity(.42);
-      final p = Paint()..color = color..strokeWidth = 1.5;
-      canvas.drawLine(Offset(candleXs[i], candleYs[i][0]),
-          Offset(candleXs[i], candleYs[i][3]), p);
-      canvas.drawRRect(RRect.fromRectAndRadius(
-        Rect.fromLTRB(candleXs[i] - 3, candleYs[i][1],
-            candleXs[i] + 3, candleYs[i][2]),
-        const Radius.circular(2),
-      ), p);
+      final color = i == 1 || i == 3 || i == 4
+          ? const Color(0xFF00E5C3).withOpacity(.82)
+          : const Color(0xFF52AFFF).withOpacity(.75);
+      final p = Paint()..color = color..strokeWidth = 1.6;
+      canvas.drawLine(
+        Offset(candleXs[i], size.height * candleData[i][0]),
+        Offset(candleXs[i], size.height * candleData[i][3]),
+        p,
+      );
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTRB(
+            candleXs[i] - 3.1,
+            size.height * candleData[i][1],
+            candleXs[i] + 3.1,
+            size.height * candleData[i][2],
+          ),
+          const Radius.circular(2),
+        ),
+        p,
+      );
     }
+
+    final scan = Paint()
+      ..color = const Color(0xFF00E5C3).withOpacity(.30)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.2;
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius * .91),
+      -.95,
+      1.18,
+      false,
+      scan,
+    );
+    canvas.drawCircle(
+      Offset(size.width * .88, size.height * .16),
+      2.8,
+      Paint()..color = const Color(0xFF00E5C3),
+    );
   }
 
   @override
@@ -180,6 +252,7 @@ class _TradeShellState extends State<TradeShell>
   Timer? _statusTimer;
   final Map<String, List<Map<String, double>>> _marketCandles = {};
   final Map<String, List<String>> _marketSymbols = {};
+  final Map<String, Map<String, String>> _marketSymbolNames = {};
   final Map<String, String> _selectedSymbols = {
     'futures': 'BTCUSDT',
     'spot': 'BTCUSDT',
@@ -276,19 +349,26 @@ class _TradeShellState extends State<TradeShell>
         raw = raw['symbols'] ?? raw['items'] ?? raw['data'];
       }
       final symbols = <String>[];
+      final names = <String, String>{};
       if (raw is List) {
         for (final item in raw) {
           final value = item is Map
               ? (item['symbol'] ?? item['s'] ?? item['pair'])
               : item;
           if (value != null && '$value'.isNotEmpty) {
-            symbols.add('$value');
+            final symbol = '$value';
+            symbols.add(symbol);
+            if (item is Map) {
+              final name = '${item['name'] ?? item['display'] ?? item['ticker'] ?? ''}'.trim();
+              if (name.isNotEmpty && name != symbol) names[symbol] = name;
+            }
           }
         }
       }
       if (symbols.isNotEmpty) {
         setState(() {
           _marketSymbols[market] = symbols.toSet().toList()..sort();
+          _marketSymbolNames[market] = names;
           if (!_marketSymbols[market]!.contains(_selectedSymbols[market])) {
             _selectedSymbols[market] = _marketSymbols[market]!.first;
           }
@@ -422,7 +502,11 @@ class _TradeShellState extends State<TradeShell>
                 ),
               ),
               ...symbols.map((symbol) => ListTile(
-                title: Text(symbol, style: TextStyle(color: widget.text)),
+                title: Text(
+                  _marketSymbolNames[market]?[symbol] ?? symbol,
+                  style: TextStyle(color: widget.text, fontWeight: FontWeight.w700),
+                ),
+                subtitle: Text(symbol, style: TextStyle(color: widget.muted, fontSize: 10)),
                 trailing: symbol == _selectedSymbols[market]
                     ? const Icon(Icons.check_circle, color: cyan)
                     : null,
@@ -470,14 +554,37 @@ class _TradeShellState extends State<TradeShell>
               color: accent, fontSize: 9, fontWeight: FontWeight.bold,
             )),
           ]),
+          if (market == 'alpha') ...[
+            const SizedBox(height: 7),
+            Row(children: [
+              Expanded(
+                child: Text(
+                  _marketSymbolNames[market]?[_selectedSymbols[market] ?? ''] ??
+                      (_selectedSymbols[market]?.isNotEmpty == true
+                          ? _selectedSymbols[market]!
+                          : tr('تحميل عملات Binance Alpha...', 'Loading Binance Alpha tokens...')),
+                  style: TextStyle(color: violet, fontSize: 12, fontWeight: FontWeight.w800),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              TextButton.icon(
+                onPressed: () => _chooseMarketSymbol(market),
+                icon: const Icon(Icons.currency_exchange, size: 16),
+                label: Text(tr('قائمة العملات', 'Token list')),
+              ),
+            ]),
+          ],
           const SizedBox(height: 10),
           ProChartScreen(
-            key: ValueKey('market-pro-chart-$market'),
+            key: ValueKey('market-pro-chart-$market-${_selectedSymbols[market] ?? ''}'),
             embedded: true,
             initialMarket: market,
-            initialSymbol: (_selectedSymbols[market]?.isNotEmpty ?? false)
-                ? _selectedSymbols[market]!
-                : 'BTCUSDT',
+            initialSymbol: market == 'alpha'
+                ? (_selectedSymbols[market] ?? '')
+                : ((_selectedSymbols[market]?.isNotEmpty ?? false)
+                    ? _selectedSymbols[market]!
+                    : 'BTCUSDT'),
             english: en,
             bg: widget.bg,
             panel: widget.panel,
