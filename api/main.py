@@ -131,6 +131,16 @@ class APIHandler(BaseHTTPRequestHandler):
                 symbol = data.get("symbol", "BTCUSDT")
                 return self.send_json(coordinator.analyze_live(symbol))
 
+            if path == "/agent/submit":
+                result = coordinator.submit_chart_signal(
+                    domain=data.get("domain", ""),
+                    symbol=data.get("symbol", ""),
+                    timeframe=data.get("timeframe", "5m"),
+                )
+                return self.send_json(
+                    result, 200 if result.get("success") else 400
+                )
+
             if path == "/emergency-stop":
                 return self.send_json(coordinator.emergency_stop_all())
 
