@@ -37,6 +37,25 @@ class TestBinanceBookTicker(unittest.TestCase):
         self.assertEqual(result["market"], "futures")
         self.assertEqual(result["spread"], 0.5)
 
+    def test_fetch_candles_passes_historical_time_bounds(self):
+        raw = [[
+            1700000000000, "100", "102", "99", "101", "10",
+            1700000059999, "1000", 5, "4", "400", "0"
+        ], [
+            1700000060000, "101", "103", "100", "102", "11",
+            1700000119999, "1100", 6, "5", "500", "0"
+        ]]
+        with patch.object(self.client, "_request", return_value=raw) as req:
+            frame = self.client.fetch_candles(
+                "spot", "BTCUSDT", "1m", limit=2,
+                closed_only=False, start_time=1700000000000,
+                end_time=1700000120000,
+            )
+        params = req.call_args.args[2]
+        self.assertEqual(params["startTime"], 1700000000000)
+        self.assertEqual(params["endTime"], 1700000120000)
+        self.assertEqual(len(frame), 2)
+
     def test_rejects_invalid_market(self):
         with self.assertRaises(ValueError):
             self.client.fetch_book_ticker("margin", "BTCUSDT")
