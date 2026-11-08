@@ -230,8 +230,11 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
         ),
         Text(
           enabled
-              ? t('يعمل: يفحص السوق ويفتح صفقات تجريبية تلقائياً.',
-                  'Running: scans the market and opens demo trades automatically.')
+              ? (_serverOnline
+                  ? t('يعمل: يفحص السوق ويفتح صفقات تجريبية تلقائياً.',
+                      'Running: scans the market and opens demo trades automatically.')
+                  : t('آخر إعداد محفوظ مفعّل، لكن الخادم غير متصل ولا يمكن تأكيد استمرار التشغيل.',
+                      'Last saved setting is ON, but the server is offline; active trading cannot be confirmed.'))
               : t('متوقف. شغّله ليبدأ الوكيل بالتداول التجريبي.',
                   'Off. Turn it on to let the agent trade in demo.'),
           style: TextStyle(color: widget.muted, fontSize: 11),
