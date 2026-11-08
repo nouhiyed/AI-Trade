@@ -1,10 +1,7 @@
 import 'dart:async';
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-
 import '../services/api_service.dart';
+import 'closed_trade_detail_screen.dart';
 
 const _green = Color(0xFF21D6A1);
 const _red = Color(0xFFFF647C);
@@ -36,16 +33,17 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
   List<Map<String, dynamic>> _trades = [];
   bool _busy = false;
   bool _serverOnline = false;
+  bool _autoLoaded = false;
+  bool _autoSaving = false;
   String? _error;
   Timer? _timer;
-  static const String _autoCacheKey = 'ai_trade_autopilot_config_v1';
 
   String t(String ar, String en) => widget.english ? en : ar;
 
   @override
   void initState() {
     super.initState();
-    _restoreAutoCache();
+    // Autopilot state is safety-critical: only render the server-confirmed value.
     _load();
     _timer = Timer.periodic(const Duration(seconds: 10), (_) => _load());
   }
@@ -59,48 +57,29 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
   Map<String, dynamic> _map(dynamic v) =>
       v is Map ? Map<String, dynamic>.from(v) : <String, dynamic>{};
 
-  Future<void> _restoreAutoCache() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(_autoCacheKey);
-      if (raw == null || raw.isEmpty || !mounted || _auto.isNotEmpty) return;
-      final decoded = jsonDecode(raw);
-      if (decoded is Map) {
-        setState(() => _auto = Map<String, dynamic>.from(decoded));
-      }
-    } catch (_) {
-      // The backend remains the source of truth; cache is only a UI fallback.
-    }
-  }
-
-  Future<void> _saveAutoCache(Map<String, dynamic> value) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_autoCacheKey, jsonEncode(value));
-    } catch (_) {}
-  }
-
   Future<void> _load() async {
     if (_busy) return;
     _busy = true;
     try {
+      // Read the authoritative autopilot state first; never hydrate the switch
+      // from stale device preferences.
+      final auto = await ApiService.autopilot();
       final perf = await ApiService.performance();
       final learning = await ApiService.learning();
-      final auto = await ApiService.autopilot();
-      final journal = await ApiService.journal(limit: 30);
+      final journal = await ApiService.journal(closedOnly: true);
       final rows = journal['trades'];
       if (!mounted) return;
       setState(() {
         _perf = perf;
         _learning = learning;
-        _auto = auto;
+        if (!_autoSaving) _auto = auto;
+        _autoLoaded = true;
         _serverOnline = true;
         _trades = rows is List
             ? rows.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
             : <Map<String, dynamic>>[];
         _error = null;
       });
-      await _saveAutoCache(auto);
     } catch (e) {
       if (mounted) setState(() {
         _error = '$e';
@@ -112,17 +91,23 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
   }
 
   Future<void> _setAuto(Map<String, dynamic> changes) async {
+    if (_autoSaving || !_serverOnline || !_autoLoaded) return;
+    setState(() => _autoSaving = true);
     try {
       final result = await ApiService.autopilotUpdate(changes);
       if (mounted) {
         setState(() {
           _auto = result;
           _serverOnline = true;
+          _autoLoaded = true;
         });
-        await _saveAutoCache(result);
       }
     } catch (e) {
       _toast('$e');
+      // Refresh the server value after a rejected/failed change.
+      await _load();
+    } finally {
+      if (mounted) setState(() => _autoSaving = false);
     }
   }
 
@@ -221,11 +206,20 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
         Row(
           children: [
             Expanded(child: _title(t('التداول الآلي (DEMO)', 'Autopilot (DEMO)'))),
-            Switch(
-              value: enabled,
-              activeColor: _green,
-              onChanged: _serverOnline ? (v) => _setAuto({'enabled': v}) : null,
-            ),
+            if (!_autoLoaded)
+              const SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            else
+              Switch(
+                value: enabled,
+                activeColor: _green,
+                onChanged: _serverOnline && !_autoSaving
+                    ? (v) => _setAuto({'enabled': v})
+                    : null,
+              ),
           ],
         ),
         Text(
@@ -426,62 +420,77 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
   Widget _tradesCard() => _card(Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _title(t('سجل الصفقات', 'Trade journal')),
+          _title(t('أرشيف الصفقات المغلقة', 'CLOSED TRADE ARCHIVE')),
           if (_trades.isEmpty)
-            Text(t('لا توجد صفقات بعد.', 'No trades yet.'),
+            Text(t('لا توجد صفقات مغلقة بعد.', 'No closed trades yet.'),
                 style: TextStyle(color: widget.muted, fontSize: 11)),
-          for (final tr in _trades)
+          for (final trade in _trades)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 5),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: ('${tr['direction']}' == 'LONG' ? _green : _red)
-                          .withOpacity(.15),
-                      borderRadius: BorderRadius.circular(8),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => ClosedTradeDetailScreen(
+                      trade: trade,
+                      english: widget.english,
+                      bg: widget.bg,
+                      panel: widget.panel,
+                      text: widget.text,
+                      muted: widget.muted,
                     ),
-                    child: Text('${tr['direction']}',
-                        style: TextStyle(
-                            color: '${tr['direction']}' == 'LONG' ? _green : _red,
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold)),
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('${tr['symbol']}',
-                            style: TextStyle(
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 5),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.archive_outlined,
+                        color: _blue,
+                        size: 18,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '${trade['symbol'] ?? '—'} · ${(trade['domain'] ?? '').toString().toUpperCase()}',
+                              style: TextStyle(
                                 color: widget.text,
                                 fontWeight: FontWeight.bold,
-                                fontSize: 12)),
-                        Text(
-                          '${tr['status'] == 'OPEN' ? t('مفتوحة', 'OPEN') : (tr['close_reason'] ?? '')}'
-                          ' · ${t('ثقة', 'conf')} ${_n(tr['confidence'], 0)}',
-                          style: TextStyle(color: widget.muted, fontSize: 10),
+                                fontSize: 12,
+                              ),
+                            ),
+                            Text(
+                              '${trade['direction'] ?? ''} · ${trade['close_reason'] ?? 'CLOSED'} · ${t('عرض التشارت والتفاصيل', 'View chart & details')}',
+                              style: TextStyle(color: widget.muted, fontSize: 10),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
+                      ),
+                      Text(
+                        trade['net_pnl'] == null ? '—' : _n(trade['net_pnl'], 4),
+                        style: TextStyle(
+                          color: (double.tryParse('${trade['net_pnl']}') ?? 0) > 0
+                              ? _green
+                              : (double.tryParse('${trade['net_pnl']}') ?? 0) < 0
+                                  ? _red
+                                  : widget.muted,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 12,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Icon(Icons.chevron_right, color: widget.muted, size: 17),
+                    ],
                   ),
-                  Text(
-                    tr['net_pnl'] == null ? '—' : _n(tr['net_pnl'], 3),
-                    style: TextStyle(
-                      color: (double.tryParse('${tr['net_pnl']}') ?? 0) >= 0
-                          ? _green
-                          : _red,
-                      fontWeight: FontWeight.w900,
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
+                ),
               ),
             ),
         ],
       ));
-
   @override
   Widget build(BuildContext context) {
     return Directionality(
