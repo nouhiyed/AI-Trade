@@ -71,14 +71,19 @@ class TestTradingCoordinator(unittest.TestCase):
             }
         }
         calls = []
-        self.system.request_demo_futures_trade = lambda symbol, direction: (
-            calls.append((symbol, direction)) or
-            {"approved": True, "position_id": "demo-test"}
-        )
+        def execute_chart_trade(symbol, direction, signal_override=None):
+            calls.append((symbol, direction, signal_override))
+            return {"approved": True, "position_id": "demo-test"}
+        self.system.request_demo_futures_trade = execute_chart_trade
         result = self.system.submit_chart_signal("futures", "BTCUSDT", "5m", 100, 102, 99)
         self.assertTrue(result["success"], result)
         self.assertTrue(result["opened"])
-        self.assertEqual(calls, [("BTCUSDT", "LONG")])
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][0:2], ("BTCUSDT", "LONG"))
+        self.assertIsNotNone(calls[0][2])
+        self.assertEqual(calls[0][2]["trade_plan"]["entry"], 100)
+        self.assertEqual(calls[0][2]["trade_plan"]["take_profit"], 102)
+        self.assertEqual(calls[0][2]["trade_plan"]["stop_loss"], 99)
         self.assertEqual(result["signal"]["chart_timeframe"], "5m")
         self.assertEqual(result["trade_plan"]["entry"], 100)
         self.assertEqual(result["trade_plan"]["take_profit"], 102)
