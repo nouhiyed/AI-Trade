@@ -210,11 +210,15 @@ class SpotDemoMixin:
 
     # ---- open --------------------------------------------------------------------
 
-    def request_demo_spot_trade(self, symbol, domain="spot", risk_pct=0.5):
+    def request_demo_spot_trade(self, symbol, domain="spot", risk_pct=0.5,
+                                signal_override=None):
         with self._demo_lock:
-            return self._request_demo_spot_trade_locked(symbol, domain, risk_pct)
+            return self._request_demo_spot_trade_locked(
+                symbol, domain, risk_pct, signal_override
+            )
 
-    def _request_demo_spot_trade_locked(self, symbol, domain, risk_pct):
+    def _request_demo_spot_trade_locked(self, symbol, domain, risk_pct,
+                                        signal_override=None):
         symbol = str(symbol).strip().upper()
         domain = str(domain).strip().lower()
         if domain not in SPOT_LIKE:
@@ -235,7 +239,9 @@ class SpotDemoMixin:
         if any(str(p.get("symbol")).upper() == symbol for p in active):
             return {"approved": False, "reason": "A DEMO position on this symbol is already open"}
 
-        signal = self.last_signals.get(domain, {})
+        # Keep manual chart analysis bound to its own signal even if autopilot
+        # refreshes the shared latest-signal cache concurrently.
+        signal = signal_override if isinstance(signal_override, dict) else self.last_signals.get(domain, {})
         if str(signal.get("symbol", "")).upper() != symbol:
             return {"approved": False, "reason": "Symbol does not match latest signal"}
         if str(signal.get("direction", "")).upper() != "BUY":
