@@ -331,10 +331,10 @@ class TradingCoordinator(SpotDemoMixin):
         if not self.notifier.enabled:
             return
         text = (
-            "AI-Trader | DEMO POSITION CLOSED\\n"
-            "Agent: %s\\nSymbol: %s\\nDirection: %s\\n"
-            "Entry: %s\\nExit: %s\\nSL: %s\\nTP: %s\\n"
-            "Reason: %s\\nNet PnL: %+.4f USDT"
+            "AI-Trader | DEMO POSITION CLOSED\n"
+            "Agent: %s\nSymbol: %s\nDirection: %s\n"
+            "Entry: %s\nExit: %s\nSL: %s\nTP: %s\n"
+            "Reason: %s\nNet PnL: %+.4f USDT"
         ) % (
             str(record.get("domain", "futures")).upper(),
             record.get("symbol"), record.get("direction"),
@@ -343,7 +343,7 @@ class TradingCoordinator(SpotDemoMixin):
             reason or record.get("close_reason") or "MANUAL", net,
         )
         if str(record.get("domain", "")).lower() == "futures":
-            text += "\\nLeverage: %sx" % record.get("leverage", 1)
+            text += "\nLeverage: %sx" % record.get("leverage", 1)
         threading.Thread(target=self.notifier.send_message, args=(text,),
                          daemon=True).start()
 
@@ -415,7 +415,7 @@ class TradingCoordinator(SpotDemoMixin):
             lines.append("Confidence: " + str(signal.get("confidence")) + "%")
         if context.get("flags"):
             lines.append("Context: " + "; ".join(context["flags"]))
-        self.notifier.send_message("\\n".join(lines))
+        self.notifier.send_message("\n".join(lines))
 
     def _send_open_snapshot(self, record, signal):
         try:
