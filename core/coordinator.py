@@ -330,9 +330,20 @@ class TradingCoordinator(SpotDemoMixin):
     def _notify_close(self, record, net, reason):
         if not self.notifier.enabled:
             return
-        text = "%s %s closed (%s)\nNet PnL: %+.4f USDT" % (
+        text = (
+            "AI-Trader | DEMO POSITION CLOSED\\n"
+            "Agent: %s\\nSymbol: %s\\nDirection: %s\\n"
+            "Entry: %s\\nExit: %s\\nSL: %s\\nTP: %s\\n"
+            "Reason: %s\\nNet PnL: %+.4f USDT"
+        ) % (
+            str(record.get("domain", "futures")).upper(),
             record.get("symbol"), record.get("direction"),
-            reason or record.get("close_reason") or "MANUAL", net)
+            record.get("entry_price"), record.get("close_price") or record.get("exit_price"),
+            record.get("stop_loss"), record.get("take_profit"),
+            reason or record.get("close_reason") or "MANUAL", net,
+        )
+        if str(record.get("domain", "")).lower() == "futures":
+            text += "\\nLeverage: %sx" % record.get("leverage", 1)
         threading.Thread(target=self.notifier.send_message, args=(text,),
                          daemon=True).start()
 
@@ -372,8 +383,39 @@ class TradingCoordinator(SpotDemoMixin):
         except Exception as error:
             record["journal_error"] = str(error)
         if self.notifier.enabled:
-            threading.Thread(target=self._send_open_snapshot,
-                             args=(dict(record), signal), daemon=True).start()
+            snapshot = dict(record)
+            signal_snapshot = dict(signal)
+            # Essential details are sent immediately; chart rendering is separate.
+            threading.Thread(
+                target=self._notify_open, args=(snapshot, signal_snapshot),
+                name="telegram-open-" + str(record.get("trade_id", ""))[:8],
+                daemon=True,
+            ).start()
+            threading.Thread(
+                target=self._send_open_snapshot, args=(snapshot, signal_snapshot),
+                name="telegram-chart-" + str(record.get("trade_id", ""))[:8],
+                daemon=True,
+            ).start()
+
+    def _notify_open(self, record, signal):
+        domain = str(record.get("domain", "futures")).upper()
+        context = signal.get("market_context") or {}
+        lines = [
+            "AI-Trader | DEMO POSITION OPENED",
+            "Agent: " + domain,
+            "Symbol: " + str(record.get("symbol", "")),
+            "Direction: " + str(record.get("direction", "")),
+            "Entry: " + str(record.get("entry_price", "")),
+            "Stop Loss: " + str(record.get("stop_loss", "")),
+            "Take Profit: " + str(record.get("take_profit", "")),
+        ]
+        if domain == "FUTURES":
+            lines.append("Leverage: " + str(record.get("leverage", 1)) + "x")
+        if signal.get("confidence") is not None:
+            lines.append("Confidence: " + str(signal.get("confidence")) + "%")
+        if context.get("flags"):
+            lines.append("Context: " + "; ".join(context["flags"]))
+        self.notifier.send_message("\\n".join(lines))
 
     def _send_open_snapshot(self, record, signal):
         try:
@@ -922,6 +964,35 @@ class TradingCoordinator(SpotDemoMixin):
             return unknown
 
 
+    def analyze_live_domain(self, symbol, domain, preferred_timeframe=None):
+        """Analyze only the requested agent using only its required live market data."""
+        symbol = str(symbol).strip().upper()
+        domain = str(domain).strip().lower()
+        if domain not in self.agents:
+            return {"symbol": symbol, "signals": {},
+                    "data_errors": {"domain": "Unknown agent"}}
+        live_data = self.market_engine.build_live(symbol, domains={domain})
+        agent_data = self.market_engine.for_live_agent(live_data, domain)
+        if domain == "alpha":
+            agent_data["token_safety"] = self._get_alpha_safety(symbol)
+        signal = self.agents[domain].analyze(agent_data)
+        if domain == "futures" and isinstance(signal, dict):
+            direction = str(signal.get("direction", "WAIT")).upper()
+            if direction in ("LONG", "SHORT"):
+                signal["trade_plan"] = self.trade_planner.create(
+                    agent_data, direction, preferred_timeframe=preferred_timeframe)
+        elif domain == "spot" and isinstance(signal, dict):
+            if str(signal.get("direction", "")).upper() == "BUY":
+                signal["trade_plan"] = self.trade_planner.create(
+                    agent_data, "LONG", preferred_timeframe=preferred_timeframe)
+        self.last_signals[domain] = signal
+        return {
+            "symbol": symbol,
+            "source": live_data.get("source"),
+            "signals": {domain: signal},
+            "data_errors": live_data.get("errors", {}),
+        }
+
     def analyze_live(self, symbol, preferred_timeframe=None):
         symbol = str(symbol).strip().upper()
 
@@ -1055,7 +1126,8 @@ class TradingCoordinator(SpotDemoMixin):
                 return {**base, "success": True, "decision_status": "REJECTED",
                         "decision_reason": reason, "reason": reason}
         else:
-            analysis = self.analyze_live(symbol, preferred_timeframe=timeframe)
+            analysis = self.analyze_live_domain(
+                symbol, domain, preferred_timeframe=timeframe)
             signal = analysis.get("signals", {}).get(domain, {})
         if not isinstance(signal, dict) or signal.get("error"):
             reason = (signal.get("error") if isinstance(signal, dict) else None) or "Analysis unavailable"
