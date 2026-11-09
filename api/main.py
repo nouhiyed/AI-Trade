@@ -81,11 +81,23 @@ def _process_agent_submission(request_id, payload):
     with submission_jobs_lock:
         job = submission_jobs.get(request_id)
         if job is not None:
+            if not isinstance(result, dict):
+                failed = True
+                result = {
+                    "success": False,
+                    "decision_status": "ERROR",
+                    "decision_reason": "Agent returned an invalid decision payload",
+                    "reason": "Agent returned an invalid decision payload",
+                }
             job["status"] = "FAILED" if failed else "COMPLETED"
             job["result"] = result
             job["reason"] = result.get("decision_reason") or result.get("reason")
             job["completed_at"] = time.time()
-            _save_submission_jobs_locked()
+            try:
+                _save_submission_jobs_locked()
+            except Exception as error:
+                # Keep the in-memory result pollable even if persistence fails.
+                print("[API] submission result persistence failed:", type(error).__name__)
 
 
 class APIHandler(BaseHTTPRequestHandler):
@@ -332,7 +344,11 @@ class APIHandler(BaseHTTPRequestHandler):
                 return self.send_json({
                     "system": system_status,
                     "controls": coordinator.get_agent_controls(),
-                    "demo": system_status.get("demo", {})
+                    "demo": system_status.get("demo", {}),
+                    # Expose only configuration state; never return bot credentials.
+                    "notifications": {
+                        "telegram_enabled": bool(coordinator.notifier.enabled)
+                    },
                 })
             return self.send_json({"error": "Not found"}, 404)
         except Exception as e:
