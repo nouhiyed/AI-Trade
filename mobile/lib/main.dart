@@ -71,89 +71,171 @@ class _BalanceAiPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    // Keep the illustration on the side opposite the balance text.
-    final x = size.width * (english ? .82 : .18);
-    final center = Offset(x, size.height * .50);
-    final radius = size.height * .25;
-    final accentA = const Color(0xFF36AFA4).withOpacity(dark ? .16 : .10);
-    final accentB = const Color(0xFF668CCB).withOpacity(dark ? .13 : .08);
-
+    if (size.isEmpty) return;
+    final cx = size.width * (english ? .82 : .18);
+    final cy = size.height * .50;
+    final unit = math.min(size.height * .40, size.width * .22).clamp(54.0, 92.0);
+    final chip = Rect.fromCenter(
+      center: Offset(cx, cy),
+      width: unit * 1.18,
+      height: unit * .92,
+    );
+    final mint = const Color(0xFF22BFAF);
+    final azure = const Color(0xFF5B9DE8);
+    final ink = dark ? const Color(0xFF12263A) : const Color(0xFFEAF4F8);
+    final edge = mint.withOpacity(dark ? .48 : .38);
+    final trace = azure.withOpacity(dark ? .30 : .25);
     final glow = Paint()
       ..shader = RadialGradient(
-        colors: [accentA, accentB, Colors.transparent],
-        stops: const [0, .55, 1],
-      ).createShader(Rect.fromCircle(center: center, radius: radius * 2.0));
-    canvas.drawCircle(center, radius * 2.0, glow);
+        colors: [
+          mint.withOpacity(dark ? .22 : .15),
+          azure.withOpacity(dark ? .10 : .07),
+          Colors.transparent,
+        ],
+      ).createShader(Rect.fromCircle(center: Offset(cx, cy), radius: unit * 2.5));
+    canvas.drawCircle(Offset(cx, cy), unit * 2.5, glow);
 
-    final orbit = Paint()
-      ..color = accentB
+    // Circuit-board routes radiate from the processor into the full card area.
+    final left = cx < size.width / 2;
+    final routePaint = Paint()
+      ..color = trace
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.0;
-    canvas.save();
-    canvas.translate(center.dx, center.dy);
-    canvas.rotate(-.42);
-    canvas.drawOval(
-      Rect.fromCenter(center: Offset.zero, width: radius * 2.65, height: radius * .92),
-      orbit,
-    );
-    canvas.rotate(1.0);
-    orbit.color = accentA;
-    canvas.drawOval(
-      Rect.fromCenter(center: Offset.zero, width: radius * 2.25, height: radius * .82),
-      orbit,
-    );
-    canvas.restore();
-
-    final nodes = <Offset>[
-      Offset(size.width * (english ? .62 : .08), size.height * .22),
-      Offset(size.width * (english ? .78 : .24), size.height * .12),
-      Offset(size.width * (english ? .95 : .38), size.height * .29),
-      Offset(size.width * (english ? .91 : .34), size.height * .72),
-      Offset(size.width * (english ? .70 : .14), size.height * .84),
-    ];
-    final links = <(int, int)>[(0, 1), (1, 2), (2, 3), (3, 4), (4, 0), (0, 3)];
-    final linkPaint = Paint()
-      ..color = accentB
-      ..strokeWidth = 1.0;
-    for (final edge in links) {
-      canvas.drawLine(nodes[edge.$1], nodes[edge.$2], linkPaint);
-    }
-    for (var i = 0; i < nodes.length; i++) {
-      canvas.drawCircle(
-        nodes[i],
-        i.isEven ? 2.6 : 1.8,
-        Paint()..color = accentA,
-      );
-      canvas.drawCircle(
-        nodes[i],
-        i.isEven ? 5.5 : 4.2,
-        Paint()
-          ..color = accentB
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = .8,
-      );
+      ..strokeWidth = 1.15
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    final outerX = left ? size.width * .96 : size.width * .04;
+    final innerX = left ? size.width * .50 : size.width * .50;
+    for (var i = 0; i < 5; i++) {
+      final y = size.height * (.16 + i * .17);
+      final pinY = cy + (i - 2) * unit * .22;
+      final path = Path()
+        ..moveTo(left ? chip.right : chip.left, pinY)
+        ..lineTo(innerX, pinY)
+        ..lineTo(innerX, y)
+        ..lineTo(outerX, y);
+      canvas.drawPath(path, routePaint);
+      canvas.drawCircle(Offset(outerX, y), 2.2,
+          Paint()..color = mint.withOpacity(dark ? .58 : .46));
+      canvas.drawCircle(Offset(innerX, y), 1.6,
+          Paint()..color = azure.withOpacity(dark ? .5 : .38));
     }
 
-    final trace = Path()
-      ..moveTo(nodes[0].dx, size.height * .60)
-      ..cubicTo(
-        size.width * (english ? .67 : .13), size.height * .54,
-        size.width * (english ? .72 : .18), size.height * .43,
-        size.width * (english ? .80 : .26), size.height * .48,
-      )
-      ..cubicTo(
-        size.width * (english ? .86 : .32), size.height * .52,
-        size.width * (english ? .88 : .34), size.height * .34,
-        nodes[2].dx, size.height * .36,
+    // Fine signal traces on the opposite edge give the panel a chart motif.
+    final chartLeft = left ? size.width * .48 : size.width * .06;
+    final chartRight = left ? size.width * .94 : size.width * .52;
+    final chartTop = size.height * .22;
+    final chartBottom = size.height * .78;
+    final chartWidth = chartRight - chartLeft;
+    final chartHeight = chartBottom - chartTop;
+    final signal = Path()
+      ..moveTo(chartLeft, chartTop + chartHeight * .70)
+      ..lineTo(chartLeft + chartWidth * .16, chartTop + chartHeight * .58)
+      ..lineTo(chartLeft + chartWidth * .29, chartTop + chartHeight * .66)
+      ..lineTo(chartLeft + chartWidth * .43, chartTop + chartHeight * .36)
+      ..lineTo(chartLeft + chartWidth * .57, chartTop + chartHeight * .48)
+      ..lineTo(chartLeft + chartWidth * .73, chartTop + chartHeight * .20)
+      ..lineTo(chartRight, chartTop + chartHeight * .27);
+    canvas.drawPath(signal, Paint()
+      ..color = mint.withOpacity(dark ? .42 : .32)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round);
+
+    // Small candlesticks sit behind the traces, like a live market waveform.
+    final candleXs = List<double>.generate(
+      8, (i) => chartLeft + chartWidth * (i + .5) / 8);
+    final heights = [0.50, 0.42, 0.58, 0.31, 0.44, 0.24, 0.36, 0.18];
+    for (var i = 0; i < candleXs.length; i++) {
+      final x = candleXs[i];
+      final mid = chartTop + chartHeight * heights[i];
+      final up = i.isEven;
+      final color = up ? mint : azure;
+      final wick = Paint()
+        ..color = color.withOpacity(dark ? .35 : .27)
+        ..strokeWidth = 1.0;
+      canvas.drawLine(Offset(x, mid - chartHeight * .12),
+          Offset(x, mid + chartHeight * .13), wick);
+      final body = Rect.fromCenter(
+        center: Offset(x, mid + (up ? -2 : 2)),
+        width: math.max(2.0, chartWidth * .025),
+        height: chartHeight * .09,
       );
-    canvas.drawPath(
-      trace,
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(body, const Radius.circular(1.5)),
+        Paint()..color = color.withOpacity(dark ? .30 : .23),
+      );
+    }
+
+    // Processor package and inner silicon die.
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        chip.inflate(unit * .13), Radius.circular(unit * .16)),
+      Paint()..color = mint.withOpacity(dark ? .07 : .06),
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(chip, Radius.circular(unit * .12)),
+      Paint()..color = ink,
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(chip, Radius.circular(unit * .12)),
       Paint()
-        ..color = accentA
+        ..color = edge
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.5
-        ..strokeCap = StrokeCap.round,
+        ..strokeWidth = 1.4,
     );
+    final die = chip.deflate(unit * .18);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(die, Radius.circular(unit * .08)),
+      Paint()..color = mint.withOpacity(dark ? .12 : .10),
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(die, Radius.circular(unit * .08)),
+      Paint()
+        ..color = azure.withOpacity(dark ? .38 : .30)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1,
+    );
+
+    final pinPaint = Paint()
+      ..color = mint.withOpacity(dark ? .62 : .50)
+      ..strokeWidth = 2.0
+      ..strokeCap = StrokeCap.round;
+    for (var i = 0; i < 5; i++) {
+      final px = chip.left + chip.width * (i + .5) / 5;
+      canvas.drawLine(Offset(px, chip.top - unit * .13),
+          Offset(px, chip.top), pinPaint);
+      canvas.drawLine(Offset(px, chip.bottom),
+          Offset(px, chip.bottom + unit * .13), pinPaint);
+      final py = chip.top + chip.height * (i + .5) / 5;
+      canvas.drawLine(Offset(chip.left - unit * .13, py),
+          Offset(chip.left, py), pinPaint);
+      canvas.drawLine(Offset(chip.right, py),
+          Offset(chip.right + unit * .13, py), pinPaint);
+    }
+
+    final label = TextPainter(
+      text: TextSpan(
+        text: 'AI',
+        style: TextStyle(
+          color: dark ? const Color(0xFF8DFFF0) : const Color(0xFF087F78),
+          fontSize: unit * .29,
+          fontWeight: FontWeight.w900,
+          letterSpacing: 1.2,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    label.paint(canvas, Offset(cx - label.width / 2, cy - label.height / 2));
+
+    final nodePaint = Paint()..color = mint.withOpacity(dark ? .68 : .52);
+    for (final point in [
+      Offset(chartLeft, chartTop + chartHeight * .70),
+      Offset(chartLeft + chartWidth * .43, chartTop + chartHeight * .36),
+      Offset(chartRight, chartTop + chartHeight * .27),
+    ]) {
+      canvas.drawCircle(point, 2.4, nodePaint);
+    }
   }
 
   @override
@@ -195,6 +277,8 @@ class _TradeShellState extends State<TradeShell>
   int _statusFailures = 0;
   Map<String, dynamic> demoData = {};
   Map<String, dynamic> agentControls = {};
+  bool telegramEnabled = false;
+  bool telegramStatusKnown = false;
   final Set<String> closingPositionIds = {};
   Timer? _refreshTimer;
   Timer? _statusTimer;
@@ -682,6 +766,11 @@ class _TradeShellState extends State<TradeShell>
     agentControls = controls is Map
         ? Map<String, dynamic>.from(controls)
         : <String, dynamic>{};
+    final notifications = data['notifications'];
+    telegramStatusKnown = notifications is Map &&
+        notifications.containsKey('telegram_enabled');
+    telegramEnabled = telegramStatusKnown &&
+        notifications['telegram_enabled'] == true;
   }
 
   bool get allAgentsEnabled {
@@ -1871,6 +1960,19 @@ class _TradeShellState extends State<TradeShell>
                   'Binance API',
                   tr('غير متصل بالتطبيق', 'Not connected to app'),
                   const Icon(Icons.lock_outline, color: widgetMuted),
+                ),
+                _setting(
+                  Icons.send_rounded,
+                  'Telegram',
+                  !telegramStatusKnown
+                      ? tr('حالة الاتصال غير معروفة', 'Connection status unavailable')
+                      : telegramEnabled
+                          ? tr('مفعّل على الخادم', 'Enabled on backend')
+                          : tr('غير مهيأ: أضف إعدادات البوت في Termux', 'Not configured: add bot settings in Termux'),
+                  Icon(
+                    telegramEnabled ? Icons.check_circle : Icons.warning_amber_rounded,
+                    color: telegramEnabled ? green : red,
+                  ),
                 ),
               ],
             ),
