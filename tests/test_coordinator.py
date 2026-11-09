@@ -85,7 +85,7 @@ class TestTradingCoordinator(unittest.TestCase):
         self.assertEqual(result["trade_plan"]["stop_loss"], 99)
 
     def test_chart_submission_does_not_execute_rejected_signal(self):
-        self.system.analyze_live = lambda symbol, preferred_timeframe=None: {
+        self.system.analyze_live_domain = lambda symbol, domain, preferred_timeframe=None: {
             "signals": {"futures": {
                 "symbol": symbol, "direction": "WAIT", "confidence": 12,
                 "reason": "No directional edge",
@@ -100,7 +100,7 @@ class TestTradingCoordinator(unittest.TestCase):
         self.assertIn("No directional edge", result["decision_reason"])
 
     def test_chart_submission_rejects_invalid_proposed_level_order(self):
-        self.system.analyze_live = lambda symbol, preferred_timeframe=None: {
+        self.system.analyze_live_domain = lambda symbol, domain, preferred_timeframe=None: {
             "signals": {"futures": {
                 "symbol": symbol, "direction": "LONG", "confidence": 80,
                 "trade_plan": {
