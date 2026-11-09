@@ -143,6 +143,49 @@ class TestAutopilot(Base):
         self.assertEqual(again["opened"], [])
         self.assertEqual(len(self.c.journal.recent()), 2)
 
+    def test_shared_slots_are_distributed_across_domains_before_second_entry(self):
+        def opportunity(domain, symbol):
+            signal = plan(symbol)
+            return {
+                "symbol": symbol, "direction": "LONG", "confidence": 80,
+                "trade_plan": signal["trade_plan"], "signal": signal,
+                "domain": domain,
+            }
+
+        self.c.scan_futures = lambda limit=12: {
+            "success": True, "scanned": 3, "actionable": 3,
+            "opportunities": [
+                opportunity("futures", "BTCUSDT"),
+                opportunity("futures", "ETHUSDT"),
+                opportunity("futures", "BNBUSDT"),
+            ],
+        }
+        self.c.scan_spot = lambda limit=8: {
+            "success": True, "scanned": 1, "actionable": 1,
+            "opportunities": [opportunity("spot", "SOLUSDT")],
+        }
+        self.c.scan_alpha = lambda limit=6: {
+            "success": True, "scanned": 1, "actionable": 1,
+            "opportunities": [opportunity("alpha", "ALPHA_9USDT")],
+        }
+        self.c.request_demo_futures_trade = lambda symbol, direction, **kw: {
+            "approved": True, "trade_id": symbol, "leverage": 1,
+        }
+        self.c.request_demo_spot_trade = lambda symbol, domain="spot", **kw: {
+            "approved": True, "trade_id": symbol, "leverage": 1,
+        }
+
+        ap = Autopilot(self.c, config_path="config/ap-fair.json")
+        ap.update({
+            "enabled": True, "max_concurrent": 3, "use_context": False,
+            "min_confidence": 60,
+        })
+        result = ap.tick()
+        self.assertEqual(
+            sorted(item["domain"] for item in result["opened"]),
+            ["alpha", "futures", "spot"],
+        )
+
     def test_learning_disabled_setup_is_skipped(self):
         self._scan([("BTCUSDT", 80)])
         key = setup_key("LONG", 80, 2.0)
