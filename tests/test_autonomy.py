@@ -11,6 +11,7 @@ from core.chart_image import render_trade_chart
 from core.coordinator import TradingCoordinator
 from core.learning import setup_key
 from core.market_context import MarketContext, classify_headline, parse_rss
+from core.market_data_engine import MarketDataEngine
 from core.notifier import Notifier
 
 
@@ -314,6 +315,36 @@ class TestOutputs(unittest.TestCase):
         n = Notifier(token="", chat_id="")
         self.assertFalse(n.enabled)
         self.assertFalse(n.send_message("x"))
+
+
+class TestDomainScopedMarketBuild(unittest.TestCase):
+    def test_focused_analysis_fetches_only_requested_market(self):
+        engine = MarketDataEngine()
+        calls = []
+
+        def snapshot(market, symbol, timeframes, candle_limit, orderbook_limit):
+            calls.append((market, tuple(timeframes)))
+            return {"errors": {}, "candles": {}, "orderbook": {}}
+
+        engine.binance.fetch_snapshot = snapshot
+        engine.build_live("BTCUSDT", domains={"futures"})
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][0], "futures")
+        self.assertEqual(calls[0][1], tuple(engine.timeframes["futures"]))
+
+    def test_alpha_focused_build_uses_alpha_timeframes_from_spot_feed(self):
+        engine = MarketDataEngine()
+        calls = []
+
+        def snapshot(market, symbol, timeframes, candle_limit, orderbook_limit):
+            calls.append((market, tuple(timeframes)))
+            return {"errors": {}, "candles": {}, "orderbook": {}}
+
+        engine.binance.fetch_snapshot = snapshot
+        engine.build_live("ALPHA_9USDT", domains={"alpha"})
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][0], "spot")
+        self.assertEqual(calls[0][1], tuple(engine.timeframes["alpha"]))
 
 
 if __name__ == "__main__":
