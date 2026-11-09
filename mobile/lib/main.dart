@@ -2236,42 +2236,114 @@ class OrbPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width * .5, size.height * .5);
     final r = size.width * .27;
+    final sphere = Rect.fromCircle(center: center, radius: r);
+
+    // Deep ambient glow behind the processor core.
     canvas.drawCircle(
       center,
-      r * 1.8,
+      r * 2.25,
       Paint()
         ..shader = RadialGradient(
-          colors: [cyan.withOpacity(.28), blue.withOpacity(.06), Colors.transparent],
-        ).createShader(Rect.fromCircle(center: center, radius: r * 1.8)),
+          colors: [
+            cyan.withOpacity(.34),
+            blue.withOpacity(.14),
+            violet.withOpacity(.045),
+            Colors.transparent,
+          ],
+          stops: const [0, .38, .68, 1],
+        ).createShader(Rect.fromCircle(center: center, radius: r * 2.25)),
     );
+
+    // Three-dimensional metallic glass sphere with a bright upper-left highlight.
     canvas.drawCircle(
       center,
       r,
       Paint()
         ..shader = const RadialGradient(
-          colors: [Color(0xFF8CFFF4), Color(0xFF00AFA5), Color(0xFF112044)],
-          center: Alignment(-.4, -.4),
-        ).createShader(Rect.fromCircle(center: center, radius: r)),
+          center: Alignment(-.42, -.48),
+          radius: .95,
+          colors: [
+            Color(0xFFE1FFFC),
+            Color(0xFF39D8CB),
+            Color(0xFF087E91),
+            Color(0xFF101A38),
+          ],
+          stops: [0, .18, .52, 1],
+        ).createShader(sphere),
     );
+    canvas.drawCircle(
+      Offset(center.dx - r * .25, center.dy - r * .34),
+      r * .22,
+      Paint()
+        ..shader = RadialGradient(
+          colors: [Colors.white.withOpacity(.72), Colors.white.withOpacity(0)],
+        ).createShader(Rect.fromCircle(
+          center: Offset(center.dx - r * .25, center.dy - r * .34),
+          radius: r * .22,
+        )),
+    );
+
+    // Curved latitude and longitude traces give the core a dimensional AI-shell.
+    final mesh = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1
+      ..color = cyan.withOpacity(.28);
+    for (int i = -2; i <= 2; i++) {
+      final y = center.dy + i * r * .27;
+      final half = math.sqrt(math.max(0, r * r - math.pow(i * r * .27, 2)));
+      canvas.drawArc(
+        Rect.fromCenter(center: Offset(center.dx, y), width: half * 2, height: r * .38),
+        math.pi,
+        math.pi,
+        false,
+        mesh,
+      );
+    }
     for (int i = 0; i < 3; i++) {
       canvas.save();
       canvas.translate(center.dx, center.dy);
-      canvas.rotate(t * math.pi * 2 + i * math.pi / 3);
+      canvas.rotate((t * math.pi * 2) + i * math.pi / 3);
       canvas.drawOval(
-        Rect.fromCenter(center: Offset.zero, width: r * 3, height: r * .85),
+        Rect.fromCenter(center: Offset.zero, width: r * 3.25, height: r * .78),
         Paint()
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.4
-          ..color = [cyan, blue, violet][i].withOpacity(.8),
+          ..strokeWidth = 1.5
+          ..color = [cyan, blue, violet][i].withOpacity(.88),
+      );
+      canvas.drawOval(
+        Rect.fromCenter(center: Offset.zero, width: r * 2.65, height: r * .54),
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = .7
+          ..color = Colors.white.withOpacity(.22),
       );
       canvas.restore();
     }
-    for (int i = 0; i < 8; i++) {
-      final a = t * math.pi * 2 + i * math.pi / 4;
+
+    // Orbiting data nodes and subtle connector beams.
+    for (int i = 0; i < 10; i++) {
+      final a = t * math.pi * 2 + i * math.pi / 5;
+      final point = Offset(
+        center.dx + math.cos(a) * r * 1.72,
+        center.dy + math.sin(a) * r * .82,
+      );
+      canvas.drawLine(
+        center,
+        point,
+        Paint()..color = (i.isEven ? cyan : violet).withOpacity(.12),
+      );
       canvas.drawCircle(
-        Offset(center.dx + math.cos(a) * r * 1.5, center.dy + math.sin(a) * r * .7),
-        3,
+        point,
+        i % 3 == 0 ? 4 : 2.4,
         Paint()..color = i.isEven ? cyan : violet,
+      );
+      canvas.drawCircle(
+        point,
+        7,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = .8
+          ..color = (i.isEven ? cyan : violet).withOpacity(.38),
       );
     }
   }
@@ -2279,7 +2351,6 @@ class OrbPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant OrbPainter old) => old.t != t;
 }
-
 class NetworkPainter extends CustomPainter {
   final double t;
   NetworkPainter(this.t);
