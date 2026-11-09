@@ -33,3 +33,6 @@ apk-output/
 # Demo runtime state
 config/demo_state.json
 config/autopilot.json
+
+# Local Telegram credentials (never commit)
+config/telegram.json

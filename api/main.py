@@ -323,6 +323,9 @@ class APIHandler(BaseHTTPRequestHandler):
                 if snapshot["status"] == "FAILED":
                     response["reason"] = snapshot.get("reason", "Agent request failed")
                 return self.send_json(response)
+            if path == "/notifications/status":
+                return self.send_json(coordinator.notifier.status())
+
             if path == "/health":
                 return self.send_json({"ok": True, "mode": coordinator.mode})
             if path == "/status":
@@ -339,6 +342,19 @@ class APIHandler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path.rstrip("/")
         try:
             data = self.read_body()
+
+            if path == "/notifications/configure":
+                status = coordinator.notifier.configure(data.get("bot_token"), data.get("chat_id"))
+                return self.send_json({"success": True, **status})
+
+            if path == "/notifications/test":
+                sent = coordinator.notifier.send_message(
+                    "AI-Trader Telegram connection test: notifications are working."
+                )
+                status = coordinator.notifier.status()
+                return self.send_json({"success": sent, "sent": sent,
+                    "reason": status.get("last_error"), "status": status},
+                    200 if sent else 503)
 
             if path == "/scan/futures":
                 return self.send_json(

@@ -668,12 +668,15 @@ class TradingCoordinator(SpotDemoMixin):
         except (TypeError, ValueError, AttributeError):
             return 1
 
-    def request_demo_futures_trade(self, symbol, direction, risk_pct=0.5, leverage=1):
+    def request_demo_futures_trade(self, symbol, direction, risk_pct=0.5, leverage=1,
+                                   signal_override=None):
         with self._demo_lock:
-            return self._request_demo_futures_trade_locked(symbol, direction, risk_pct, leverage)
+            return self._request_demo_futures_trade_locked(
+                symbol, direction, risk_pct, leverage, signal_override
+            )
 
     def _request_demo_futures_trade_locked(
-        self, symbol, direction, risk_pct=0.5, leverage=1
+        self, symbol, direction, risk_pct=0.5, leverage=1, signal_override=None
     ):
         symbol = str(symbol).strip().upper()
         direction = str(direction).strip().upper()
@@ -700,7 +703,9 @@ class TradingCoordinator(SpotDemoMixin):
         if any(str(p.get("symbol")).upper() == symbol for p in active):
             return {"approved": False, "reason": "A DEMO position on this symbol is already open"}
 
-        signal = self.last_signals.get("futures", {})
+        # Manual chart submissions pass their own analyzed signal so an
+        # overlapping autopilot scan cannot replace it between analysis/execution.
+        signal = signal_override if isinstance(signal_override, dict) else self.last_signals.get("futures", {})
         if str(signal.get("symbol", "")).upper() != symbol:
             return {"approved": False, "reason": "Symbol does not match latest signal"}
         if str(signal.get("direction", "")).upper() != direction:
@@ -1139,9 +1144,13 @@ class TradingCoordinator(SpotDemoMixin):
 
         try:
             if domain == "futures":
-                execution = self.request_demo_futures_trade(symbol, direction)
+                execution = self.request_demo_futures_trade(
+                    symbol, direction, signal_override=signal
+                )
             else:
-                execution = self.request_demo_spot_trade(symbol, domain=domain)
+                execution = self.request_demo_spot_trade(
+                    symbol, domain=domain, signal_override=signal
+                )
             opened = bool(execution.get("approved"))
             reason = (
                 "Agent accepted the setup and DEMO risk/execution checks passed"

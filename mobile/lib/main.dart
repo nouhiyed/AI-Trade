@@ -65,6 +65,49 @@ class _AITradeAppState extends State<AITradeApp> {
 }
 
 
+class AppAtmospherePainter extends CustomPainter {
+  final bool dark;
+  const AppAtmospherePainter({required this.dark});
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawRect(Offset.zero & size,
+      Paint()..color = dark ? const Color(0xFF07101D) : const Color(0xFFF1F6FC));
+    final accents = [
+      [Offset(size.width * .08, size.height * .16), size.width * .72,
+        dark ? const Color(0xFF00D9C2) : const Color(0xFF52B8B0)],
+      [Offset(size.width * .95, size.height * .53), size.width * .82,
+        dark ? const Color(0xFF7357D8) : const Color(0xFF9C8DE0)],
+      [Offset(size.width * .22, size.height * .94), size.width * .55,
+        dark ? const Color(0xFF7357D8) : const Color(0xFF9C8DE0)],
+    ];
+    for (final item in accents) {
+      final center = item[0] as Offset, radius = item[1] as double, color = item[2] as Color;
+      canvas.drawCircle(center, radius, Paint()..shader = RadialGradient(colors: [
+        color.withOpacity(dark ? .105 : .075), color.withOpacity(.018), Colors.transparent,
+      ], stops: const [0, .48, 1]).createShader(
+        Rect.fromCircle(center: center, radius: radius)));
+    }
+    final grid = Paint()
+      ..color = (dark ? const Color(0xFF5ACFCB) : const Color(0xFF5B8EA7))
+          .withOpacity(dark ? .045 : .055)..strokeWidth = .7;
+    for (double x = 0; x < size.width; x += 34) {
+      canvas.drawLine(Offset(x, 0), Offset(x, size.height), grid);
+    }
+    for (double y = 0; y < size.height; y += 34) {
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), grid);
+    }
+    final orbit = Paint()..style = PaintingStyle.stroke..strokeWidth = 1.1
+      ..color = (dark ? const Color(0xFF00D9C2) : const Color(0xFF52B8B0))
+          .withOpacity(.12);
+    canvas.drawOval(Rect.fromCenter(center: Offset(size.width * .82, size.height * .22),
+      width: size.width * .82, height: size.width * .24), orbit);
+    canvas.drawOval(Rect.fromCenter(center: Offset(size.width * .12, size.height * .76),
+      width: size.width * .70, height: size.width * .20), orbit);
+  }
+  @override
+  bool shouldRepaint(covariant AppAtmospherePainter old) => old.dark != dark;
+}
+
 class _BalanceAiPainter extends CustomPainter {
   final bool dark;
   final bool english;
@@ -803,7 +846,12 @@ class _TradeShellState extends State<TradeShell>
     ];
 
     return Scaffold(
-      body: SafeArea(
+      backgroundColor: Colors.transparent,
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          CustomPaint(painter: AppAtmospherePainter(dark: widget.dark)),
+          SafeArea(
         bottom: false,
         child: Column(
           children: [
@@ -815,6 +863,8 @@ class _TradeShellState extends State<TradeShell>
             _bottomBar(titles),
           ],
         ),
+          ),
+        ],
       ),
     );
   }
