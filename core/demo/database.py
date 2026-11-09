@@ -73,6 +73,7 @@ class DemoDatabase:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
+        self._lock = threading.RLock()
         self.connection = sqlite3.connect(
             str(self.db_path),
             timeout=30,
@@ -89,20 +90,20 @@ class DemoDatabase:
         self.connection.create_aggregate(
             "demo_decimal_sum", 1, _DecimalSum,
         )
-        self.connection.execute("PRAGMA foreign_keys = ON")
-        self.connection.execute("PRAGMA journal_mode = WAL")
-
-        self._lock = threading.RLock()
+        with self._lock:
+            self.connection.execute("PRAGMA busy_timeout = 30000")
+            self.connection.execute("PRAGMA foreign_keys = ON")
+            self.connection.execute("PRAGMA journal_mode = WAL")
         self._depth = 0
         self._savepoint_id = 0
         self._closed = False
 
     @contextmanager
     def transaction(self):
-        if self._closed:
-            raise RuntimeError("Database is closed")
-
         with self._lock:
+            if self._closed:
+                raise RuntimeError("Database is closed")
+
             depth = self._depth
             savepoint = None
 

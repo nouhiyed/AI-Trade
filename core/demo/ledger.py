@@ -25,7 +25,12 @@ class Ledger:
 
     def _initialize(self):
         schema = Path(__file__).with_name("schema.sql")
-        self.connection.executescript(schema.read_text(encoding="utf-8"))
+        # executescript performs implicit transaction boundaries; serialize it
+        # with every DemoDatabase transaction to avoid racing the monitor thread.
+        with self.database._lock:
+            if self.database._closed:
+                raise RuntimeError("Database is closed")
+            self.connection.executescript(schema.read_text(encoding="utf-8"))
 
     @staticmethod
     def _amount(value, allow_zero=False):

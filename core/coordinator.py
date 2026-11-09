@@ -376,6 +376,12 @@ class TradingCoordinator(SpotDemoMixin):
                              args=(dict(record), signal), daemon=True).start()
 
     def _send_open_snapshot(self, record, signal):
+        ctx = signal.get("market_context") or {}
+        caption = "%s %s opened (DEMO)\nEntry %s\nSL %s\nTP %s\nConfidence %s\n%s" % (
+            record.get("symbol"), record.get("direction"),
+            record.get("entry_price"), record.get("stop_loss"),
+            record.get("take_profit"), signal.get("confidence"),
+            "; ".join(ctx.get("flags", [])))
         try:
             domain = record.get("domain", "futures")
             if domain == "alpha":
@@ -390,17 +396,14 @@ class TradingCoordinator(SpotDemoMixin):
                 candles, record["direction"], float(record["entry_price"]),
                 float(record["stop_loss"]), float(record["take_profit"]),
                 record["symbol"])
-            ctx = signal.get("market_context") or {}
-            caption = "%s %s (DEMO)\nEntry %s\nSL %s\nTP %s\nConfidence %s\n%s" % (
-                record["symbol"], record["direction"], record["entry_price"],
-                record["stop_loss"], record["take_profit"],
-                signal.get("confidence"), "; ".join(ctx.get("flags", [])))
-            if png:
-                self.notifier.send_photo(png, caption)
-            else:
-                self.notifier.send_message(caption)
+            if png and self.notifier.send_photo(png, caption):
+                return
+            # A failed chart fetch or Telegram photo upload must not suppress
+            # the essential trade-open notification.
+            self.notifier.send_message(caption)
         except Exception as error:
-            print("[NOTIFY] snapshot failed:", error)
+            print("[NOTIFY] snapshot failed:", type(error).__name__)
+            self.notifier.send_message(caption)
 
     def _catch_up(self, record, direction, stop, target):
         """After an outage, replay 1m candles to see if stop/target was touched.

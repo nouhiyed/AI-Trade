@@ -28,7 +28,9 @@ class Notifier:
         try:
             r = self.session.post(self._url("sendMessage"), timeout=self.timeout,
                                   data={"chat_id": self.chat_id, "text": text[:4000]})
-            return r.ok
+            r.raise_for_status()
+            payload = r.json()
+            return isinstance(payload, dict) and payload.get("ok") is True
         except Exception as error:
             print("[NOTIFY] message failed:", type(error).__name__)
             return False
@@ -41,7 +43,9 @@ class Notifier:
                 self._url("sendPhoto"), timeout=self.timeout,
                 data={"chat_id": self.chat_id, "caption": caption[:1000]},
                 files={"photo": ("trade.png", png_bytes, "image/png")})
-            return r.ok
+            r.raise_for_status()
+            payload = r.json()
+            return isinstance(payload, dict) and payload.get("ok") is True
         except Exception as error:
             print("[NOTIFY] photo failed:", type(error).__name__)
             return False
