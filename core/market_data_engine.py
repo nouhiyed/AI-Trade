@@ -133,11 +133,16 @@ class MarketDataEngine:
 
         return result
 
-    def build_live(self, symbol):
+    def build_live(self, symbol, domains=None):
         symbol = str(symbol).strip().upper()
 
         if not symbol:
             raise ValueError("Symbol cannot be empty")
+
+        requested = set(domains or self.timeframes)
+        unknown = requested.difference(self.timeframes)
+        if unknown:
+            raise ValueError("Unknown live market domain(s): " + ", ".join(sorted(unknown)))
 
         result = {
             "symbol": symbol,
@@ -154,13 +159,22 @@ class MarketDataEngine:
             "errors": {}
         }
 
-        market_domains = {
-            "futures": "futures",
-            "spot": "spot"
-        }
+        market_domains = {}
+        if "futures" in requested:
+            market_domains["futures"] = "futures"
+        if requested.intersection({"spot", "alpha"}):
+            market_domains["spot"] = "spot"
 
         for market, domain in market_domains.items():
-            frames = self.timeframes[domain]
+            if market == "spot":
+                requested_frames = set()
+                if "spot" in requested:
+                    requested_frames.update(self.timeframes["spot"])
+                if "alpha" in requested:
+                    requested_frames.update(self.timeframes["alpha"])
+                frames = [tf for tf in self.timeframes["spot"] if tf in requested_frames]
+            else:
+                frames = self.timeframes[domain]
 
             try:
                 snapshot = self.binance.fetch_snapshot(
@@ -194,13 +208,13 @@ class MarketDataEngine:
                 result["errors"][f"{market}_snapshot"] = str(error)
 
         # Alpha currently analyzes Spot market candles.
-        result["timeframes"]["alpha"] = {
-            timeframe: result["timeframes"]["spot"][timeframe]
-            for timeframe in self.timeframes["alpha"]
-            if timeframe in result["timeframes"]["spot"]
-        }
-
-        result["orderbooks"]["alpha"] = result["orderbooks"]["spot"]
+        if "alpha" in requested:
+            result["timeframes"]["alpha"] = {
+                timeframe: result["timeframes"]["spot"][timeframe]
+                for timeframe in self.timeframes["alpha"]
+                if timeframe in result["timeframes"]["spot"]
+            }
+            result["orderbooks"]["alpha"] = result["orderbooks"]["spot"]
 
         return result
 
