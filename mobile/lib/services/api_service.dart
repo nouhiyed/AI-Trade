@@ -16,19 +16,38 @@ class ApiService {
     late http.Response response;
 
     try {
+      final duration = requestTimeout ?? timeout;
       if (method == 'GET') {
-        response = await http.get(uri).timeout(requestTimeout ?? timeout);
+        response = await http.get(
+          uri,
+          headers: const {'Accept': 'application/json'},
+        ).timeout(duration);
       } else {
         response = await http.post(
           uri,
-          headers: {'Content-Type': 'application/json'},
+          headers: const {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+          },
           body: jsonEncode(body ?? {}),
-        ).timeout(requestTimeout ?? timeout);
+        ).timeout(duration);
       }
 
-      final decoded = jsonDecode(response.body);
+      dynamic decoded;
+      try {
+        decoded = jsonDecode(response.body);
+      } on FormatException {
+        final detail = response.body.trim();
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          throw Exception(
+            'HTTP ${response.statusCode}${detail.isEmpty ? '' : ': ${detail.substring(0, detail.length > 180 ? 180 : detail.length)}'}',
+          );
+        }
+        throw Exception('Server returned an invalid JSON response');
+      }
+
       if (decoded is! Map<String, dynamic>) {
-        throw Exception('Invalid server response');
+        throw Exception('Invalid server response format');
       }
 
       if (allowNotFound &&
@@ -44,6 +63,8 @@ class ApiService {
         );
       }
       return decoded;
+    } on Exception catch (e) {
+      throw Exception('API request failed ($path): $e');
     } catch (e) {
       throw Exception('API request failed ($path): $e');
     }
