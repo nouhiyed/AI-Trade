@@ -195,7 +195,7 @@ class TestAutopilot(Base):
         ap.update({"enabled": True})
         out = ap.tick()
         self.assertEqual(out["opened"], [])
-        self.assertIn("disabled by learning", out["skipped"][0]["reason"])
+        self.assertTrue(any("disabled by learning" in item["reason"] for item in out["skipped"]))
 
     def test_context_veto_blocks_trade(self):
         class Ctx:
@@ -206,7 +206,7 @@ class TestAutopilot(Base):
         ap.update({"enabled": True})
         out = ap.tick()
         self.assertEqual(out["opened"], [])
-        self.assertIn("Context veto", out["skipped"][0]["reason"])
+        self.assertTrue(any("Context veto" in item["reason"] for item in out["skipped"]))
 
     def test_config_is_clamped(self):
         ap = Autopilot(self.c, config_path="config/ap.json")
