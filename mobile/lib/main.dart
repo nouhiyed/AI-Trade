@@ -5,6 +5,7 @@ import 'screens/performance_screen.dart';
 import 'screens/pro_chart_screen.dart';
 import 'screens/closed_trade_detail_screen.dart';
 import 'services/api_service.dart';
+import 'widgets/coin_logo.dart';
 
 void main() => runApp(const AITradeApp());
 
@@ -456,6 +457,7 @@ class _TradeShellState extends State<TradeShell>
                 ),
               ),
               ...symbols.map((symbol) => ListTile(
+                leading: CoinLogo(symbol: symbol, size: 30),
                 title: Text(
                   _marketSymbolNames[market]?[symbol] ?? symbol,
                   style: TextStyle(color: widget.text, fontWeight: FontWeight.w700),
