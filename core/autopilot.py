@@ -42,6 +42,7 @@ class Autopilot:
         self.last_run = None
         self.last_result = {}
         self._cooldown = {}          # symbol -> unix time when it may trade again
+        self._domain_cursor = 0        # rotating first chance across enabled agents
         self._lock = threading.Lock()
         self._load()
 
@@ -108,25 +109,27 @@ class Autopilot:
             if slots <= 0:
                 result["skipped"].append({"reason": "Max concurrent trades reached"})
 
-            sources = []
-            limit = int(cfg["scan_limit"])
-            if cfg["trade_futures"]:
-                sources.append(("futures", lambda: self.c.scan_futures(limit=limit)))
-            if cfg["trade_spot"]:
-                sources.append(("spot", lambda: self.c.scan_spot(limit=min(limit, 8))))
-            if cfg["trade_alpha"]:
-                sources.append(("alpha", lambda: self.c.scan_alpha(limit=min(limit, 6))))
-
+            scanners = {
+                "futures": lambda: self.c.scan_futures(limit=limit),
+                "spot": lambda: self.c.scan_spot(limit=min(limit, 8)),
+                "alpha": lambda: self.c.scan_alpha(limit=min(limit, 6)),
+            }
+            enabled = [d for d, key in (
+                ("futures", "trade_futures"),
+                ("spot", "trade_spot"),
+                ("alpha", "trade_alpha"),
+            ) if cfg[key]]
             result["scanned"] = 0
             result["actionable"] = 0
-            # Keep every enabled market scanner running even when entry slots
-            # are full; only execution is blocked by the shared slot limit.
-            for domain, scan_fn in sources:
+            scans = {}
+            # Scan every enabled domain, even if execution slots are full.
+            for domain in enabled:
                 try:
-                    scan = scan_fn()
+                    scan = scanners[domain]()
                 except Exception as error:
                     result["skipped"].append({"domain": domain, "reason": str(error)})
                     continue
+                scans[domain] = scan
                 result["scanned"] += scan.get("scanned") or 0
                 result["actionable"] += scan.get("actionable") or 0
                 if scan.get("rejections"):
@@ -137,12 +140,32 @@ class Autopilot:
                 if not scan.get("success"):
                     result["skipped"].append(
                         {"domain": domain, "reason": scan.get("reason", "Scan failed")})
-                    continue
-                slots = self._process(domain, scan, cfg, open_symbols, slots, result)
+
+            # Give each domain one successful entry before any domain gets a
+            # second slot. Rotate the starting domain every cycle.
+            if enabled:
+                offset = self._domain_cursor % len(enabled)
+                ordered = enabled[offset:] + enabled[:offset]
+                self._domain_cursor = (offset + 1) % len(enabled)
+                for domain in ordered:
+                    scan = scans.get(domain)
+                    if scan and scan.get("success") and slots > 0:
+                        slots = self._process(
+                            domain, scan, cfg, open_symbols, slots, result,
+                            max_new=1)
+                # Reuse unfilled slots if other domains had no valid opportunity.
+                for domain in ordered:
+                    scan = scans.get(domain)
+                    if scan and scan.get("success") and slots > 0:
+                        slots = self._process(
+                            domain, scan, cfg, open_symbols, slots, result)
+
             self.last_result = result
             return result
 
-    def _process(self, domain, scan, cfg, open_symbols, slots, result):
+    def _process(self, domain, scan, cfg, open_symbols, slots, result,
+                 max_new=None):
+        opened_count = 0
         for opp in scan.get("opportunities", []):
             if slots <= 0:
                 break
@@ -196,6 +219,9 @@ class Autopilot:
                                          "direction": direction,
                                          "leverage": trade.get("leverage", selected_leverage if domain == "futures" else 1),
                                          "trade_id": trade.get("trade_id")})
+                opened_count += 1
+                if max_new is not None and opened_count >= max_new:
+                    break
             else:
                 skip(trade.get("reason", "Rejected"))
         return slots
