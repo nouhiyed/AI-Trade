@@ -109,6 +109,7 @@ class Autopilot:
             if slots <= 0:
                 result["skipped"].append({"reason": "Max concurrent trades reached"})
 
+            limit = int(cfg["scan_limit"])
             scanners = {
                 "futures": lambda: self.c.scan_futures(limit=limit),
                 "spot": lambda: self.c.scan_spot(limit=min(limit, 8)),
