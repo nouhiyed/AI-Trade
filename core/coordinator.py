@@ -668,12 +668,15 @@ class TradingCoordinator(SpotDemoMixin):
         except (TypeError, ValueError, AttributeError):
             return 1
 
-    def request_demo_futures_trade(self, symbol, direction, risk_pct=0.5, leverage=1):
+    def request_demo_futures_trade(self, symbol, direction, risk_pct=0.5, leverage=1,
+                                   signal_override=None):
         with self._demo_lock:
-            return self._request_demo_futures_trade_locked(symbol, direction, risk_pct, leverage)
+            return self._request_demo_futures_trade_locked(
+                symbol, direction, risk_pct, leverage, signal_override
+            )
 
     def _request_demo_futures_trade_locked(
-        self, symbol, direction, risk_pct=0.5, leverage=1
+        self, symbol, direction, risk_pct=0.5, leverage=1, signal_override=None
     ):
         symbol = str(symbol).strip().upper()
         direction = str(direction).strip().upper()
