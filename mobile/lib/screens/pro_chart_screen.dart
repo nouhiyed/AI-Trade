@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../services/api_service.dart';
+import '../widgets/coin_logo.dart';
 
 const _up = Color(0xFF26A69A);
 const _down = Color(0xFFEF5350);
@@ -269,6 +270,7 @@ class _ProChartScreenState extends State<ProChartScreen> {
                         children: [
                           for (final s in shown)
                             ListTile(
+                              leading: CoinLogo(symbol: s, size: 30),
                               title: Text(_symbolNames[s] ?? s,
                                 style: TextStyle(color: widget.text, fontWeight: FontWeight.w700)),
                               subtitle: Text(s, style: TextStyle(color: widget.muted, fontSize: 11)),
