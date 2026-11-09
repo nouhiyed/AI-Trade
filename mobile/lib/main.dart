@@ -74,7 +74,7 @@ class _BalanceAiPainter extends CustomPainter {
     if (size.isEmpty) return;
     final cx = size.width * (english ? .82 : .18);
     final cy = size.height * .50;
-    final unit = math.min(size.height * .40, size.width * .22).clamp(54.0, 92.0);
+    final unit = math.min(size.height * .40, size.width * .22).clamp(54.0, 92.0).toDouble();
     final chip = Rect.fromCenter(
       center: Offset(cx, cy),
       width: unit * 1.18,
@@ -158,7 +158,7 @@ class _BalanceAiPainter extends CustomPainter {
           Offset(x, mid + chartHeight * .13), wick);
       final body = Rect.fromCenter(
         center: Offset(x, mid + (up ? -2 : 2)),
-        width: math.max(2.0, chartWidth * .025),
+        width: math.max(2.0, chartWidth * .025).toDouble(),
         height: chartHeight * .09,
       );
       canvas.drawRRect(
