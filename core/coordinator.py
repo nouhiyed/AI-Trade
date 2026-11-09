@@ -433,10 +433,12 @@ class TradingCoordinator(SpotDemoMixin):
                 float(record["stop_loss"]), float(record["take_profit"]),
                 record["symbol"])
             ctx = signal.get("market_context") or {}
-            caption = "%s %s (DEMO)\nEntry %s\nSL %s\nTP %s\nConfidence %s\n%s" % (
+            caption = "%s %s %s (DEMO)\nEntry %s\nSL %s\nTP %s\nLeverage %sx\nConfidence %s\n%s" % (
+                str(record.get("domain", "futures")).upper(),
                 record["symbol"], record["direction"], record["entry_price"],
                 record["stop_loss"], record["take_profit"],
-                signal.get("confidence"), "; ".join(ctx.get("flags", [])))
+                record.get("leverage", 1), signal.get("confidence"),
+                "; ".join(ctx.get("flags", [])))
             if png:
                 self.notifier.send_photo(png, caption)
             else:
@@ -971,8 +973,16 @@ class TradingCoordinator(SpotDemoMixin):
         if domain not in self.agents:
             return {"symbol": symbol, "signals": {},
                     "data_errors": {"domain": "Unknown agent"}}
-        live_data = self.market_engine.build_live(symbol, domains={domain})
-        agent_data = self.market_engine.for_live_agent(live_data, domain)
+        try:
+            live_data = self.market_engine.build_live(symbol, domains={domain})
+            agent_data = self.market_engine.for_live_agent(live_data, domain)
+        except Exception as error:
+            return {
+                "symbol": symbol,
+                "source": "binance_rest",
+                "signals": {domain: {"error": str(error)}},
+                "data_errors": {"market_data": str(error)},
+            }
         if domain == "alpha":
             agent_data["token_safety"] = self._get_alpha_safety(symbol)
         signal = self.agents[domain].analyze(agent_data)
