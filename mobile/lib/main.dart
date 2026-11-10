@@ -2676,7 +2676,7 @@ class HeroMarketAIPainter extends CustomPainter {
         ..strokeWidth = 2
         ..shader = const LinearGradient(colors: [
           Color(0xFF00F0D0), Color(0xFF318DFF), Color(0xFF9A72FF), Color(0xFF00F0D0),
-        ]).createShader(Rect.fromCircle(center: center, radius: coreRadius * 1.6),
+        ]).createShader(Rect.fromCircle(center: center, radius: coreRadius * 1.6)),
     );
 
     // Inner luminous processor die and microchip pins.
