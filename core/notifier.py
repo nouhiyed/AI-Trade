@@ -76,7 +76,8 @@ class Notifier:
             self.last_success_at = time.time()
             return True
         except Exception as error:
-            self.last_error = f"{type(error).__name__}: {error}"
+            detail = str(error).replace(token, "[redacted]")
+            self.last_error = f"{type(error).__name__}: {detail}"
             print("[NOTIFY] Telegram send failed:", self.last_error)
             return False
 
