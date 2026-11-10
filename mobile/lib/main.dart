@@ -112,24 +112,24 @@ class AppAtmospherePainter extends CustomPainter {
     }
 
     // Holographic candlestick market stream on the right side.
-    final candleWidth = size.width * .009 < 3.0 ? 3.0 : size.width * .009;
-    final gap = candleWidth * 1.8;
-    final chartLeft = size.width * .48;
-    final chartTop = size.height * .10;
-    final chartHeight = size.height * .72;
+    final double candleWidth = size.width * .009 < 3.0 ? 3.0 : size.width * .009;
+    final double gap = candleWidth * 1.8;
+    final double chartLeft = size.width * .48;
+    final double chartTop = size.height * .10;
+    final double chartHeight = size.height * .72;
     final up = Paint()..color = const Color(0xFF00E5B0).withOpacity(dark ? .30 : .13);
     final down = Paint()..color = const Color(0xFFFF557D).withOpacity(dark ? .27 : .12);
     final wickUp = Paint()..color = const Color(0xFF00E5B0).withOpacity(dark ? .42 : .20)..strokeWidth = 1;
     final wickDown = Paint()..color = const Color(0xFFFF557D).withOpacity(dark ? .38 : .18)..strokeWidth = 1;
     for (int i = 0; i < 34; i++) {
-      final x = chartLeft + i * gap;
+      final double x = chartLeft + i.toDouble() * gap;
       if (x > size.width + candleWidth) break;
-      final wave = math.sin(i * .57) * .20 + math.cos(i * .21) * .14;
-      final centerY = chartTop + chartHeight * (.48 - wave - i * .004);
-      final bodyHeight = 8 + (math.sin(i * 1.73).abs() * size.height * .035);
+      final double wave = math.sin(i * .57) * .20 + math.cos(i * .21) * .14;
+      final double centerY = chartTop + chartHeight * (.48 - wave - i.toDouble() * .004);
+      final double bodyHeight = 8.0 + (math.sin(i * 1.73).abs() * size.height * .035);
       final rising = math.sin(i * 1.31) > -.12;
-      final top = centerY - bodyHeight * .5;
-      final bottom = centerY + bodyHeight * .5;
+      final double top = centerY - bodyHeight * .5;
+      final double bottom = centerY + bodyHeight * .5;
       canvas.drawLine(
         Offset(x + candleWidth * .5, top - 7),
         Offset(x + candleWidth * .5, bottom + 8),
