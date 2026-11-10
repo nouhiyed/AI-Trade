@@ -20,11 +20,21 @@ from core.autopilot import Autopilot
 from core.market_context import MarketContext
 from core import performance
 
-initial_balance = float(os.environ.get("DEMO_INITIAL_BALANCE", "1000"))
-if not math.isfinite(initial_balance) or initial_balance <= 0:
-    raise ValueError("DEMO_INITIAL_BALANCE must be a finite positive number")
-coordinator = TradingCoordinator(initial_balance=initial_balance)
-autopilot = Autopilot(coordinator, context=MarketContext())
+# Runtime objects are created only after the HTTP socket is bound. A second
+# launcher must fail fast on Address already in use without opening SQLite.
+coordinator = None
+autopilot = None
+
+
+def initialize_runtime():
+    global coordinator, autopilot
+    initial_balance = float(os.environ.get("DEMO_INITIAL_BALANCE", "1000"))
+    if not math.isfinite(initial_balance) or initial_balance <= 0:
+        raise ValueError("DEMO_INITIAL_BALANCE must be a finite positive number")
+    coordinator = TradingCoordinator(initial_balance=initial_balance)
+    autopilot = Autopilot(coordinator, context=MarketContext())
+
+
 submission_store_path = PROJECT_ROOT / "data" / "agent_submissions.json"
 submission_jobs = {}
 submission_jobs_lock = threading.Lock()
@@ -551,6 +561,12 @@ if __name__ == "__main__":
     # Bind first. If another API instance owns the port, fail before starting
     # any background workers that could touch the shared trading state.
     server = ThreadingHTTPServer((host, port), APIHandler)
+
+    try:
+        initialize_runtime()
+    except BaseException:
+        server.server_close()
+        raise
 
     monitor_thread = threading.Thread(
         target=demo_monitor_worker,
