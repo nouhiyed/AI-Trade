@@ -66,6 +66,90 @@ def _decimal_equal(left, right):
         return 0
 
 
+class _BufferedCursor:
+    """Materialized cursor result; no SQLite cursor escapes the connection lock."""
+
+    def __init__(self, cursor, rows):
+        self.description = cursor.description
+        self.rowcount = cursor.rowcount
+        self.lastrowid = cursor.lastrowid
+        self._rows = list(rows)
+        self._index = 0
+
+    def fetchone(self):
+        if self._index >= len(self._rows):
+            return None
+        row = self._rows[self._index]
+        self._index += 1
+        return row
+
+    def fetchall(self):
+        rows = self._rows[self._index:]
+        self._index = len(self._rows)
+        return rows
+
+    def fetchmany(self, size=1):
+        end = min(len(self._rows), self._index + max(0, int(size)))
+        rows = self._rows[self._index:end]
+        self._index = end
+        return rows
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        row = self.fetchone()
+        if row is None:
+            raise StopIteration
+        return row
+
+
+class _LockedConnection:
+    """Serialize every operation on the shared SQLite connection.
+
+    Reads are fully materialized while holding the same re-entrant lock used
+    by transactions. This prevents request/monitor threads from interleaving
+    statements on one check_same_thread=False connection.
+    """
+
+    def __init__(self, connection, lock):
+        self._connection = connection
+        self._lock = lock
+
+    def execute(self, sql, parameters=()):
+        with self._lock:
+            cursor = self._connection.execute(sql, parameters)
+            rows = cursor.fetchall() if cursor.description is not None else ()
+            return _BufferedCursor(cursor, rows)
+
+    def executemany(self, sql, seq_of_parameters):
+        with self._lock:
+            cursor = self._connection.executemany(sql, seq_of_parameters)
+            rows = cursor.fetchall() if cursor.description is not None else ()
+            return _BufferedCursor(cursor, rows)
+
+    def executescript(self, sql_script):
+        with self._lock:
+            cursor = self._connection.executescript(sql_script)
+            rows = cursor.fetchall() if cursor.description is not None else ()
+            return _BufferedCursor(cursor, rows)
+
+    def commit(self):
+        with self._lock:
+            return self._connection.commit()
+
+    def rollback(self):
+        with self._lock:
+            return self._connection.rollback()
+
+    def close(self):
+        with self._lock:
+            return self._connection.close()
+
+    def __getattr__(self, name):
+        return getattr(self._connection, name)
+
+
 class DemoDatabase:
     """Owns one SQLite connection shared by DEMO components."""
 
@@ -74,12 +158,13 @@ class DemoDatabase:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
         self._lock = threading.RLock()
-        self.connection = sqlite3.connect(
+        raw_connection = sqlite3.connect(
             str(self.db_path),
             timeout=30,
             check_same_thread=False,
         )
-        self.connection.row_factory = sqlite3.Row
+        raw_connection.row_factory = sqlite3.Row
+        self.connection = _LockedConnection(raw_connection, self._lock)
         self.connection.create_function(
             "demo_decimal_line_valid", 2,
             _decimal_line_valid,
