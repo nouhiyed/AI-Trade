@@ -1489,7 +1489,7 @@ class _TradeShellState extends State<TradeShell>
                 builder: (_, __) => SizedBox(
                   width: 230,
                   height: 230,
-                  child: CustomPaint(painter: HeroMarketAIPainter(pulse.value)),
+                  child: CustomPaint(painter: OrbPainter(pulse.value)),
                 ),
               ),
             ),

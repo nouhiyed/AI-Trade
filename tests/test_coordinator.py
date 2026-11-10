@@ -293,5 +293,63 @@ class TestTradingCoordinator(unittest.TestCase):
         )
 
 
+    def test_manual_close_is_not_blocked_by_monitor_binance_request(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from decimal import Decimal
+        from threading import Event
+
+        signal = {
+            "symbol": "BTCUSDT",
+            "direction": "LONG",
+            "confidence": 82,
+            "setup_key": "manual-close-monitor-priority",
+            "trade_plan": {
+                "success": True, "direction": "LONG",
+                "entry": 100, "stop_loss": 99, "take_profit": 102,
+                "atr": 0.5, "reward_risk": 2.0, "timeframe": "5m",
+            },
+        }
+        self.system._demo_market_price = (
+            lambda symbol, market="futures": Decimal("100")
+        )
+        opened = self.system.request_demo_futures_trade(
+            "BTCUSDT", "LONG", signal_override=signal
+        )
+        self.assertTrue(opened["approved"], opened)
+        position_id = opened["position_id"]
+
+        monitor_entered = Event()
+        release_monitor = Event()
+
+        def slow_monitor_quote(market, symbol):
+            monitor_entered.set()
+            if not release_monitor.wait(5):
+                raise TimeoutError("test monitor quote was not released")
+            return {"bid": "100", "ask": "100"}
+
+        self.system.market_feed.fetch_book_ticker = slow_monitor_quote
+        self.system._catch_up = lambda *args: None
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            monitor = pool.submit(
+                self.system._monitor_demo_positions_locked, [position_id]
+            )
+            self.assertTrue(monitor_entered.wait(2), "monitor did not reach Binance quote")
+            self.system._demo_market_price = (
+                lambda symbol, market="futures": Decimal("101")
+            )
+            close = pool.submit(self.system.close_demo_position, position_id)
+            try:
+                result = close.result(timeout=2)
+                self.assertTrue(result["success"], result)
+            finally:
+                release_monitor.set()
+            monitor.result(timeout=5)
+
+        self.assertEqual(
+            self.system.demo_positions[position_id]["status"], "DEMO_CLOSED"
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

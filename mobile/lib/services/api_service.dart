@@ -167,9 +167,12 @@ class ApiService {
   static Future<Map<String, dynamic>> closeDemoTrade({
     required String positionId,
   }) =>
-      _request('POST', '/demo/close', body: {
-        'position_id': positionId,
-      });
+      _request(
+        'POST',
+        '/demo/close',
+        body: {'position_id': positionId},
+        requestTimeout: const Duration(seconds: 60),
+      );
 
   static Future<Map<String, dynamic>> depositDemoBalance(double amount) =>
       _request('POST', '/demo/deposit', body: {'amount': amount});
