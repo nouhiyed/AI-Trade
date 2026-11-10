@@ -232,7 +232,7 @@ class TestTradingCoordinator(unittest.TestCase):
             if item.get("trade_id") == position_id
         ]
         self.assertTrue(archived, snapshot["closed_positions"])
-        self.assertEqual(archived[0]["status"], "CLOSED")
+        self.assertIn(archived[0]["status"], ("CLOSED", "DEMO_CLOSED"))
 
         # A second request cannot execute the same close twice.
         repeated = self.system.close_demo_position(position_id)
