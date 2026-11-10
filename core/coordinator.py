@@ -606,7 +606,7 @@ class TradingCoordinator(SpotDemoMixin):
         return out
 
     def _monitor_demo_positions_locked(self, position_ids=None):
-        """Monitor Futures positions without holding the global state lock during I/O."""
+        """Monitor Futures positions without blocking manual closes during market I/O."""
         results = []
         if position_ids is None:
             with self._demo_lock:
@@ -614,60 +614,74 @@ class TradingCoordinator(SpotDemoMixin):
 
         checked = 0
         for position_id in position_ids:
-            with self._demo_position_lock(position_id):
-                with self._demo_lock:
-                    record = self.demo_positions.get(position_id)
-                    if (
-                        not record
-                        or record.get("status") not in ("DEMO_OPEN", "DEMO_PARTIALLY_CLOSED")
-                        or not record.get("engine_position_id")
-                    ):
-                        continue
-                    checked += 1
-                    symbol = str(record["symbol"]).upper()
-                    direction = str(record["direction"]).upper()
-                    stop = Decimal(str(record["stop_loss"]))
-                    target = Decimal(str(record["take_profit"]))
-                    engine_position_id = record["engine_position_id"]
-                    snapshot = dict(record)
+            # Take a consistent snapshot, but never hold the per-position lock
+            # while requesting Binance data or replaying candles. Manual close
+            # must be able to mark the position DEMO_CLOSING immediately.
+            with self._demo_lock:
+                record = self.demo_positions.get(position_id)
+                if (
+                    not record
+                    or record.get("status") not in ("DEMO_OPEN", "DEMO_PARTIALLY_CLOSED")
+                    or not record.get("engine_position_id")
+                ):
+                    continue
+                checked += 1
+                symbol = str(record["symbol"]).upper()
+                direction = str(record["direction"]).upper()
+                stop = Decimal(str(record["stop_loss"]))
+                target = Decimal(str(record["take_profit"]))
+                engine_position_id = record["engine_position_id"]
+                snapshot = dict(record)
+
+            try:
+                # Network calls stay outside both coordinator and position locks.
+                quote = self.market_feed.fetch_book_ticker("futures", symbol)
+                exit_price = Decimal(str(
+                    quote["ask"] if direction == "SHORT" else quote["bid"]
+                ))
+                if not exit_price.is_finite() or exit_price <= 0:
+                    raise ValueError("Invalid DEMO exit quote")
 
                 try:
-                    quote = self.market_feed.fetch_book_ticker("futures", symbol)
-                    exit_price = Decimal(str(
-                        quote["ask"] if direction == "SHORT" else quote["bid"]
-                    ))
-                    if not exit_price.is_finite() or exit_price <= 0:
-                        raise ValueError("Invalid DEMO exit quote")
-
-                    try:
-                        missed = self._catch_up(snapshot, direction, stop, target)
-                    except Exception as catch_error:
-                        missed = None
-                        with self._demo_lock:
-                            current = self.demo_positions.get(position_id)
-                            if current:
-                                current["catch_up_error"] = str(catch_error)
-
-                    reason = missed[0] if missed else None
-                    if missed:
-                        exit_price = missed[1]
-                    elif direction == "LONG":
-                        if exit_price <= stop:
-                            reason = "STOP_LOSS"
-                        elif exit_price >= target:
-                            reason = "TAKE_PROFIT"
-                    elif direction == "SHORT":
-                        if exit_price >= stop:
-                            reason = "STOP_LOSS"
-                        elif exit_price <= target:
-                            reason = "TAKE_PROFIT"
-
+                    missed = self._catch_up(snapshot, direction, stop, target)
+                except Exception as catch_error:
+                    missed = None
                     with self._demo_lock:
                         current = self.demo_positions.get(position_id)
-                        if not current or current.get("status") not in (
+                        if current and current.get("status") in (
                             "DEMO_OPEN", "DEMO_PARTIALLY_CLOSED"
                         ):
+                            current["catch_up_error"] = str(catch_error)
+
+                reason = missed[0] if missed else None
+                if missed:
+                    exit_price = missed[1]
+                elif direction == "LONG":
+                    if exit_price <= stop:
+                        reason = "STOP_LOSS"
+                    elif exit_price >= target:
+                        reason = "TAKE_PROFIT"
+                elif direction == "SHORT":
+                    if exit_price >= stop:
+                        reason = "STOP_LOSS"
+                    elif exit_price <= target:
+                        reason = "TAKE_PROFIT"
+
+                # Serialize only the short state/ledger update. If a manual close
+                # started while Binance was responding, its DEMO_CLOSING status
+                # wins and this stale monitor result is discarded.
+                with self._demo_position_lock(position_id):
+                    with self._demo_lock:
+                        current = self.demo_positions.get(position_id)
+                        if (
+                            not current
+                            or current.get("status") not in (
+                                "DEMO_OPEN", "DEMO_PARTIALLY_CLOSED"
+                            )
+                            or current.get("engine_position_id") != engine_position_id
+                        ):
                             continue
+
                         self.demo_execution.update_mark_price(
                             symbol, "FUTURES", exit_price, source="BINANCE"
                         )
@@ -709,19 +723,19 @@ class TradingCoordinator(SpotDemoMixin):
                             current["risk_sync_error"] = str(risk_error)
                             self._save_demo_state()
 
-                    if reason:
-                        results.append({
-                            "position_id": position_id,
-                            "symbol": symbol,
-                            "reason": reason,
-                            "result": result,
-                        })
-                except Exception as error:
+                if reason:
                     results.append({
                         "position_id": position_id,
                         "symbol": symbol,
-                        "error": str(error),
+                        "reason": reason,
+                        "result": result,
                     })
+            except Exception as error:
+                results.append({
+                    "position_id": position_id,
+                    "symbol": symbol,
+                    "error": str(error),
+                })
 
         return {"checked": checked, "events": results}
 
