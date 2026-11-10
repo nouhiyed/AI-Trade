@@ -10,9 +10,15 @@ import time
 
 import requests
 
-TOKEN_LIST = (
-    "https://www.binance.com/bapi/defi/v1/public/wallet-direct/buw/wallet/cex/"
+TOKEN_PATH = (
+    "/bapi/defi/v1/public/wallet-direct/buw/wallet/cex/"
     "alpha/all/token/list"
+)
+TOKEN_HOSTS = (
+    "https://www.binance.com",
+    "https://bapi.binance.com",
+    "https://api.binance.com",
+    "https://api1.binance.com",
 )
 
 
@@ -49,17 +55,34 @@ class AlphaFeed:
         with self._lock:
             if self._cache and now - self._cache[0] < self.ttl:
                 return self._cache[1]
-        r = self.session.get(TOKEN_LIST, timeout=self.timeout)
-        r.raise_for_status()
-        payload = r.json()
-        if not isinstance(payload, dict):
-            raise RuntimeError("Binance Alpha token list returned an invalid response")
-        if payload.get("success") is False or (
-            payload.get("code") is not None and str(payload.get("code")) != "000000"
-        ):
+        payload = None
+        failures = []
+        for host in TOKEN_HOSTS:
+            try:
+                response = self.session.get(
+                    host + TOKEN_PATH, timeout=min(self.timeout, 5)
+                )
+                response.raise_for_status()
+                candidate = response.json()
+                if not isinstance(candidate, dict):
+                    raise RuntimeError("Invalid Binance Alpha token-list response")
+                if candidate.get("success") is False or (
+                    candidate.get("code") is not None
+                    and str(candidate.get("code")) != "000000"
+                ):
+                    raise RuntimeError(
+                        str(candidate.get("message")
+                            or candidate.get("messageDetail")
+                            or candidate.get("code"))
+                    )
+                payload = candidate
+                break
+            except (requests.RequestException, ValueError, RuntimeError) as error:
+                failures.append(f"{host}: {type(error).__name__}: {error}")
+        if payload is None:
             raise RuntimeError(
-                "Binance Alpha token list error: " +
-                str(payload.get("message") or payload.get("messageDetail") or payload.get("code"))
+                "All official Binance Alpha token-list endpoints failed: "
+                + " | ".join(failures[-3:])
             )
 
         data = payload.get("data")
