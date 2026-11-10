@@ -354,6 +354,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 return self.send_json({"ok": True, "mode": coordinator.mode, "api_version": API_VERSION})
             if path == "/status":
                 return self.send_json({
+                    "api_version": API_VERSION,
                     "system": coordinator.get_system_status(),
                     "controls": coordinator.get_agent_controls(),
                     "demo": coordinator.get_demo_positions()
