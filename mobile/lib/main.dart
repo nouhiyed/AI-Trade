@@ -681,43 +681,53 @@ class _TradeShellState extends State<TradeShell>
               color: accent, fontSize: 9, fontWeight: FontWeight.bold,
             )),
           ]),
-          if (market == 'alpha') ...[
+          if (market == 'alpha' && _marketSymbolErrors[market] != null) ...[
             const SizedBox(height: 7),
-            if (_marketSymbolErrors[market] != null) ...[
-              Text(
-                _marketSymbolErrors[market]!,
-                style: const TextStyle(color: red, fontSize: 10),
-                maxLines: 2,
+            Text(
+              _marketSymbolErrors[market]!,
+              style: const TextStyle(color: red, fontSize: 10),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: TextButton.icon(
+                onPressed: () => _loadMarketSymbols(market),
+                icon: const Icon(Icons.refresh, size: 15),
+                label: Text(tr('إعادة جلب القائمة', 'Retry token list')),
+              ),
+            ),
+          ],
+          const SizedBox(height: 7),
+          Row(children: [
+            CoinLogo(
+              symbol: _selectedSymbols[market]?.isNotEmpty == true
+                  ? _selectedSymbols[market]!
+                  : 'BTCUSDT',
+              size: 28,
+            ),
+            const SizedBox(width: 9),
+            Expanded(
+              child: Text(
+                _marketSymbolNames[market]?[_selectedSymbols[market] ?? ''] ??
+                    (_selectedSymbols[market]?.isNotEmpty == true
+                        ? _selectedSymbols[market]!
+                        : tr('تحميل قائمة العملات...', 'Loading market symbols...')),
+                style: TextStyle(
+                  color: accent,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                ),
+                maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
-              Align(
-                alignment: AlignmentDirectional.centerStart,
-                child: TextButton.icon(
-                  onPressed: () => _loadMarketSymbols(market),
-                  icon: const Icon(Icons.refresh, size: 15),
-                  label: Text(tr('إعادة جلب القائمة', 'Retry token list')),
-                ),
-              ),
-            ],
-            Row(children: [
-              Expanded(
-                child: Text(
-                  _marketSymbolNames[market]?[_selectedSymbols[market] ?? ''] ??
-                      (_selectedSymbols[market]?.isNotEmpty == true
-                          ? _selectedSymbols[market]!
-                          : tr('تحميل عملات Binance Alpha...', 'Loading Binance Alpha tokens...')),
-                  style: TextStyle(color: violet, fontSize: 12, fontWeight: FontWeight.w800),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              TextButton.icon(
-                onPressed: () => _chooseMarketSymbol(market),
-                icon: const Icon(Icons.currency_exchange, size: 16),
-                label: Text(tr('قائمة العملات', 'Token list')),
-              ),
-            ]),
-          ],
+            ),
+            TextButton.icon(
+              onPressed: () => _chooseMarketSymbol(market),
+              icon: const Icon(Icons.currency_exchange, size: 16),
+              label: Text(tr('العملات', 'Coins')),
+            ),
+          ]),
           const SizedBox(height: 10),
           ProChartScreen(
             key: ValueKey('market-pro-chart-$market-${_selectedSymbols[market] ?? ''}'),
