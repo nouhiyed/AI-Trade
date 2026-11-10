@@ -129,17 +129,17 @@ class ApiService {
     required String domain,
     required String symbol,
     required String timeframe,
-    required double entryPrice,
-    required double takeProfit,
-    required double stopLoss,
+    double? entryPrice,
+    double? takeProfit,
+    double? stopLoss,
   }) =>
       _request('POST', '/agent/submit', body: {
         'domain': domain,
         'symbol': symbol,
         'timeframe': timeframe,
-        'entry_price': entryPrice,
-        'take_profit': takeProfit,
-        'stop_loss': stopLoss,
+        if (entryPrice != null) 'entry_price': entryPrice,
+        if (takeProfit != null) 'take_profit': takeProfit,
+        if (stopLoss != null) 'stop_loss': stopLoss,
       }, requestTimeout: const Duration(seconds: 25));
 
   static Future<Map<String, dynamic>> agentSubmissionStatus(String requestId) =>
