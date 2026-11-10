@@ -176,5 +176,68 @@ class TestTradingCoordinator(unittest.TestCase):
         self.assertFalse(self.system.set_mode("PAPER")["success"])
 
 
+    def test_manual_demo_close_moves_trade_to_closed_archive(self):
+        from decimal import Decimal
+
+        signal = {
+            "symbol": "BTCUSDT",
+            "direction": "LONG",
+            "confidence": 82,
+            "setup_key": "manual-close-regression",
+            "trade_plan": {
+                "success": True,
+                "direction": "LONG",
+                "entry": 100,
+                "stop_loss": 99,
+                "take_profit": 102,
+                "atr": 0.5,
+                "reward_risk": 2.0,
+                "timeframe": "5m",
+            },
+        }
+        self.system._demo_market_price = (
+            lambda symbol, market="futures": Decimal("100")
+        )
+
+        opened = self.system.request_demo_futures_trade(
+            "BTCUSDT", "LONG", signal_override=signal
+        )
+        self.assertTrue(opened["approved"], opened)
+        position_id = opened["position_id"]
+        self.assertEqual(
+            self.system.demo_positions[position_id]["status"], "DEMO_OPEN"
+        )
+
+        # A manual close uses the current executable market quote.
+        self.system._demo_market_price = (
+            lambda symbol, market="futures": Decimal("101")
+        )
+        closed = self.system.close_demo_position(position_id)
+
+        self.assertTrue(closed["success"], closed)
+        self.assertEqual(
+            self.system.demo_positions[position_id]["status"], "DEMO_CLOSED"
+        )
+        self.assertEqual(
+            self.system.demo_positions[position_id]["close_reason"], "MANUAL"
+        )
+
+        snapshot = self.system.get_demo_positions()
+        self.assertNotIn(
+            position_id,
+            [item["position_id"] for item in snapshot["open_positions"]],
+        )
+        archived = [
+            item for item in snapshot["closed_positions"]
+            if item.get("trade_id") == position_id
+        ]
+        self.assertTrue(archived, snapshot["closed_positions"])
+        self.assertEqual(archived[0]["status"], "CLOSED")
+
+        # A second request cannot execute the same close twice.
+        repeated = self.system.close_demo_position(position_id)
+        self.assertFalse(repeated["success"])
+
+
 if __name__ == "__main__":
     unittest.main()
