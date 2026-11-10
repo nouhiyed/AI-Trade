@@ -164,7 +164,12 @@ class _ProChartScreenState extends State<ProChartScreen> {
         _pushLevels();
       }
     } catch (e) {
-      if (mounted) setState(() => _error = '$e');
+      if (mounted) {
+        setState(() {
+          _error = '$e';
+          if (!_requestReceived) _requestSubmitted = false;
+        });
+      }
     } finally {
       _loading = false;
     }
@@ -516,6 +521,7 @@ class _AgentSubmissionScreenState extends State<AgentSubmissionScreen> {
   final TextEditingController _target = TextEditingController();
   final TextEditingController _stop = TextEditingController();
   bool _sending = false;
+  bool _requestSubmitted = false;
   bool _requestReceived = false;
   String? _requestId;
   Map<String, dynamic>? _result;
@@ -557,6 +563,7 @@ class _AgentSubmissionScreenState extends State<AgentSubmissionScreen> {
     }
     setState(() {
       _sending = true;
+      _requestSubmitted = true;
       _requestReceived = false;
       _requestId = null;
       _error = null;
@@ -587,6 +594,7 @@ class _AgentSubmissionScreenState extends State<AgentSubmissionScreen> {
 
       Map<String, dynamic>? decision;
       Object? lastPollingError;
+      String? processingFailure;
       // Keep waiting through brief mobile-network interruptions; one failed poll
       // must not erase the server's acknowledgement or the pending request.
       for (var attempt = 0; attempt < 90; attempt++) {
@@ -600,22 +608,12 @@ class _AgentSubmissionScreenState extends State<AgentSubmissionScreen> {
             break;
           }
           if (requestStatus == 'FAILED') {
-            if (progress['result'] is Map) {
-              decision = Map<String, dynamic>.from(progress['result'] as Map);
-            } else {
-              final failure = '${progress['reason'] ?? progress['message'] ?? 'Agent worker failed'}';
-              decision = {
-                'success': false,
-                'opened': false,
-                'decision_status': 'REJECTED',
-                'decision_reason': failure,
-                'reason': failure,
-              };
-            }
+            final failedResult = progress['result'];
+            processingFailure = '${(failedResult is Map ? failedResult['decision_reason'] ?? failedResult['reason'] : null) ?? progress['reason'] ?? progress['message'] ?? 'Agent processing failed'}';
             break;
           }
           if (requestStatus == 'NOT_FOUND') {
-            lastPollingError = Exception(progress['reason'] ?? requestStatus);
+            processingFailure = '${progress['reason'] ?? 'The request could not be found on the server'}';
             break;
           }
           lastPollingError = null;
@@ -623,6 +621,12 @@ class _AgentSubmissionScreenState extends State<AgentSubmissionScreen> {
           lastPollingError = error;
           // Retry transient transport errors until the full wait window expires.
         }
+      }
+      if (processingFailure != null) {
+        throw Exception(
+          '${t('حدث خطأ تقني أثناء معالجة الطلب، وليس رفضاً للفرصة: ', 'A technical error occurred while processing the request; this is not a trade rejection: ')}'
+          '$processingFailure • Request ID: $requestId',
+        );
       }
       if (decision == null) {
         throw Exception(
@@ -755,20 +759,25 @@ class _AgentSubmissionScreenState extends State<AgentSubmissionScreen> {
                     : t('إرسال للتحليل واتخاذ القرار', 'SEND FOR AGENT DECISION')),
               ),
             ),
-            if (_requestReceived) ...[
+            if (_requestSubmitted || _requestReceived) ...[
               const SizedBox(height: 12),
               Container(
                 padding: const EdgeInsets.all(13),
                 decoration: BoxDecoration(color: widget.panel, borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: (_result == null ? const Color(0xFF4287F5) : (_result!['decision_status'] == 'APPROVED' ? _up : const Color(0xFFFFC857))).withOpacity(.45))),
+                  border: Border.all(color: (_error != null ? const Color(0xFFFFC857) : _result == null ? const Color(0xFF4287F5) : (_result!['decision_status'] == 'APPROVED' ? _up : _down)).withOpacity(.45))),
                 child: Row(children: [
-                  if (_result == null)
+                  if (_result == null && _error == null && _sending)
                     const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
                   else
-                    Icon(Icons.verified, color: decisionColor, size: 20),
+                    Icon(
+                      _error != null ? Icons.error_outline :
+                      (_result == null ? Icons.mark_email_read_outlined : Icons.verified),
+                      color: _error != null ? const Color(0xFFFFC857) : decisionColor,
+                      size: 20,
+                    ),
                   const SizedBox(width: 10),
                   Expanded(child: Text(
-                    '${_result != null ? t('وصل قرار الوكيل.', 'Agent decision received.') : _sending ? t('تم استلام الطلب من الخادم وإرساله للوكيل المختص. يجري التحليل الآن.', 'Server confirmed receipt and forwarded the request to the selected agent. Analysis is running.') : t('تم تأكيد الاستلام، لكن تعذر جلب القرار حتى الآن.', 'Receipt is confirmed, but the decision has not been retrieved yet.')}'
+                    '${_error != null ? _error! : _result != null ? t('وصل قرار الوكيل.', 'Agent decision received.') : _requestReceived ? t('تم استلام الطلب من الخادم وإرساله للوكيل المختص. يجري التحليل الآن.', 'Server confirmed receipt and forwarded the request to the selected agent. Analysis is running.') : t('جارٍ إرسال الطلب إلى الخادم...', 'Sending request to server...')}'
                     '${_requestId == null ? '' : '\\nRequest ID: $_requestId'}',
                     style: TextStyle(color: widget.text, fontSize: 12, height: 1.45))),
                 ]),
