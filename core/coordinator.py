@@ -1036,8 +1036,22 @@ class TradingCoordinator(SpotDemoMixin):
             return {**base, "decision_status": "REJECTED",
                     "decision_reason": reason, "reason": reason}
 
-        analysis = self.analyze_live(symbol, preferred_timeframe=timeframe)
-        signal = analysis.get("signals", {}).get(domain, {})
+        if domain == "alpha":
+            try:
+                token = self.alpha_feed.token(symbol)
+                signal = self.analyze_alpha(token, preferred_timeframe=timeframe)
+                analysis = {
+                    "symbol": symbol,
+                    "source": "binance_alpha",
+                    "signals": {"alpha": signal},
+                }
+            except Exception as error:
+                reason = "Alpha analysis failed: " + str(error)
+                return {**base, "success": True, "decision_status": "REJECTED",
+                        "decision_reason": reason, "reason": reason}
+        else:
+            analysis = self.analyze_live(symbol, preferred_timeframe=timeframe)
+            signal = analysis.get("signals", {}).get(domain, {})
         if not isinstance(signal, dict) or signal.get("error"):
             reason = (signal.get("error") if isinstance(signal, dict) else None) or "Analysis unavailable"
             return {**base, "success": True, "decision_status": "REJECTED",
