@@ -86,7 +86,8 @@ def _process_agent_submission(request_id, payload):
         result = {
             "success": False,
             "opened": False,
-            "decision_status": "REJECTED",
+            "decision_status": "ERROR",
+            "error_type": "AGENT_PROCESSING_ERROR",
             "decision_reason": str(error),
             "reason": str(error),
         }
@@ -95,7 +96,8 @@ def _process_agent_submission(request_id, payload):
         result = {
             "success": False,
             "opened": False,
-            "decision_status": "REJECTED",
+            "decision_status": "ERROR",
+            "error_type": "INVALID_AGENT_RESPONSE",
             "decision_reason": "Agent returned an invalid response",
             "reason": "Agent returned an invalid response",
         }
@@ -450,7 +452,8 @@ class APIHandler(BaseHTTPRequestHandler):
                         if job is not None:
                             job.update({
                                 "status": "FAILED",
-                                "decision_status": "REJECTED",
+                                "decision_status": "ERROR",
+                                "error_type": "WORKER_START_ERROR",
                                 "reason": "Could not start agent worker: " + str(error),
                                 "completed_at": time.time(),
                             })
@@ -462,7 +465,8 @@ class APIHandler(BaseHTTPRequestHandler):
                         "success": False,
                         "request_id": request_id,
                         "request_status": "FAILED",
-                        "decision_status": "REJECTED",
+                        "decision_status": "ERROR",
+                        "error_type": "WORKER_START_ERROR",
                         "reason": "Could not start agent worker: " + str(error),
                     }, 503)
                 return self.send_json({
