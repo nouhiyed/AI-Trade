@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 from uuid import uuid4
 
-API_VERSION = "2026.11.10.2"
+API_VERSION = "2026.11.10.4"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
@@ -75,18 +75,39 @@ def _process_agent_submission(request_id, payload):
         failed = True
         result = {
             "success": False,
-            "decision_status": "ERROR",
+            "opened": False,
+            "decision_status": "REJECTED",
             "decision_reason": str(error),
             "reason": str(error),
         }
+    if not isinstance(result, dict):
+        failed = True
+        result = {
+            "success": False,
+            "opened": False,
+            "decision_status": "REJECTED",
+            "decision_reason": "Agent returned an invalid response",
+            "reason": "Agent returned an invalid response",
+        }
+    # A completed analysis, including a rejection, is a completed decision.
+    result.setdefault("decision_status", "REJECTED")
+    result.setdefault(
+        "decision_reason",
+        result.get("reason") or "Agent did not provide a decision reason",
+    )
     with submission_jobs_lock:
         job = submission_jobs.get(request_id)
         if job is not None:
             job["status"] = "FAILED" if failed else "COMPLETED"
             job["result"] = result
+            job["decision_status"] = result.get("decision_status")
             job["reason"] = result.get("decision_reason") or result.get("reason")
             job["completed_at"] = time.time()
-            _save_submission_jobs_locked()
+            try:
+                _save_submission_jobs_locked()
+            except Exception as error:
+                # Keep the in-memory result readable even if local persistence fails.
+                job["persistence_error"] = str(error)
 
 
 class APIHandler(BaseHTTPRequestHandler):
@@ -314,6 +335,8 @@ class APIHandler(BaseHTTPRequestHandler):
                     "request_status": snapshot["status"],
                     "created_at": snapshot.get("created_at"),
                     "completed_at": snapshot.get("completed_at"),
+                    "decision_status": snapshot.get("decision_status"),
+                    "decision_reason": snapshot.get("reason"),
                     "message": (
                         "Agent decision is ready" if snapshot["status"] == "COMPLETED"
                         else snapshot.get("reason") or "Request is being processed"
