@@ -167,7 +167,6 @@ class _ProChartScreenState extends State<ProChartScreen> {
       if (mounted) {
         setState(() {
           _error = '$e';
-          if (!_requestReceived) _requestSubmitted = false;
         });
       }
     } finally {
