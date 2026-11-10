@@ -667,7 +667,7 @@ class _AgentSubmissionScreenState extends State<AgentSubmissionScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final status = '${_result?['decision_status'] ?? (_result?['opened'] == true ? 'APPROVED' : 'REJECTED')}'.toUpperCase();
+    final status = '${_result == null ? 'PROCESSING' : (_result!['decision_status'] ?? (_result!['opened'] == true ? 'APPROVED' : 'REJECTED'))}'.toUpperCase();
     final approved = status == 'APPROVED';
     final waiting = status == 'WAIT' || status == 'PROCESSING';
     final decisionColor = approved ? _up : waiting ? const Color(0xFFFFC857) : _down;
