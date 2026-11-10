@@ -1034,21 +1034,6 @@ class TradingCoordinator(SpotDemoMixin):
             return {**base, "decision_status": "REJECTED",
                     "decision_reason": reason, "reason": reason}
 
-        try:
-            proposed = {
-                "entry": Decimal(str(entry_price)),
-                "take_profit": Decimal(str(take_profit)),
-                "stop_loss": Decimal(str(stop_loss)),
-            }
-        except Exception:
-            reason = "Entry, take-profit and stop-loss prices are required numeric values"
-            return {**base, "decision_status": "REJECTED",
-                    "decision_reason": reason, "reason": reason}
-        if not all(value.is_finite() and value > 0 for value in proposed.values()):
-            reason = "All proposed prices must be finite positive numbers"
-            return {**base, "decision_status": "REJECTED",
-                    "decision_reason": reason, "reason": reason}
-
         if domain == "alpha":
             try:
                 token = self.alpha_feed.token(symbol)
@@ -1106,6 +1091,41 @@ class TradingCoordinator(SpotDemoMixin):
                     "decision_reason": reason, "reason": reason,
                     "signal": signal, "trade_plan": agent_plan}
 
+        # Chart submission is an instruction to the selected agent to analyze
+        # the live market and create its own entry/SL/TP. Manual levels remain
+        # optional for advanced use, but are never required by the UI.
+        supplied = (entry_price is not None, take_profit is not None, stop_loss is not None)
+        if any(supplied) and not all(supplied):
+            reason = "Supply all three optional levels or leave all three to the agent"
+            return {**base, "success": True, "decision_status": "REJECTED",
+                    "decision_reason": reason, "reason": reason,
+                    "signal": signal, "trade_plan": agent_plan}
+        try:
+            if all(supplied):
+                proposed = {
+                    "entry": Decimal(str(entry_price)),
+                    "take_profit": Decimal(str(take_profit)),
+                    "stop_loss": Decimal(str(stop_loss)),
+                }
+                plan_source = "USER_PROPOSAL_REVIEWED_BY_AGENT"
+            else:
+                proposed = {
+                    "entry": Decimal(str(agent_plan["entry"])),
+                    "take_profit": Decimal(str(agent_plan["take_profit"])),
+                    "stop_loss": Decimal(str(agent_plan["stop_loss"])),
+                }
+                plan_source = "AGENT_GENERATED_LIVE_PLAN"
+        except Exception:
+            reason = "Agent did not return valid entry, take-profit and stop-loss levels"
+            return {**base, "success": True, "decision_status": "REJECTED",
+                    "decision_reason": reason, "reason": reason,
+                    "signal": signal, "trade_plan": agent_plan}
+        if not all(value.is_finite() and value > 0 for value in proposed.values()):
+            reason = "All entry, take-profit and stop-loss prices must be finite positive numbers"
+            return {**base, "success": True, "decision_status": "REJECTED",
+                    "decision_reason": reason, "reason": reason,
+                    "signal": signal, "trade_plan": agent_plan}
+
         entry = proposed["entry"]
         target = proposed["take_profit"]
         stop = proposed["stop_loss"]
@@ -1136,7 +1156,7 @@ class TradingCoordinator(SpotDemoMixin):
             "success": True, "direction": "SHORT" if is_short else "LONG",
             "entry": float(entry), "stop_loss": float(stop),
             "take_profit": float(target), "reward_risk": round(float(reward_risk), 4),
-            "timeframe": timeframe, "method": "AGENT_REVIEWED_USER_PROPOSAL",
+            "timeframe": timeframe, "method": plan_source,
             "agent_generated_plan": agent_plan,
         })
         signal["trade_plan"] = plan
