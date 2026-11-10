@@ -166,7 +166,7 @@ class TradingCoordinator(SpotDemoMixin):
             return {"success": False, "reason": "Only DEMO mode is supported"}
         if any(
             p.get("status") in (
-                "DEMO_OPEN", "DEMO_PARTIALLY_CLOSED", "DEMO_UNPROTECTED",
+                "DEMO_OPEN", "DEMO_PARTIALLY_CLOSED", "DEMO_CLOSING", "DEMO_UNPROTECTED",
                 "DEMO_RECONCILIATION_REQUIRED"
             )
             for p in self.demo_positions.values()
@@ -181,7 +181,7 @@ class TradingCoordinator(SpotDemoMixin):
     def get_demo_positions(self):
         """Return active positions separately from the closed-trade archive."""
         active_statuses = {
-            "DEMO_OPEN", "DEMO_PARTIALLY_CLOSED",
+            "DEMO_OPEN", "DEMO_PARTIALLY_CLOSED", "DEMO_CLOSING",
             "DEMO_UNPROTECTED", "DEMO_RECONCILIATION_REQUIRED",
         }
         closed_statuses = {"DEMO_CLOSED", "CLOSED"}
@@ -760,7 +760,7 @@ class TradingCoordinator(SpotDemoMixin):
         if direction not in ("LONG", "SHORT"):
             return {"approved": False, "reason": "Invalid Futures direction"}
 
-        live_statuses = ("DEMO_OPEN", "DEMO_PARTIALLY_CLOSED")
+        live_statuses = ("DEMO_OPEN", "DEMO_PARTIALLY_CLOSED", "DEMO_CLOSING")
         if any(
             p.get("status") in ("DEMO_UNPROTECTED", "DEMO_RECONCILIATION_REQUIRED")
             for p in self.demo_positions.values()
