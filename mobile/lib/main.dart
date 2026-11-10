@@ -112,7 +112,7 @@ class AppAtmospherePainter extends CustomPainter {
     }
 
     // Holographic candlestick market stream on the right side.
-    final candleWidth = math.max(3.0, size.width * .009);
+    final candleWidth = size.width * .009 < 3.0 ? 3.0 : size.width * .009;
     final gap = candleWidth * 1.8;
     final chartLeft = size.width * .48;
     final chartTop = size.height * .10;
@@ -1002,7 +1002,7 @@ class _TradeShellState extends State<TradeShell>
         children: [
           Row(
             children: [
-              const Icon(Icons.telegram, color: Color(0xFF29A9EB), size: 25),
+              const Icon(Icons.send_rounded, color: Color(0xFF29A9EB), size: 25),
               const SizedBox(width: 9),
               Expanded(
                 child: Text(
