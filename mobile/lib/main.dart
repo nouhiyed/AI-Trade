@@ -980,7 +980,17 @@ class _TradeShellState extends State<TradeShell>
       });
       notify(tr('تم حفظ إعدادات Telegram. أرسل رسالة اختبار للتأكد.', 'Telegram settings saved. Send a test message to verify delivery.'));
     } catch (error) {
-      if (mounted) notify('${tr('فشل حفظ Telegram: ', 'Telegram setup failed: ')}$error');
+      if (mounted) {
+        final detail = error.toString();
+        if (detail.contains('Not found') || detail.contains('404')) {
+          notify(tr(
+            'خادم Termux قديم ولا يحتوي مسار Telegram. حدّث ملفات AI-Trader وأعد تشغيل الخادم.',
+            'Your Termux API is outdated and lacks the Telegram route. Update AI-Trader files and restart the server.',
+          ));
+        } else {
+          notify('${tr('فشل حفظ Telegram: ', 'Telegram setup failed: ')}$error');
+        }
+      }
     } finally {
       if (mounted) setState(() => _telegramBusy = false);
     }
