@@ -283,7 +283,7 @@ class _BalanceAiPainter extends CustomPainter {
       final bottom = size.height * candle.$2;
       final color = candle.$4 ? cyan : const Color(0xFFFF6487);
       final paint = Paint()
-        ..color = color.withOpacity(dark ? .48 : .30)
+        ..color = color.withOpacity(dark ? .72 : .46)
         ..strokeWidth = 1.2;
       canvas.drawLine(Offset(x, top - size.height * .055),
           Offset(x, bottom + size.height * .055), paint);
@@ -295,7 +295,7 @@ class _BalanceAiPainter extends CustomPainter {
               bodyBottom < bodyTop + 5 ? bodyTop + 5 : bodyBottom),
           const Radius.circular(2),
         ),
-        Paint()..color = color.withOpacity(dark ? .62 : .40),
+        Paint()..color = color.withOpacity(dark ? .82 : .58),
       );
     }
 
@@ -484,16 +484,35 @@ class _TradeShellState extends State<TradeShell>
     if (apiBusy) return;
     setState(() => apiBusy = true);
     try {
-      final data = await ApiService.status();
+      Object? lastError;
+      Map<String, dynamic>? data;
+      // Brief retries smooth over the momentary gap while Termux is starting
+      // or Android is reconnecting the local loopback service.
+      for (var attempt = 0; attempt < 3; attempt++) {
+        try {
+          data = await ApiService.status();
+          break;
+        } catch (error) {
+          lastError = error;
+          if (attempt < 2) {
+            await Future.delayed(Duration(milliseconds: 700 * (attempt + 1)));
+          }
+        }
+      }
       if (!mounted) return;
+      if (data == null) {
+        setState(() {
+          apiOnline = false;
+          _apiVersion = lastError == null ? '' : 'CONNECTION_ERROR';
+        });
+        return;
+      }
       _applyStatus(data);
       final version = '${data['api_version'] ?? ''}';
       setState(() {
         _apiVersion = version;
         apiOnline = version == '2026.11.10.4';
       });
-    } catch (_) {
-      if (mounted) setState(() => apiOnline = false);
     } finally {
       if (mounted) setState(() => apiBusy = false);
     }
