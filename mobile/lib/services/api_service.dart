@@ -97,12 +97,13 @@ class ApiService {
       );
 
   static Future<bool> health() async {
-    final result = await _request('GET', '/health');
-    return result['ok'] == true;
+    final result = await _request(
+      'GET', '/health', requestTimeout: const Duration(seconds: 5));
+    return result['ok'] == true && result['api_version'] == '2026.11.10.4';
   }
 
   static Future<Map<String, dynamic>> status() =>
-      _request('GET', '/status');
+      _request('GET', '/status', requestTimeout: const Duration(seconds: 8));
 
   static Future<Map<String, dynamic>> telegramStatus() =>
       _request('GET', '/notifications/status');
