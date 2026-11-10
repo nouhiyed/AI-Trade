@@ -110,6 +110,18 @@ class TradingCoordinator(SpotDemoMixin):
         rows = self.demo_execution.get_open_positions(self.demo_account_id)
         changed = False
 
+        # A process may stop after persisting the temporary manual-close state
+        # but before the execution transaction. Restore that position on restart.
+        for record in self.demo_positions.values():
+            if record.get("status") == "DEMO_CLOSING":
+                previous = record.pop("closing_previous_status", "DEMO_OPEN")
+                if previous not in ("DEMO_OPEN", "DEMO_PARTIALLY_CLOSED",
+                                    "DEMO_UNPROTECTED", "DEMO_RECONCILIATION_REQUIRED"):
+                    previous = "DEMO_OPEN"
+                record["status"] = previous
+                record.pop("close_error", None)
+                changed = True
+
         for position in rows:
             engine_id = str(position["position_id"])
             record = next(
@@ -470,6 +482,7 @@ class TradingCoordinator(SpotDemoMixin):
                 previous_status = record.get("status")
                 domain = str(record.get("domain", "futures")).lower()
                 symbol = str(record.get("symbol", "")).upper()
+                record["closing_previous_status"] = previous_status
                 record["status"] = "DEMO_CLOSING"
                 record.pop("close_error", None)
                 self._save_demo_state()
@@ -488,6 +501,7 @@ class TradingCoordinator(SpotDemoMixin):
                     current = self.demo_positions.get(position_id)
                     if not result.get("success") and current and current.get("status") == "DEMO_CLOSING":
                         current["status"] = previous_status
+                        current.pop("closing_previous_status", None)
                         current["close_error"] = result.get("reason", "Close failed")
                         self._save_demo_state()
                     return result
@@ -496,6 +510,7 @@ class TradingCoordinator(SpotDemoMixin):
                     current = self.demo_positions.get(position_id)
                     if current and current.get("status") == "DEMO_CLOSING":
                         current["status"] = previous_status
+                        current.pop("closing_previous_status", None)
                         current["close_error"] = str(error)
                         self._save_demo_state()
                 return {"success": False, "reason": str(error)}
@@ -547,6 +562,7 @@ class TradingCoordinator(SpotDemoMixin):
                 "DEMO_CLOSED" if result["status"] == "CLOSED"
                 else "DEMO_PARTIALLY_CLOSED"
             )
+            record.pop("closing_previous_status", None)
             record["close_price"] = str(result["execution_price"])
             record["realized_pnl"] = str(result["realized_pnl"])
             record["close_fee"] = str(result["fee"])
