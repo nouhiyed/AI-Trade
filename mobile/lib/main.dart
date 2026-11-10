@@ -1382,7 +1382,7 @@ class _TradeShellState extends State<TradeShell>
                 builder: (_, __) => SizedBox(
                   width: 230,
                   height: 230,
-                  child: CustomPaint(painter: OrbPainter(pulse.value)),
+                  child: CustomPaint(painter: HeroMarketAIPainter(pulse.value)),
                 ),
               ),
             ),
@@ -2569,6 +2569,163 @@ class GridPainter extends CustomPainter {
   }
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+class HeroMarketAIPainter extends CustomPainter {
+  final double t;
+  HeroMarketAIPainter(this.t);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width * .48, size.height * .49);
+    final coreRadius = size.width * .19;
+    final glowRect = Rect.fromCircle(center: center, radius: coreRadius * 2.8);
+
+    // Deep cyan/violet bloom behind the AI processor.
+    canvas.drawCircle(
+      center,
+      coreRadius * 2.8,
+      Paint()
+        ..shader = RadialGradient(colors: [
+          const Color(0xFF00E9D2).withOpacity(.34 + .05 * math.sin(t * math.pi * 2)),
+          const Color(0xFF287BFF).withOpacity(.16),
+          const Color(0xFF815BFF).withOpacity(.08),
+          Colors.transparent,
+        ], stops: const [0, .42, .72, 1]).createShader(glowRect),
+    );
+
+    // Market candles behind the AI core.
+    final candleUp = Paint()..color = const Color(0xFF00E4B5).withOpacity(.72);
+    final candleDown = Paint()..color = const Color(0xFFFF5D83).withOpacity(.66);
+    final wickUp = Paint()..color = const Color(0xFF00E4B5).withOpacity(.8)..strokeWidth = 1.1;
+    final wickDown = Paint()..color = const Color(0xFFFF5D83).withOpacity(.75)..strokeWidth = 1.1;
+    for (int i = 0; i < 17; i++) {
+      final x = size.width * (.05 + i * .054);
+      final wave = math.sin(i * .72) * .22 + math.cos(i * .31) * .10;
+      final y = size.height * (.49 - wave - i * .006);
+      final h = 8.0 + (i % 4) * 4.0;
+      final rising = math.sin(i * 1.4) > -.05;
+      canvas.drawLine(Offset(x, y - h), Offset(x, y + h), rising ? wickUp : wickDown);
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromCenter(center: Offset(x, y), width: 4.2, height: h * 1.05),
+          const Radius.circular(1.5),
+        ),
+        rising ? candleUp : candleDown,
+      );
+    }
+
+    // Circuit-board links from the core to three independent trading agents.
+    final nodes = <Offset>[
+      Offset(size.width * .12, size.height * .18),
+      Offset(size.width * .80, size.height * .16),
+      Offset(size.width * .13, size.height * .82),
+      Offset(size.width * .83, size.height * .79),
+      Offset(size.width * .49, size.height * .04),
+      Offset(size.width * .49, size.height * .94),
+    ];
+    final colors = [
+      const Color(0xFF00E5C3),
+      const Color(0xFF4C9BFF),
+      const Color(0xFF9A78FF),
+      const Color(0xFF00D9C2),
+      const Color(0xFF4C9BFF),
+      const Color(0xFF9A78FF),
+    ];
+    for (int i = 0; i < nodes.length; i++) {
+      final path = Path()
+        ..moveTo(center.dx, center.dy)
+        ..lineTo((center.dx + nodes[i].dx) * .5, nodes[i].dy)
+        ..lineTo(nodes[i].dx, nodes[i].dy);
+      canvas.drawPath(
+        path,
+        Paint()
+          ..color = colors[i].withOpacity(.42)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.1,
+      );
+      canvas.drawCircle(nodes[i], 8, Paint()..color = colors[i].withOpacity(.10));
+      canvas.drawCircle(nodes[i], 3.2, Paint()..color = colors[i].withOpacity(.95));
+      canvas.drawCircle(
+        nodes[i], 6.2,
+        Paint()..style = PaintingStyle.stroke..strokeWidth = 1..color = colors[i].withOpacity(.62),
+      );
+      final progress = (t + i * .17) % 1.0;
+      final signal = Offset.lerp(center, nodes[i], progress)!;
+      canvas.drawCircle(signal, 2.2, Paint()..color = colors[i].withOpacity(.9));
+    }
+
+    // Hexagonal glass processor housing.
+    final hex = Path();
+    for (int i = 0; i < 6; i++) {
+      final a = -math.pi / 2 + i * math.pi / 3;
+      final p = Offset(center.dx + math.cos(a) * coreRadius * 1.48,
+          center.dy + math.sin(a) * coreRadius * 1.48);
+      if (i == 0) {
+        hex.moveTo(p.dx, p.dy);
+      } else {
+        hex.lineTo(p.dx, p.dy);
+      }
+    }
+    hex.close();
+    canvas.drawPath(hex, Paint()..color = const Color(0xFF071A2B).withOpacity(.82));
+    canvas.drawPath(
+      hex,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2
+        ..shader = const LinearGradient(colors: [
+          Color(0xFF00F0D0), Color(0xFF318DFF), Color(0xFF9A72FF), Color(0xFF00F0D0),
+        ]).createShader(Rect.fromCircle(center: center, radius: coreRadius * 1.6),
+    );
+
+    // Inner luminous processor die and microchip pins.
+    final die = RRect.fromRectAndRadius(
+      Rect.fromCenter(center: center, width: coreRadius * 1.45, height: coreRadius * 1.45),
+      const Radius.circular(12),
+    );
+    canvas.drawRRect(
+      die,
+      Paint()
+        ..shader = const RadialGradient(colors: [
+          Color(0xFF1C8F9A), Color(0xFF10324D), Color(0xFF0B142B),
+        ]).createShader(die.outerRect),
+    );
+    final pin = Paint()..color = const Color(0xFF7DFCEC).withOpacity(.8)..strokeWidth = 1.6;
+    for (int i = -2; i <= 2; i++) {
+      final offset = i * coreRadius * .22;
+      canvas.drawLine(Offset(center.dx - coreRadius * .93, center.dy + offset),
+          Offset(center.dx - coreRadius * .69, center.dy + offset), pin);
+      canvas.drawLine(Offset(center.dx + coreRadius * .69, center.dy + offset),
+          Offset(center.dx + coreRadius * .93, center.dy + offset), pin);
+      canvas.drawLine(Offset(center.dx + offset, center.dy - coreRadius * .93),
+          Offset(center.dx + offset, center.dy - coreRadius * .69), pin);
+      canvas.drawLine(Offset(center.dx + offset, center.dy + coreRadius * .69),
+          Offset(center.dx + offset, center.dy + coreRadius * .93), pin);
+    }
+
+    final ai = TextPainter(
+      text: const TextSpan(
+        text: 'AI',
+        style: TextStyle(
+          color: Color(0xFFE8FFFE), fontSize: 27, fontWeight: FontWeight.w900,
+          letterSpacing: 1.5,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    ai.paint(canvas, Offset(center.dx - ai.width / 2, center.dy - ai.height / 2));
+
+    // Three compact agent markers at the base of the processor.
+    for (int i = 0; i < 3; i++) {
+      final x = center.dx + (i - 1) * coreRadius * .52;
+      canvas.drawCircle(Offset(x, center.dy + coreRadius * 1.95), 3.5,
+          Paint()..color = [const Color(0xFF00E5C3), const Color(0xFF4C9BFF), const Color(0xFF9A78FF)][i]);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant HeroMarketAIPainter old) => old.t != t;
 }
 
 class OrbPainter extends CustomPainter {
