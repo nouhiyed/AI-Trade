@@ -12,7 +12,30 @@ class BinanceMarketData:
         "spot": "https://api.binance.com",
         "futures": "https://fapi.binance.com",
     }
-    ALPHA_BASE_URL = "https://www.binance.com"
+    FALLBACK_URLS = {
+        "spot": (
+            "https://api.binance.com",
+            "https://api1.binance.com",
+            "https://api2.binance.com",
+            "https://api3.binance.com",
+            "https://api4.binance.com",
+            "https://data-api.binance.vision",
+            "https://api.binance.vision",
+        ),
+        "futures": (
+            "https://fapi.binance.com",
+            "https://fapi1.binance.com",
+            "https://fapi2.binance.com",
+            "https://fapi3.binance.com",
+            "https://fapi4.binance.com",
+        ),
+    }
+    ALPHA_BASE_URLS = (
+        "https://www.binance.com",
+        "https://bapi.binance.com",
+        "https://api.binance.com",
+        "https://api1.binance.com",
+    )
 
     CANDLE_COLUMNS = [
         "open_time", "open", "high", "low", "close", "volume",
@@ -33,12 +56,27 @@ class BinanceMarketData:
         if market not in self.BASE_URLS:
             raise ValueError("Market must be spot or futures")
 
-        url = self.BASE_URLS[market] + endpoint
-        response = self.session.get(
-            url, params=params, timeout=self.timeout
+        failures = []
+        # Binance publishes several official API hostnames. Try them in order
+        # so a DNS/route failure on one hostname does not disable an entire agent.
+        for base_url in self.FALLBACK_URLS[market]:
+            try:
+                response = self.session.get(
+                    base_url + endpoint,
+                    params=params,
+                    timeout=min(self.timeout, 5),
+                )
+                response.raise_for_status()
+                payload = response.json()
+                if isinstance(payload, dict) and payload.get("code") not in (None, 0, "0"):
+                    raise RuntimeError(str(payload.get("msg") or payload.get("message") or payload.get("code")))
+                return payload
+            except (requests.RequestException, ValueError, RuntimeError) as error:
+                failures.append(f"{base_url}: {type(error).__name__}: {error}")
+        raise RuntimeError(
+            f"All official Binance {market} API endpoints failed: "
+            + " | ".join(failures[-3:])
         )
-        response.raise_for_status()
-        return response.json()
 
     def fetch_candles(
         self, market, symbol, interval="1m",
@@ -109,19 +147,28 @@ class BinanceMarketData:
         return df
 
     def _alpha_request(self, endpoint, params=None):
-        response = self.session.get(
-            self.ALPHA_BASE_URL + endpoint,
-            params=params or {},
-            timeout=self.timeout
+        failures = []
+        for base_url in self.ALPHA_BASE_URLS:
+            try:
+                response = self.session.get(
+                    base_url + endpoint,
+                    params=params or {},
+                    timeout=min(self.timeout, 5),
+                )
+                response.raise_for_status()
+                result = response.json()
+                if not isinstance(result, dict) or result.get("code") != "000000":
+                    raise RuntimeError(
+                        "Binance Alpha API error: " +
+                        str(result.get("message", "Invalid response") if isinstance(result, dict) else result)
+                    )
+                return result.get("data")
+            except (requests.RequestException, ValueError, RuntimeError) as error:
+                failures.append(f"{base_url}: {type(error).__name__}: {error}")
+        raise RuntimeError(
+            "All official Binance Alpha API endpoints failed: "
+            + " | ".join(failures[-3:])
         )
-        response.raise_for_status()
-        result = response.json()
-        if not isinstance(result, dict) or result.get("code") != "000000":
-            raise RuntimeError(
-                "Binance Alpha API error: " +
-                str(result.get("message", "Invalid response") if isinstance(result, dict) else result)
-            )
-        return result.get("data")
 
     def fetch_alpha_symbols(self):
         data = self._alpha_request(
