@@ -425,6 +425,7 @@ class _TradeShellState extends State<TradeShell>
   bool running = true;
   bool apiOnline = false;
   bool apiBusy = false;
+  String _apiVersion = '';
   Map<String, dynamic> demoData = {};
   Map<String, dynamic> agentControls = {};
   final Set<String> closingPositionIds = {};
@@ -486,7 +487,11 @@ class _TradeShellState extends State<TradeShell>
       final data = await ApiService.status();
       if (!mounted) return;
       _applyStatus(data);
-      setState(() => apiOnline = true);
+      final version = '${data['api_version'] ?? ''}';
+      setState(() {
+        _apiVersion = version;
+        apiOnline = version == '2026.11.10.4';
+      });
     } catch (_) {
       if (mounted) setState(() => apiOnline = false);
     } finally {
@@ -1107,9 +1112,14 @@ class _TradeShellState extends State<TradeShell>
           ),
           const SizedBox(height: 7),
           Text(
-            configured
-                ? tr('البوت مربوط — تحقق من وصول الرسائل', 'Bot configured — verify message delivery')
-                : tr('أدخل بيانات البوت لربط الإشعارات', 'Enter bot credentials to enable alerts'),
+            !apiOnline
+                ? tr(
+                    'خادم Termux قديم أو غير محدث. حدّث ملفات المشروع وأعد تشغيل API.',
+                    'Termux API is outdated. Pull the latest project files and restart the API.',
+                  )
+                : configured
+                    ? tr('البوت مربوط — تحقق من وصول الرسائل', 'Bot configured — verify message delivery')
+                    : tr('أدخل بيانات البوت لربط الإشعارات', 'Enter bot credentials to enable alerts'),
             style: TextStyle(color: widget.muted, fontSize: 10),
           ),
           const SizedBox(height: 12),
