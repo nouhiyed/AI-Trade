@@ -1,4 +1,7 @@
 import sqlite3
+import threading
+import unittest
+
 import pytest
 
 from core.demo.database import DemoDatabase
@@ -94,3 +97,53 @@ def test_database_cannot_close_during_transaction(tmp_path):
     with pytest.raises(RuntimeError):
         with db.transaction():
             pass
+
+
+
+class TestConcurrentDatabaseAccess(unittest.TestCase):
+    def test_shared_connection_serializes_concurrent_reads_and_writes(self):
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as directory:
+            db = DemoDatabase(Path(directory) / "concurrent.db")
+            db.connection.execute("CREATE TABLE events (value INTEGER NOT NULL)")
+            failures = []
+
+            def writer():
+                try:
+                    for value in range(100):
+                        with db.transaction():
+                            db.connection.execute(
+                                "INSERT INTO events(value) VALUES (?)", (value,)
+                            )
+                except Exception as error:
+                    failures.append(error)
+
+            def reader():
+                try:
+                    for _ in range(150):
+                        row = db.connection.execute(
+                            "SELECT COUNT(*) AS total FROM events"
+                        ).fetchone()
+                        self.assertGreaterEqual(row["total"], 0)
+                except Exception as error:
+                    failures.append(error)
+
+            threads = [
+                threading.Thread(target=writer),
+                threading.Thread(target=reader),
+                threading.Thread(target=reader),
+            ]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=10)
+
+            self.assertTrue(all(not thread.is_alive() for thread in threads))
+            self.assertEqual(failures, [])
+            self.assertEqual(
+                db.connection.execute("SELECT COUNT(*) FROM events").fetchone()[0],
+                100,
+            )
+            db.close()
