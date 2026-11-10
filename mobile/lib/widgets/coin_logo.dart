@@ -16,7 +16,9 @@ class _CoinLogoState extends State<CoinLogo> {
   String get _ticker {
     var value = widget.symbol.toLowerCase().replaceAll('usdt', '').replaceAll('usdc', '');
     if (value.startsWith('1000')) value = value.substring(4);
-    return value.replaceAll(RegExp(r'[^a-z0-9]'), '');
+    value = value.replaceAll(RegExp(r'[^a-z0-9]'), '');
+    const aliases = {'xbt': 'btc', 'bcc': 'bch', 'bcha': 'bch'};
+    return aliases[value] ?? value;
   }
 
   Future<String?> _resolve() => _cache.putIfAbsent(_ticker, () async {
@@ -41,7 +43,7 @@ class _CoinLogoState extends State<CoinLogo> {
         }
       }
     } catch (_) {}
-    return 'https://assets.coincap.io/assets/icons/$ticker@2x.png';
+    return 'https://bin.bnbstatic.com/static/assets/logos/$ticker.png';
   });
 
   @override
@@ -58,8 +60,19 @@ class _CoinLogoState extends State<CoinLogo> {
         future: _resolve(),
         builder: (context, snapshot) {
           if (snapshot.data == null) return fallback;
-          return Image.network(snapshot.data!, width: widget.size, height: widget.size,
-            fit: BoxFit.cover, errorBuilder: (_, __, ___) => fallback);
+          return Image.network(
+            snapshot.data!,
+            width: widget.size,
+            height: widget.size,
+            fit: BoxFit.contain,
+            errorBuilder: (_, __, ___) => Image.network(
+              'https://assets.coincap.io/assets/icons/$_ticker@2x.png',
+              width: widget.size,
+              height: widget.size,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => fallback,
+            ),
+          );
         },
       ),
     );
