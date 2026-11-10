@@ -238,6 +238,10 @@ class _TradeShellState extends State<TradeShell>
   Map<String, dynamic> demoData = {};
   Map<String, dynamic> agentControls = {};
   final Set<String> closingPositionIds = {};
+  final TextEditingController _telegramTokenController = TextEditingController();
+  final TextEditingController _telegramChatController = TextEditingController();
+  Map<String, dynamic> _telegramStatus = {};
+  bool _telegramBusy = false;
   Timer? _refreshTimer;
   Timer? _statusTimer;
   final Map<String, List<Map<String, double>>> _marketCandles = {};
@@ -269,6 +273,8 @@ class _TradeShellState extends State<TradeShell>
     super.initState();
     () async {
       await _refreshStatus();
+      if (!mounted) return;
+      await _loadTelegramStatus();
       if (!mounted) return;
       await _refreshMarketData(loadSymbols: true);
     }();
@@ -813,10 +819,159 @@ class _TradeShellState extends State<TradeShell>
     }
   }
 
+  Future<void> _loadTelegramStatus() async {
+    if (!apiOnline) return;
+    try {
+      final status = await ApiService.telegramStatus();
+      if (mounted) setState(() => _telegramStatus = status);
+    } catch (_) {}
+  }
+
+  Future<void> _configureTelegram() async {
+    final token = _telegramTokenController.text.trim();
+    final chatId = _telegramChatController.text.trim();
+    if (token.isEmpty || chatId.isEmpty) {
+      notify(tr('أدخل Bot Token و Chat ID أولاً', 'Enter both Bot Token and Chat ID'));
+      return;
+    }
+    if (!apiOnline || _telegramBusy) return;
+    setState(() => _telegramBusy = true);
+    try {
+      final result = await ApiService.configureTelegram(
+        botToken: token,
+        chatId: chatId,
+      );
+      if (!mounted) return;
+      setState(() {
+        _telegramStatus = result;
+        _telegramTokenController.clear();
+      });
+      notify(tr('تم حفظ إعدادات Telegram. أرسل رسالة اختبار للتأكد.', 'Telegram settings saved. Send a test message to verify delivery.'));
+    } catch (error) {
+      if (mounted) notify('${tr('فشل حفظ Telegram: ', 'Telegram setup failed: ')}$error');
+    } finally {
+      if (mounted) setState(() => _telegramBusy = false);
+    }
+  }
+
+  Future<void> _testTelegram() async {
+    if (!apiOnline || _telegramBusy) return;
+    setState(() => _telegramBusy = true);
+    try {
+      final result = await ApiService.testTelegram();
+      if (!mounted) return;
+      setState(() => _telegramStatus = Map<String, dynamic>.from(result['status'] ?? {}));
+      notify(result['sent'] == true
+          ? tr('وصلت رسالة الاختبار إلى Telegram بنجاح', 'Telegram test message delivered')
+          : '${tr('فشل إرسال Telegram: ', 'Telegram delivery failed: ')}${result['reason'] ?? 'Unknown error'}');
+    } catch (error) {
+      if (mounted) notify('${tr('فشل إرسال Telegram: ', 'Telegram delivery failed: ')}$error');
+    } finally {
+      if (mounted) setState(() => _telegramBusy = false);
+    }
+  }
+
+  Widget _telegramSettingsCard() {
+    final configured = _telegramStatus['configured'] == true;
+    return _panel(
+      border: (configured ? green : blue).withOpacity(.3),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.telegram, color: Color(0xFF29A9EB), size: 25),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Text(
+                  tr('إشعارات Telegram', 'Telegram notifications'),
+                  style: TextStyle(color: widget.text, fontWeight: FontWeight.w800),
+                ),
+              ),
+              Icon(
+                configured ? Icons.check_circle : Icons.error_outline,
+                color: configured ? green : widget.muted,
+                size: 19,
+              ),
+            ],
+          ),
+          const SizedBox(height: 7),
+          Text(
+            configured
+                ? tr('البوت مربوط — تحقق من وصول الرسائل', 'Bot configured — verify message delivery')
+                : tr('أدخل بيانات البوت لربط الإشعارات', 'Enter bot credentials to enable alerts'),
+            style: TextStyle(color: widget.muted, fontSize: 10),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _telegramTokenController,
+            obscureText: true,
+            autocorrect: false,
+            enableSuggestions: false,
+            style: TextStyle(color: widget.text, fontSize: 12),
+            decoration: InputDecoration(
+              labelText: 'Telegram Bot Token',
+              labelStyle: TextStyle(color: widget.muted, fontSize: 11),
+              filled: true,
+              fillColor: widget.bg.withOpacity(.55),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              prefixIcon: const Icon(Icons.key, color: cyan, size: 18),
+            ),
+          ),
+          const SizedBox(height: 9),
+          TextField(
+            controller: _telegramChatController,
+            keyboardType: TextInputType.text,
+            autocorrect: false,
+            style: TextStyle(color: widget.text, fontSize: 12),
+            decoration: InputDecoration(
+              labelText: 'Telegram Chat ID',
+              labelStyle: TextStyle(color: widget.muted, fontSize: 11),
+              filled: true,
+              fillColor: widget.bg.withOpacity(.55),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              prefixIcon: const Icon(Icons.forum_outlined, color: cyan, size: 18),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: !apiOnline || _telegramBusy ? null : _configureTelegram,
+                  icon: const Icon(Icons.save_outlined, size: 17),
+                  label: Text(tr('حفظ الربط', 'Save')),
+                ),
+              ),
+              const SizedBox(width: 9),
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: !apiOnline || _telegramBusy || !configured ? null : _testTelegram,
+                  icon: const Icon(Icons.send_rounded, size: 16),
+                  label: Text(tr('اختبار الإرسال', 'Test send')),
+                  style: FilledButton.styleFrom(backgroundColor: const Color(0xFF168BC4)),
+                ),
+              ),
+            ],
+          ),
+          if (_telegramStatus['last_error'] != null) ...[
+            const SizedBox(height: 7),
+            Text(
+              '${tr('آخر خطأ: ', 'Last error: ')}${_telegramStatus['last_error']}',
+              style: const TextStyle(color: red, fontSize: 10),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   @override
   void dispose() {
     _refreshTimer?.cancel();
     _statusTimer?.cancel();
+    _telegramTokenController.dispose();
+    _telegramChatController.dispose();
     pulse.dispose();
     super.dispose();
   }
@@ -1921,6 +2076,8 @@ class _TradeShellState extends State<TradeShell>
               ],
             ),
           ),
+          const SizedBox(height: 15),
+          _telegramSettingsCard(),
           const SizedBox(height: 15),
           _panel(
             border: red.withOpacity(.3),
