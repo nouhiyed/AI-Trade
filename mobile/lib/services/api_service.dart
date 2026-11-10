@@ -104,6 +104,21 @@ class ApiService {
   static Future<Map<String, dynamic>> status() =>
       _request('GET', '/status');
 
+  static Future<Map<String, dynamic>> telegramStatus() =>
+      _request('GET', '/notifications/status');
+
+  static Future<Map<String, dynamic>> configureTelegram({
+    required String botToken,
+    required String chatId,
+  }) =>
+      _request('POST', '/notifications/configure', body: {
+        'bot_token': botToken,
+        'chat_id': chatId,
+      });
+
+  static Future<Map<String, dynamic>> testTelegram() =>
+      _request('POST', '/notifications/test');
+
   static Future<Map<String, dynamic>> setMode(String mode) =>
       _request('POST', '/mode', body: {'mode': mode});
 
