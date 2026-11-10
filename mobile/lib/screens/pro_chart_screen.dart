@@ -512,9 +512,6 @@ class AgentSubmissionScreen extends StatefulWidget {
 }
 
 class _AgentSubmissionScreenState extends State<AgentSubmissionScreen> {
-  late final TextEditingController _entry;
-  final TextEditingController _target = TextEditingController();
-  final TextEditingController _stop = TextEditingController();
   bool _sending = false;
   bool _requestReceived = false;
   String? _requestId;
@@ -524,37 +521,11 @@ class _AgentSubmissionScreenState extends State<AgentSubmissionScreen> {
   String t(String ar, String en) => widget.english ? en : ar;
 
   @override
-  void initState() {
-    super.initState();
-    _entry = TextEditingController(
-      text: widget.initialPrice == null ? '' : widget.initialPrice!.toString(),
-    );
-  }
-
-  @override
   void dispose() {
-    _entry.dispose();
-    _target.dispose();
-    _stop.dispose();
     super.dispose();
   }
 
-  double? _number(TextEditingController controller) =>
-      double.tryParse(controller.text.trim());
-
   Future<void> _submit() async {
-    final entry = _number(_entry);
-    final target = _number(_target);
-    final stop = _number(_stop);
-    if (entry == null || target == null || stop == null ||
-        !entry.isFinite || !target.isFinite || !stop.isFinite ||
-        entry <= 0 || target <= 0 || stop <= 0) {
-      setState(() => _error = t(
-        'أدخل أسعاراً رقمية صحيحة وأكبر من صفر في الخانات الثلاث.',
-        'Enter valid positive numeric prices in all three fields.',
-      ));
-      return;
-    }
     setState(() {
       _sending = true;
       _requestReceived = false;
@@ -563,13 +534,13 @@ class _AgentSubmissionScreenState extends State<AgentSubmissionScreen> {
       _result = null;
     });
     try {
+      // Send only the selected chart market, symbol and timeframe.
+      // The selected agent analyzes live Binance data and creates its own
+      // entry, stop-loss and take-profit plan on the backend.
       final acknowledgement = await ApiService.submitChartSignal(
         domain: widget.domain,
         symbol: widget.symbol,
         timeframe: widget.timeframe,
-        entryPrice: entry,
-        takeProfit: target,
-        stopLoss: stop,
       );
       final requestId = '${acknowledgement['request_id'] ?? ''}';
       if (acknowledgement['request_status'] != 'RECEIVED' || requestId.isEmpty) {
@@ -632,28 +603,6 @@ class _AgentSubmissionScreenState extends State<AgentSubmissionScreen> {
     }
   }
 
-  Widget _priceField(String label, TextEditingController controller, Color accent) =>
-      Padding(
-        padding: const EdgeInsets.only(bottom: 10),
-        child: TextField(
-          controller: controller,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: false),
-          style: TextStyle(color: widget.text, fontWeight: FontWeight.w700),
-          decoration: InputDecoration(
-            labelText: label,
-            labelStyle: TextStyle(color: widget.muted),
-            prefixIcon: Icon(Icons.price_change_outlined, color: accent),
-            filled: true,
-            fillColor: widget.panel,
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: BorderSide(color: accent.withOpacity(.25)),
-            ),
-          ),
-        ),
-      );
-
   @override
   Widget build(BuildContext context) {
     final status = '${_result?['decision_status'] ?? (_result?['opened'] == true ? 'APPROVED' : 'REJECTED')}'.toUpperCase();
@@ -706,14 +655,21 @@ class _AgentSubmissionScreenState extends State<AgentSubmissionScreen> {
                 ],
               ),
             ),
-            const SizedBox(height: 14),
-            _priceField(t('سعر الدخول المقترح', 'PROPOSED ENTRY'), _entry, const Color(0xFF4287F5)),
-            _priceField(t('سعر جني الأرباح', 'TAKE PROFIT'), _target, _up),
-            _priceField(t('سعر وقف الخسارة', 'STOP LOSS'), _stop, _down),
-            Text(
-              t('الاتجاه لا تختاره أنت؛ الوكيل يحدده وفق تحليله. إدخال الأسعار لا يفتح صفقة بحد ذاته.',
-                'You do not choose direction; the agent determines it. Entering prices alone never opens a trade.'),
-              style: TextStyle(color: widget.muted, fontSize: 11, height: 1.5),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(13),
+              decoration: BoxDecoration(
+                color: widget.panel,
+                borderRadius: BorderRadius.circular(13),
+                border: Border.all(color: const Color(0xFF26A69A).withOpacity(.28)),
+              ),
+              child: Text(
+                t(
+                  'أرسل الفرصة كما هي. الوكيل المختص سيحلل بيانات Binance الحية ويحدد الاتجاه وسعر الدخول ووقف الخسارة والهدف بنفسه، ثم يقرر القبول أو الرفض وفق الاستراتيجية والمخاطر.',
+                  'Send the chart setup as-is. The selected agent analyzes live Binance data, generates direction, entry, stop-loss and take-profit, then accepts or rejects under strategy and risk rules.',
+                ),
+                style: TextStyle(color: widget.muted, fontSize: 12, height: 1.55),
+              ),
             ),
             const SizedBox(height: 12),
             Text(t('التشارت الحي للمراجعة', 'LIVE CHART REVIEW'),
