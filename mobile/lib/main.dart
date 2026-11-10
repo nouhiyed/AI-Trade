@@ -237,95 +237,163 @@ class _BalanceAiPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    // Keep the illustration on the side opposite the balance text.
-    final x = size.width * (english ? .82 : .18);
-    final center = Offset(x, size.height * .50);
-    final radius = size.height * .25;
-    final accentA = const Color(0xFF36AFA4).withOpacity(dark ? .16 : .10);
-    final accentB = const Color(0xFF668CCB).withOpacity(dark ? .13 : .08);
+    // Stronger AI + trading artwork, deliberately kept on the left side
+    // so the account figures remain clear on the right.
+    final area = Rect.fromLTWH(0, 0, size.width * .49, size.height);
+    final center = Offset(size.width * .235, size.height * .51);
+    final radius = size.height * .235;
+    const cyan = Color(0xFF18E0C5);
+    const blue = Color(0xFF268BFF);
+    const violet = Color(0xFF9B68FF);
 
     final glow = Paint()
       ..shader = RadialGradient(
-        colors: [accentA, accentB, Colors.transparent],
-        stops: const [0, .55, 1],
-      ).createShader(Rect.fromCircle(center: center, radius: radius * 2.0));
-    canvas.drawCircle(center, radius * 2.0, glow);
+        colors: [
+          cyan.withOpacity(dark ? .30 : .16),
+          blue.withOpacity(dark ? .19 : .10),
+          violet.withOpacity(dark ? .10 : .05),
+          Colors.transparent,
+        ],
+        stops: const [0, .34, .68, 1],
+      ).createShader(Rect.fromCircle(center: center, radius: radius * 2.35));
+    canvas.drawCircle(center, radius * 2.35, glow);
 
+    // Subtle market grid behind the neural core.
+    final grid = Paint()
+      ..color = cyan.withOpacity(dark ? .09 : .055)
+      ..strokeWidth = .7;
+    for (double x = 8; x < size.width * .48; x += 25) {
+      canvas.drawLine(Offset(x, 0), Offset(x, size.height), grid);
+    }
+    for (double y = 12; y < size.height; y += 25) {
+      canvas.drawLine(Offset(0, y), Offset(size.width * .48, y), grid);
+    }
+
+    // Binance-like market candles rising behind the AI core.
+    final candleData = <(double, double, double, bool)>[
+      (.035, .72, .54, true), (.085, .61, .39, false),
+      (.135, .66, .43, true), (.185, .51, .30, true),
+      (.235, .57, .35, false), (.285, .43, .23, true),
+      (.335, .49, .27, true), (.385, .34, .17, false),
+      (.435, .40, .20, true),
+    ];
+    for (final candle in candleData) {
+      final x = size.width * candle.$1;
+      final top = size.height * candle.$3;
+      final bottom = size.height * candle.$2;
+      final color = candle.$4 ? cyan : const Color(0xFFFF6487);
+      final paint = Paint()
+        ..color = color.withOpacity(dark ? .48 : .30)
+        ..strokeWidth = 1.2;
+      canvas.drawLine(Offset(x, top - size.height * .055),
+          Offset(x, bottom + size.height * .055), paint);
+      final bodyTop = top < bottom ? top : bottom;
+      final bodyBottom = top < bottom ? bottom : top;
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTRB(x - 2.3, bodyTop, x + 2.3,
+              bodyBottom < bodyTop + 5 ? bodyTop + 5 : bodyBottom),
+          const Radius.circular(2),
+        ),
+        Paint()..color = color.withOpacity(dark ? .62 : .40),
+      );
+    }
+
+    // Layered orbital rings around the AI nucleus.
     final orbit = Paint()
-      ..color = accentB
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.0;
+      ..strokeWidth = 1.35
+      ..color = blue.withOpacity(dark ? .52 : .30);
     canvas.save();
     canvas.translate(center.dx, center.dy);
-    canvas.rotate(-.42);
+    canvas.rotate(-.48);
     canvas.drawOval(
-      Rect.fromCenter(center: Offset.zero, width: radius * 2.65, height: radius * .92),
+      Rect.fromCenter(center: Offset.zero,
+          width: radius * 3.0, height: radius * .92),
       orbit,
     );
-    canvas.rotate(1.0);
-    orbit.color = accentA;
+    canvas.rotate(1.02);
+    orbit.color = cyan.withOpacity(dark ? .66 : .38);
     canvas.drawOval(
-      Rect.fromCenter(center: Offset.zero, width: radius * 2.25, height: radius * .82),
+      Rect.fromCenter(center: Offset.zero,
+          width: radius * 2.65, height: radius * .80),
+      orbit,
+    );
+    canvas.rotate(.72);
+    orbit.color = violet.withOpacity(dark ? .50 : .28);
+    canvas.drawOval(
+      Rect.fromCenter(center: Offset.zero,
+          width: radius * 2.2, height: radius * .72),
       orbit,
     );
     canvas.restore();
 
+    // Glowing central processor.
+    final coreGlow = Paint()
+      ..shader = RadialGradient(
+        colors: [
+          cyan.withOpacity(dark ? .58 : .36),
+          blue.withOpacity(dark ? .34 : .20),
+          Colors.transparent,
+        ],
+      ).createShader(Rect.fromCircle(center: center, radius: radius * .95));
+    canvas.drawCircle(center, radius * .95, coreGlow);
+    canvas.drawCircle(center, radius * .48,
+        Paint()..color = const Color(0xFF071A2B).withOpacity(dark ? .72 : .48));
+    canvas.drawCircle(center, radius * .48,
+        Paint()..style = PaintingStyle.stroke..strokeWidth = 1.5
+          ..color = cyan.withOpacity(dark ? .85 : .60));
+
+    // Neural connections and active nodes.
     final nodes = <Offset>[
-      Offset(size.width * (english ? .62 : .08), size.height * .22),
-      Offset(size.width * (english ? .78 : .24), size.height * .12),
-      Offset(size.width * (english ? .95 : .38), size.height * .29),
-      Offset(size.width * (english ? .91 : .34), size.height * .72),
-      Offset(size.width * (english ? .70 : .14), size.height * .84),
+      Offset(size.width * .055, size.height * .27),
+      Offset(size.width * .12, size.height * .12),
+      Offset(size.width * .25, size.height * .10),
+      Offset(size.width * .405, size.height * .25),
+      Offset(size.width * .43, size.height * .68),
+      Offset(size.width * .28, size.height * .88),
+      Offset(size.width * .085, size.height * .76),
     ];
-    final links = <(int, int)>[(0, 1), (1, 2), (2, 3), (3, 4), (4, 0), (0, 3)];
-    final linkPaint = Paint()
-      ..color = accentB
+    const edges = <(int, int)>[
+      (0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 0),
+      (0, 3), (1, 5), (2, 4),
+    ];
+    final link = Paint()
+      ..color = blue.withOpacity(dark ? .34 : .20)
       ..strokeWidth = 1.0;
-    for (final edge in links) {
-      canvas.drawLine(nodes[edge.$1], nodes[edge.$2], linkPaint);
+    for (final edge in edges) {
+      canvas.drawLine(nodes[edge.$1], nodes[edge.$2], link);
     }
     for (var i = 0; i < nodes.length; i++) {
-      canvas.drawCircle(
-        nodes[i],
-        i.isEven ? 2.6 : 1.8,
-        Paint()..color = accentA,
-      );
-      canvas.drawCircle(
-        nodes[i],
-        i.isEven ? 5.5 : 4.2,
-        Paint()
-          ..color = accentB
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = .8,
-      );
+      final color = i.isEven ? cyan : violet;
+      canvas.drawCircle(nodes[i], i.isEven ? 3.1 : 2.5,
+          Paint()..color = color.withOpacity(dark ? .92 : .68));
+      canvas.drawCircle(nodes[i], i.isEven ? 7.5 : 6.2,
+          Paint()..style = PaintingStyle.stroke..strokeWidth = 1.0
+            ..color = color.withOpacity(dark ? .42 : .25));
     }
 
+    // A luminous price trace links the chart to the AI nucleus.
     final trace = Path()
-      ..moveTo(nodes[0].dx, size.height * .60)
-      ..cubicTo(
-        size.width * (english ? .67 : .13), size.height * .54,
-        size.width * (english ? .72 : .18), size.height * .43,
-        size.width * (english ? .80 : .26), size.height * .48,
-      )
-      ..cubicTo(
-        size.width * (english ? .86 : .32), size.height * .52,
-        size.width * (english ? .88 : .34), size.height * .34,
-        nodes[2].dx, size.height * .36,
-      );
-    canvas.drawPath(
-      trace,
-      Paint()
-        ..color = accentA
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.5
-        ..strokeCap = StrokeCap.round,
-    );
+      ..moveTo(size.width * .025, size.height * .63)
+      ..cubicTo(size.width * .12, size.height * .56,
+          size.width * .13, size.height * .48,
+          size.width * .21, size.height * .52)
+      ..cubicTo(size.width * .30, size.height * .57,
+          size.width * .33, size.height * .34,
+          size.width * .46, size.height * .29);
+    canvas.drawPath(trace, Paint()
+      ..color = cyan.withOpacity(dark ? .68 : .42)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.0
+      ..strokeCap = StrokeCap.round);
   }
 
   @override
   bool shouldRepaint(covariant _BalanceAiPainter oldDelegate) =>
       oldDelegate.dark != dark || oldDelegate.english != english;
 }
+
 class TradeShell extends StatefulWidget {
   final bool dark, english;
   final String mode;
