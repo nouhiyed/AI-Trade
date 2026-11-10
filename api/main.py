@@ -516,16 +516,27 @@ def demo_monitor_worker():
 
 
 if __name__ == "__main__":
+    host = os.environ.get("AI_TRADER_HOST", "127.0.0.1")
+    port = int(os.environ.get("AI_TRADER_PORT", "8000"))
+    print(f"AI-Trader API: http://{host}:{port}")
+
+    # Bind first. If another API instance owns the port, fail before starting
+    # any background workers that could touch the shared trading state.
+    server = ThreadingHTTPServer((host, port), APIHandler)
+
     monitor_thread = threading.Thread(
         target=demo_monitor_worker,
         name="demo-position-monitor",
         daemon=True,
     )
     monitor_thread.start()
-    threading.Thread(target=autopilot.run_forever, name="autopilot",
-                     daemon=True).start()
+    threading.Thread(
+        target=autopilot.run_forever,
+        name="autopilot",
+        daemon=True,
+    ).start()
 
-    host = os.environ.get("AI_TRADER_HOST", "127.0.0.1")
-    port = int(os.environ.get("AI_TRADER_PORT", "8000"))
-    print(f"AI-Trader API: http://{host}:{port}")
-    ThreadingHTTPServer((host, port), APIHandler).serve_forever()
+    try:
+        server.serve_forever()
+    finally:
+        server.server_close()

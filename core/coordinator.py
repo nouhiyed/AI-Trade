@@ -53,6 +53,8 @@ class TradingCoordinator(SpotDemoMixin):
 
         self.last_signals = {}
         self._demo_lock = threading.RLock()
+        self._demo_position_locks = {}
+        self._demo_position_locks_guard = threading.Lock()
         self.alpha_config_path = Path("config/alpha_tokens.json")
         self.mode = "DEMO"
         self.demo_state_path = Path("config/demo_state.json")
@@ -81,6 +83,11 @@ class TradingCoordinator(SpotDemoMixin):
         self._recover_demo_positions()
 
 
+    def _demo_position_lock(self, position_id):
+        key = str(position_id).strip()
+        with self._demo_position_locks_guard:
+            return self._demo_position_locks.setdefault(key, threading.RLock())
+
     def _load_demo_state(self):
         try:
             self.demo_state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -92,15 +99,28 @@ class TradingCoordinator(SpotDemoMixin):
             return {}
 
     def _save_demo_state(self):
-        self.demo_state_path.parent.mkdir(parents=True, exist_ok=True)
-        temp = self.demo_state_path.with_suffix(".tmp")
-        temp.write_text(json.dumps(self.demo_positions, indent=2, default=str))
-        temp.replace(self.demo_state_path)
+        with self._demo_lock:
+            self.demo_state_path.parent.mkdir(parents=True, exist_ok=True)
+            temp = self.demo_state_path.with_suffix(".tmp")
+            temp.write_text(json.dumps(self.demo_positions, indent=2, default=str))
+            temp.replace(self.demo_state_path)
 
 
     def _recover_demo_positions(self):
         rows = self.demo_execution.get_open_positions(self.demo_account_id)
         changed = False
+
+        # A process may stop after persisting the temporary manual-close state
+        # but before the execution transaction. Restore that position on restart.
+        for record in self.demo_positions.values():
+            if record.get("status") == "DEMO_CLOSING":
+                previous = record.pop("closing_previous_status", "DEMO_OPEN")
+                if previous not in ("DEMO_OPEN", "DEMO_PARTIALLY_CLOSED",
+                                    "DEMO_UNPROTECTED", "DEMO_RECONCILIATION_REQUIRED"):
+                    previous = "DEMO_OPEN"
+                record["status"] = previous
+                record.pop("close_error", None)
+                changed = True
 
         for position in rows:
             engine_id = str(position["position_id"])
@@ -158,7 +178,7 @@ class TradingCoordinator(SpotDemoMixin):
             return {"success": False, "reason": "Only DEMO mode is supported"}
         if any(
             p.get("status") in (
-                "DEMO_OPEN", "DEMO_PARTIALLY_CLOSED", "DEMO_UNPROTECTED",
+                "DEMO_OPEN", "DEMO_PARTIALLY_CLOSED", "DEMO_CLOSING", "DEMO_UNPROTECTED",
                 "DEMO_RECONCILIATION_REQUIRED"
             )
             for p in self.demo_positions.values()
@@ -173,7 +193,7 @@ class TradingCoordinator(SpotDemoMixin):
     def get_demo_positions(self):
         """Return active positions separately from the closed-trade archive."""
         active_statuses = {
-            "DEMO_OPEN", "DEMO_PARTIALLY_CLOSED",
+            "DEMO_OPEN", "DEMO_PARTIALLY_CLOSED", "DEMO_CLOSING",
             "DEMO_UNPROTECTED", "DEMO_RECONCILIATION_REQUIRED",
         }
         closed_statuses = {"DEMO_CLOSED", "CLOSED"}
@@ -442,24 +462,76 @@ class TradingCoordinator(SpotDemoMixin):
         return None
 
     def close_demo_position(self, position_id, quantity=None):
-        with self._demo_lock:
-            return self._close_demo_position_locked(position_id, quantity)
+        position_id = str(position_id).strip()
+        if not position_id:
+            return {"success": False, "reason": "Missing position_id"}
 
-    def _close_demo_position_locked(self, position_id, quantity=None):
+        # Serialize actions for this position only. Network price retrieval happens
+        # outside the coordinator-wide lock so the monitor cannot delay a manual close.
+        with self._demo_position_lock(position_id):
+            with self._demo_lock:
+                record = self.demo_positions.get(position_id)
+                if not record:
+                    return {"success": False, "reason": "DEMO position not found"}
+                if record.get("status") not in (
+                    "DEMO_OPEN", "DEMO_PARTIALLY_CLOSED",
+                    "DEMO_UNPROTECTED", "DEMO_RECONCILIATION_REQUIRED"
+                ):
+                    return {"success": False, "reason": "Position is not closable"}
+
+                previous_status = record.get("status")
+                domain = str(record.get("domain", "futures")).lower()
+                symbol = str(record.get("symbol", "")).upper()
+                record["closing_previous_status"] = previous_status
+                record["status"] = "DEMO_CLOSING"
+                record.pop("close_error", None)
+                self._save_demo_state()
+
+            try:
+                # Binance I/O is deliberately outside _demo_lock.
+                if domain in ("spot", "alpha"):
+                    exit_price = self._spot_like_price(domain, symbol, "SELL")
+                else:
+                    exit_price = self._demo_market_price(symbol)
+
+                with self._demo_lock:
+                    result = self._close_demo_position_locked(
+                        position_id, quantity, exit_price=exit_price
+                    )
+                    current = self.demo_positions.get(position_id)
+                    if not result.get("success") and current and current.get("status") == "DEMO_CLOSING":
+                        current["status"] = previous_status
+                        current.pop("closing_previous_status", None)
+                        current["close_error"] = result.get("reason", "Close failed")
+                        self._save_demo_state()
+                    return result
+            except Exception as error:
+                with self._demo_lock:
+                    current = self.demo_positions.get(position_id)
+                    if current and current.get("status") == "DEMO_CLOSING":
+                        current["status"] = previous_status
+                        current.pop("closing_previous_status", None)
+                        current["close_error"] = str(error)
+                        self._save_demo_state()
+                return {"success": False, "reason": str(error)}
+
+    def _close_demo_position_locked(self, position_id, quantity=None, exit_price=None):
         position_id = str(position_id).strip()
         record = self.demo_positions.get(position_id)
         if not record:
             return {"success": False, "reason": "DEMO position not found"}
 
         if record.get("status") not in (
-            "DEMO_OPEN", "DEMO_PARTIALLY_CLOSED",
+            "DEMO_OPEN", "DEMO_PARTIALLY_CLOSED", "DEMO_CLOSING",
             "DEMO_UNPROTECTED", "DEMO_RECONCILIATION_REQUIRED"
         ):
             return {"success": False, "reason": "Position is not closable"}
 
         if record.get("domain") in ("spot", "alpha"):
             try:
-                result = self._close_spot_like(position_id, record, "MANUAL")
+                result = self._close_spot_like(
+                    position_id, record, "MANUAL", exit_price=exit_price
+                )
                 return {"success": True, "position_id": position_id,
                         "execution": result, "mode": "DEMO"}
             except Exception as error:
@@ -475,20 +547,22 @@ class TradingCoordinator(SpotDemoMixin):
             }
 
         try:
-            symbol = str(record["symbol"]).upper()
-            price = self._demo_market_price(symbol)
+            price = Decimal(str(exit_price)) if exit_price is not None else self._demo_market_price(
+                str(record["symbol"]).upper()
+            )
             result = self.demo_execution.close_futures_position(
                 self.demo_account_id,
                 engine_position_id,
                 market_price=price,
                 quantity=quantity,
-                    reason="MANUAL",
+                reason="MANUAL",
             )
 
             record["status"] = (
                 "DEMO_CLOSED" if result["status"] == "CLOSED"
                 else "DEMO_PARTIALLY_CLOSED"
             )
+            record.pop("closing_previous_status", None)
             record["close_price"] = str(result["execution_price"])
             record["realized_pnl"] = str(result["realized_pnl"])
             record["close_fee"] = str(result["fee"])
@@ -520,60 +594,64 @@ class TradingCoordinator(SpotDemoMixin):
 
     def monitor_demo_positions(self):
         with self._demo_lock:
-            out = self._monitor_demo_positions_locked()
-            out["events"] = list(out.get("events", [])) + self._monitor_spot_like()
-            return out
+            position_ids = [
+                str(position_id) for position_id, record in self.demo_positions.items()
+                if record.get("status") in ("DEMO_OPEN", "DEMO_PARTIALLY_CLOSED")
+            ]
 
-    def _monitor_demo_positions_locked(self):
-        """Monitor internal DEMO Futures positions using live Binance quotes."""
+        # Each position is monitored independently; Binance I/O for one trade
+        # must never hold the global coordinator lock or delay manual closes.
+        out = self._monitor_demo_positions_locked(position_ids)
+        out["events"] = list(out.get("events", [])) + self._monitor_spot_like()
+        return out
+
+    def _monitor_demo_positions_locked(self, position_ids=None):
+        """Monitor Futures positions without holding the global state lock during I/O."""
         results = []
-        positions = [
-            (position_id, record)
-            for position_id, record in self.demo_positions.items()
-            if record.get("status") in ("DEMO_OPEN", "DEMO_PARTIALLY_CLOSED")
-            and record.get("engine_position_id")
-        ]
-        price_cache = {}
+        if position_ids is None:
+            with self._demo_lock:
+                position_ids = list(self.demo_positions)
 
-        for position_id, record in positions:
-            try:
-                symbol = str(record["symbol"]).upper()
-                if symbol not in price_cache:
-                    quote = self.market_feed.fetch_book_ticker(
-                        "futures", symbol
-                    )
-                    price_cache[symbol] = quote
+        checked = 0
+        for position_id in position_ids:
+            with self._demo_position_lock(position_id):
+                with self._demo_lock:
+                    record = self.demo_positions.get(position_id)
+                    if (
+                        not record
+                        or record.get("status") not in ("DEMO_OPEN", "DEMO_PARTIALLY_CLOSED")
+                        or not record.get("engine_position_id")
+                    ):
+                        continue
+                    checked += 1
+                    symbol = str(record["symbol"]).upper()
+                    direction = str(record["direction"]).upper()
+                    stop = Decimal(str(record["stop_loss"]))
+                    target = Decimal(str(record["take_profit"]))
+                    engine_position_id = record["engine_position_id"]
+                    snapshot = dict(record)
 
-                quote = price_cache[symbol]
-                direction = str(record["direction"]).upper()
-                exit_price = Decimal(str(
-                    quote["ask"] if direction == "SHORT" else quote["bid"]
-                ))
-                if not exit_price.is_finite() or exit_price <= 0:
-                    raise ValueError("Invalid DEMO exit quote")
-
-                self.demo_execution.update_mark_price(
-                    symbol, "FUTURES", exit_price, source="BINANCE"
-                )
-
-                stop = Decimal(str(record["stop_loss"]))
-                target = Decimal(str(record["take_profit"]))
-                reason = None
-                checked_ok = True
-
-                # 1) replay candles missed while the app/network was down
                 try:
-                    missed = self._catch_up(record, direction, stop, target)
-                except Exception as catch_error:
-                    missed = None
-                    checked_ok = False
-                    record["catch_up_error"] = str(catch_error)
-                if missed:
-                    reason, exit_price = missed
+                    quote = self.market_feed.fetch_book_ticker("futures", symbol)
+                    exit_price = Decimal(str(
+                        quote["ask"] if direction == "SHORT" else quote["bid"]
+                    ))
+                    if not exit_price.is_finite() or exit_price <= 0:
+                        raise ValueError("Invalid DEMO exit quote")
 
-                # 2) live quote check
-                if reason is None:
-                    if direction == "LONG":
+                    try:
+                        missed = self._catch_up(snapshot, direction, stop, target)
+                    except Exception as catch_error:
+                        missed = None
+                        with self._demo_lock:
+                            current = self.demo_positions.get(position_id)
+                            if current:
+                                current["catch_up_error"] = str(catch_error)
+
+                    reason = missed[0] if missed else None
+                    if missed:
+                        exit_price = missed[1]
+                    elif direction == "LONG":
                         if exit_price <= stop:
                             reason = "STOP_LOSS"
                         elif exit_price >= target:
@@ -584,60 +662,68 @@ class TradingCoordinator(SpotDemoMixin):
                         elif exit_price <= target:
                             reason = "TAKE_PROFIT"
 
-                if checked_ok:
-                    record["last_checked_ms"] = int(time.time() * 1000)
+                    with self._demo_lock:
+                        current = self.demo_positions.get(position_id)
+                        if not current or current.get("status") not in (
+                            "DEMO_OPEN", "DEMO_PARTIALLY_CLOSED"
+                        ):
+                            continue
+                        self.demo_execution.update_mark_price(
+                            symbol, "FUTURES", exit_price, source="BINANCE"
+                        )
+                        current["last_checked_ms"] = int(time.time() * 1000)
+                        if not reason:
+                            self._save_demo_state()
+                            continue
 
-                if reason:
-                    result = self.demo_execution.close_futures_position(
-                        self.demo_account_id,
-                        record["engine_position_id"],
-                        market_price=exit_price,
-                        reason=reason,
-                    )
-                    record["status"] = (
-                        "DEMO_CLOSED" if result["status"] == "CLOSED"
-                        else "DEMO_PARTIALLY_CLOSED"
-                    )
-                    record["close_reason"] = reason
-                    record["close_price"] = str(result["execution_price"])
-                    record["realized_pnl"] = str(result["realized_pnl"])
-                    record["close_fee"] = str(result["fee"])
-                    record["remaining_quantity"] = str(
-                        result["remaining_quantity"]
-                    )
-                    self._save_demo_state()
-
-                    try:
-                        self._apply_close_result(record, result)
-                        if record["status"] == "DEMO_CLOSED":
-                            settled = self._settle_risk(position_id, record, reason)
-                            record["risk_settled"] = bool(settled.get("success"))
-                        else:
-                            self.risk.update_reservation_status(
-                                position_id,
-                                record["status"],
-                                close_verified=True,
-                                realized_pnl=str(result["realized_pnl"]),
-                            )
-                        self._save_demo_state()
-                    except Exception as risk_error:
-                        record["risk_sync_error"] = str(risk_error)
+                        result = self.demo_execution.close_futures_position(
+                            self.demo_account_id,
+                            engine_position_id,
+                            market_price=exit_price,
+                            reason=reason,
+                        )
+                        current["status"] = (
+                            "DEMO_CLOSED" if result["status"] == "CLOSED"
+                            else "DEMO_PARTIALLY_CLOSED"
+                        )
+                        current["close_reason"] = reason
+                        current["close_price"] = str(result["execution_price"])
+                        current["realized_pnl"] = str(result["realized_pnl"])
+                        current["close_fee"] = str(result["fee"])
+                        current["remaining_quantity"] = str(result["remaining_quantity"])
                         self._save_demo_state()
 
+                        try:
+                            self._apply_close_result(current, result)
+                            if current["status"] == "DEMO_CLOSED":
+                                settled = self._settle_risk(position_id, current, reason)
+                                current["risk_settled"] = bool(settled.get("success"))
+                            else:
+                                self.risk.update_reservation_status(
+                                    position_id, current["status"],
+                                    close_verified=True,
+                                    realized_pnl=str(result["realized_pnl"]),
+                                )
+                            self._save_demo_state()
+                        except Exception as risk_error:
+                            current["risk_sync_error"] = str(risk_error)
+                            self._save_demo_state()
+
+                    if reason:
+                        results.append({
+                            "position_id": position_id,
+                            "symbol": symbol,
+                            "reason": reason,
+                            "result": result,
+                        })
+                except Exception as error:
                     results.append({
                         "position_id": position_id,
                         "symbol": symbol,
-                        "reason": reason,
-                        "result": result,
+                        "error": str(error),
                     })
-            except Exception as error:
-                results.append({
-                    "position_id": position_id,
-                    "symbol": record.get("symbol"),
-                    "error": str(error),
-                })
 
-        return {"checked": len(positions), "events": results}
+        return {"checked": checked, "events": results}
 
     @staticmethod
     def select_futures_leverage(signal, plan):
@@ -690,7 +776,7 @@ class TradingCoordinator(SpotDemoMixin):
         if direction not in ("LONG", "SHORT"):
             return {"approved": False, "reason": "Invalid Futures direction"}
 
-        live_statuses = ("DEMO_OPEN", "DEMO_PARTIALLY_CLOSED")
+        live_statuses = ("DEMO_OPEN", "DEMO_PARTIALLY_CLOSED", "DEMO_CLOSING")
         if any(
             p.get("status") in ("DEMO_UNPROTECTED", "DEMO_RECONCILIATION_REQUIRED")
             for p in self.demo_positions.values()

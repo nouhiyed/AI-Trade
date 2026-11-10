@@ -365,42 +365,70 @@ class SpotDemoMixin:
 
     def _monitor_spot_like(self):
         events = []
-        for position_id, record in list(self.demo_positions.items()):
-            if record.get("domain") not in SPOT_LIKE:
-                continue
-            if record.get("status") not in ("DEMO_OPEN", "DEMO_PARTIALLY_CLOSED"):
-                continue
-            try:
-                domain, symbol = record["domain"], str(record["symbol"]).upper()
-                stop = Decimal(str(record["stop_loss"]))
-                target = Decimal(str(record["take_profit"]))
-                reason, exit_price = None, None
-                checked_ok = True
+        with self._demo_lock:
+            position_ids = [
+                str(position_id) for position_id, record in self.demo_positions.items()
+                if record.get("domain") in SPOT_LIKE
+                and record.get("status") in ("DEMO_OPEN", "DEMO_PARTIALLY_CLOSED")
+            ]
 
-                price = self._spot_like_price(domain, symbol, "SELL")
+        for position_id in position_ids:
+            with self._demo_position_lock(position_id):
+                with self._demo_lock:
+                    record = self.demo_positions.get(position_id)
+                    if (
+                        not record
+                        or record.get("domain") not in SPOT_LIKE
+                        or record.get("status") not in ("DEMO_OPEN", "DEMO_PARTIALLY_CLOSED")
+                    ):
+                        continue
+                    snapshot = dict(record)
 
                 try:
-                    missed = self._catch_up(record, "LONG", stop, target)
-                except Exception as catch_error:
-                    missed = None
-                    checked_ok = False
-                    record["catch_up_error"] = str(catch_error)
-                if missed:
-                    reason, exit_price = missed
-                elif price <= stop:
-                    reason = "STOP_LOSS"
-                elif price >= target:
-                    reason = "TAKE_PROFIT"
+                    domain = snapshot["domain"]
+                    symbol = str(snapshot["symbol"]).upper()
+                    stop = Decimal(str(snapshot["stop_loss"]))
+                    target = Decimal(str(snapshot["take_profit"]))
 
-                if checked_ok:
-                    record["last_checked_ms"] = int(time.time() * 1000)
+                    # Quote and candle catch-up run without the global coordinator lock.
+                    price = self._spot_like_price(domain, symbol, "SELL")
+                    try:
+                        missed = self._catch_up(snapshot, "LONG", stop, target)
+                    except Exception as catch_error:
+                        missed = None
+                        with self._demo_lock:
+                            current = self.demo_positions.get(position_id)
+                            if current:
+                                current["catch_up_error"] = str(catch_error)
 
-                if reason:
-                    result = self._close_spot_like(
-                        position_id, record, reason, exit_price)
-                    events.append({"position_id": position_id, "symbol": symbol,
-                                   "reason": reason, "result": result})
-            except Exception as error:
-                events.append({"position_id": position_id,
-                               "symbol": record.get("symbol"), "error": str(error)})
+                    reason, exit_price = (missed if missed else (None, price))
+                    if reason is None:
+                        if price <= stop:
+                            reason = "STOP_LOSS"
+                        elif price >= target:
+                            reason = "TAKE_PROFIT"
+
+                    with self._demo_lock:
+                        current = self.demo_positions.get(position_id)
+                        if not current or current.get("status") not in (
+                            "DEMO_OPEN", "DEMO_PARTIALLY_CLOSED"
+                        ):
+                            continue
+                        current["last_checked_ms"] = int(time.time() * 1000)
+                        if reason:
+                            result = self._close_spot_like(
+                                position_id, current, reason, exit_price
+                            )
+                            events.append({
+                                "position_id": position_id, "symbol": symbol,
+                                "reason": reason, "result": result,
+                            })
+                        else:
+                            self._save_demo_state()
+                except Exception as error:
+                    events.append({
+                        "position_id": position_id,
+                        "symbol": snapshot.get("symbol"),
+                        "error": str(error),
+                    })
         return events
