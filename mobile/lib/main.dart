@@ -1696,123 +1696,127 @@ class _TradeShellState extends State<TradeShell>
             ),
           )
         else
-          ...trades.map((trade) {
-            final symbol = '${trade['symbol'] ?? '—'}';
-            final direction = '${trade['direction'] ?? '—'}'.toUpperCase();
-            final domain = '${trade['domain'] ?? '—'}'.toUpperCase();
-            final entry = trade['entry_price'] ?? trade['entry'] ?? '—';
-            final exit = trade['close_price'] ?? trade['exit_price'] ?? '—';
-            final timeframe = trade['timeframe'] ??
-                (trade['context'] is Map
-                    ? (trade['context'] as Map)['chart_timeframe'] ??
-                        (trade['context'] as Map)['timeframe']
-                    : null) ?? '5m';
-            final pnlValue = double.tryParse(
-              '${trade['net_pnl'] ?? trade['realized_pnl'] ?? 0}',
-            ) ?? 0;
-            final reason = '${trade['close_reason'] ?? 'CLOSED'}'.toUpperCase();
-            final outcomeLabel = pnlValue > 0
-                ? tr('رابحة', 'WIN')
-                : pnlValue < 0 ? tr('خاسرة', 'LOSS') : tr('تعادل', 'BREAKEVEN');
-            final closedAt = trade['closed_at'] ?? trade['closed_at_ms'];
-            String closedLabel = '—';
-            if (closedAt != null) {
-              final stamp = int.tryParse('$closedAt');
-              if (stamp != null && stamp > 0) {
-                final date = DateTime.fromMillisecondsSinceEpoch(
-                  stamp < 1000000000000 ? stamp * 1000 : stamp,
-                ).toLocal();
-                closedLabel =
-                    '${date.year}-${date.month.toString().padLeft(2, '0')}-'
-                    '${date.day.toString().padLeft(2, '0')} '
-                    '${date.hour.toString().padLeft(2, '0')}:'
-                    '${date.minute.toString().padLeft(2, '0')}';
-              }
-            }
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 9),
-              child: InkWell(
-                borderRadius: BorderRadius.circular(18),
-                onTap: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => ClosedTradeDetailScreen(
-                        trade: trade,
-                        english: en,
-                        bg: widget.bg,
-                        panel: widget.panel,
-                        text: widget.text,
-                        muted: widget.muted,
+          SizedBox(
+            height: 224,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              reverse: en,
+              padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+              itemCount: trades.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 10),
+              itemBuilder: (context, index) {
+                final trade = trades[index];
+                final symbol = '${trade['symbol'] ?? '—'}';
+                final direction = '${trade['direction'] ?? '—'}'.toUpperCase();
+                final domain = '${trade['domain'] ?? '—'}'.toUpperCase();
+                final entry = trade['entry_price'] ?? trade['entry'] ?? '—';
+                final exit = trade['close_price'] ?? trade['exit_price'] ?? '—';
+                final timeframe = trade['timeframe'] ??
+                    (trade['context'] is Map
+                        ? (trade['context'] as Map)['chart_timeframe'] ??
+                            (trade['context'] as Map)['timeframe']
+                        : null) ?? '5m';
+                final pnlValue = double.tryParse(
+                  '${trade['net_pnl'] ?? trade['realized_pnl'] ?? 0}',
+                ) ?? 0;
+                final reason = '${trade['close_reason'] ?? 'CLOSED'}'.toUpperCase();
+                final outcomeLabel = pnlValue > 0
+                    ? tr('رابحة', 'WIN')
+                    : pnlValue < 0 ? tr('خاسرة', 'LOSS') : tr('تعادل', 'BREAKEVEN');
+                final closedAt = trade['closed_at'] ?? trade['closed_at_ms'];
+                String closedLabel = '—';
+                if (closedAt != null) {
+                  final stamp = int.tryParse('$closedAt');
+                  if (stamp != null && stamp > 0) {
+                    final date = DateTime.fromMillisecondsSinceEpoch(
+                      stamp < 1000000000000 ? stamp * 1000 : stamp,
+                    ).toLocal();
+                    closedLabel =
+                        '${date.year}-${date.month.toString().padLeft(2, '0')}-'
+                        '${date.day.toString().padLeft(2, '0')} '
+                        '${date.hour.toString().padLeft(2, '0')}:'
+                        '${date.minute.toString().padLeft(2, '0')}';
+                  }
+                }
+                return SizedBox(
+                  width: 306,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(18),
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => ClosedTradeDetailScreen(
+                            trade: trade,
+                            english: en,
+                            bg: widget.bg,
+                            panel: widget.panel,
+                            text: widget.text,
+                            muted: widget.muted,
+                          ),
+                        ),
+                      );
+                    },
+                    child: _panel(
+                      border: (pnlValue >= 0 ? green : red).withOpacity(.28),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  symbol,
+                                  style: TextStyle(
+                                    color: widget.text,
+                                    fontWeight: FontWeight.w900,
+                                    fontSize: 15,
+                                  ),
+                                ),
+                              ),
+                              _pill(direction, direction == 'SHORT' ? red : green),
+                              const SizedBox(width: 5),
+                              _pill(domain, blue),
+                              const SizedBox(width: 5),
+                              _pill(outcomeLabel, pnlValue >= 0 ? green : red),
+                            ],
+                          ),
+                          const SizedBox(height: 13),
+                          _metric(tr('الدخول', 'ENTRY'), '$entry', widget.text),
+                          const SizedBox(height: 8),
+                          _metric(tr('الخروج', 'EXIT'), '$exit', widget.text),
+                          const SizedBox(height: 8),
+                          _metric(
+                            tr('النتيجة الصافية', 'NET PNL'),
+                            '${pnlValue >= 0 ? '+' : ''}${pnlValue.toStringAsFixed(4)} USDT',
+                            pnlValue >= 0 ? green : red,
+                          ),
+                          const Spacer(),
+                          Text(
+                            '${tr('الإطار', 'TIMEFRAME')}: $timeframe  •  $reason',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(color: widget.muted, fontSize: 9),
+                          ),
+                          const SizedBox(height: 5),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  closedLabel,
+                                  style: TextStyle(color: widget.muted, fontSize: 10),
+                                ),
+                              ),
+                              const Icon(Icons.open_in_new, color: cyan, size: 15),
+                            ],
+                          ),
+                        ],
                       ),
                     ),
-                  );
-                },
-                child: _panel(
-                  border: (pnlValue >= 0 ? green : red).withOpacity(.22),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              symbol,
-                              style: TextStyle(
-                                color: widget.text,
-                                fontWeight: FontWeight.w900,
-                                fontSize: 15,
-                              ),
-                            ),
-                          ),
-                          _pill(direction, direction == 'SHORT' ? red : green),
-                          const SizedBox(width: 6),
-                          _pill(domain, blue),
-                          const SizedBox(width: 5),
-                          _pill(outcomeLabel, pnlValue >= 0 ? green : red),
-                          const SizedBox(width: 5),
-                          Icon(Icons.open_in_new, color: widget.muted, size: 15),
-                        ],
-                      ),
-                      const SizedBox(height: 11),
-                      Row(
-                        children: [
-                          Expanded(child: _metric(tr('الدخول', 'ENTRY'), '$entry', widget.text)),
-                          Expanded(child: _metric(tr('الخروج', 'EXIT'), '$exit', widget.text)),
-                          Expanded(
-                            child: _metric(
-                              tr('النتيجة الصافية', 'NET PNL'),
-                              '${pnlValue >= 0 ? '+' : ''}${pnlValue.toStringAsFixed(4)} USDT',
-                              pnlValue >= 0 ? green : red,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 9),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              '${tr('الإطار', 'TIMEFRAME')}: $timeframe  •  ${tr('سبب الإغلاق', 'CLOSE REASON')}: $reason',
-                              style: TextStyle(color: widget.muted, fontSize: 10),
-                            ),
-                          ),
-                          Text(
-                            closedLabel,
-                            style: TextStyle(color: widget.muted, fontSize: 10),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 7),
-                      Text(
-                        tr('اضغط لعرض التشارت التاريخي وخطوط الصفقة', 'Tap to view historical chart and trade levels'),
-                        style: const TextStyle(color: cyan, fontSize: 10, fontWeight: FontWeight.bold),
-                      ),
-                    ],
                   ),
-                ),
-              ),
-            );
-          }),
+                );
+              },
+            ),
+          ),
       ],
     );
   }
