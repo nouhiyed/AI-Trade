@@ -239,5 +239,59 @@ class TestTradingCoordinator(unittest.TestCase):
         self.assertFalse(repeated["success"])
 
 
+    def test_two_demo_positions_can_be_manually_closed_concurrently(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from decimal import Decimal
+
+        quotes = {"BTCUSDT": "100", "ETHUSDT": "200"}
+        self.system._demo_market_price = (
+            lambda symbol, market="futures": Decimal(quotes[symbol])
+        )
+        opened_ids = []
+
+        for symbol, entry, stop, target, atr in (
+            ("BTCUSDT", 100, 99, 102, 0.5),
+            ("ETHUSDT", 200, 198, 204, 1.0),
+        ):
+            signal = {
+                "symbol": symbol,
+                "direction": "LONG",
+                "confidence": 82,
+                "setup_key": "concurrent-manual-close",
+                "trade_plan": {
+                    "success": True,
+                    "direction": "LONG",
+                    "entry": entry,
+                    "stop_loss": stop,
+                    "take_profit": target,
+                    "atr": atr,
+                    "reward_risk": 2.0,
+                    "timeframe": "5m",
+                },
+            }
+            opened = self.system.request_demo_futures_trade(
+                symbol, "LONG", signal_override=signal
+            )
+            self.assertTrue(opened["approved"], opened)
+            opened_ids.append(opened["position_id"])
+
+        quotes.update({"BTCUSDT": "101", "ETHUSDT": "202"})
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(
+                self.system.close_demo_position, opened_ids
+            ))
+
+        self.assertTrue(all(result["success"] for result in results), results)
+        snapshot = self.system.get_demo_positions()
+        self.assertEqual(snapshot["open_positions"], [])
+        archived_ids = {
+            item.get("trade_id") for item in snapshot["closed_positions"]
+        }
+        self.assertTrue(set(opened_ids).issubset(archived_ids))
+        self.assertEqual(
+            self.system.risk.get_status()["active_reservations"], 0
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
