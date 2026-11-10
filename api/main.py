@@ -420,13 +420,41 @@ class APIHandler(BaseHTTPRequestHandler):
                         "created_at": now,
                         "payload": dict(data),
                     }
-                    _save_submission_jobs_locked()
-                threading.Thread(
-                    target=_process_agent_submission,
-                    args=(request_id, dict(data)),
-                    name="agent-submission-" + request_id[:8],
-                    daemon=True,
-                ).start()
+                    try:
+                        _save_submission_jobs_locked()
+                    except Exception as error:
+                        # A disk-write failure must not prevent the live request
+                        # from reaching its agent; keep the job readable in memory.
+                        submission_jobs[request_id]["persistence_error"] = str(error)
+                try:
+                    worker = threading.Thread(
+                        target=_process_agent_submission,
+                        args=(request_id, dict(data)),
+                        name="agent-submission-" + request_id[:8],
+                        daemon=True,
+                    )
+                    worker.start()
+                except Exception as error:
+                    with submission_jobs_lock:
+                        job = submission_jobs.get(request_id)
+                        if job is not None:
+                            job.update({
+                                "status": "FAILED",
+                                "decision_status": "REJECTED",
+                                "reason": "Could not start agent worker: " + str(error),
+                                "completed_at": time.time(),
+                            })
+                            try:
+                                _save_submission_jobs_locked()
+                            except Exception:
+                                pass
+                    return self.send_json({
+                        "success": False,
+                        "request_id": request_id,
+                        "request_status": "FAILED",
+                        "decision_status": "REJECTED",
+                        "reason": "Could not start agent worker: " + str(error),
+                    }, 503)
                 return self.send_json({
                     "success": True,
                     "request_id": request_id,

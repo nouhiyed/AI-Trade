@@ -603,7 +603,14 @@ class _AgentSubmissionScreenState extends State<AgentSubmissionScreen> {
             if (progress['result'] is Map) {
               decision = Map<String, dynamic>.from(progress['result'] as Map);
             } else {
-              lastPollingError = Exception(progress['reason'] ?? requestStatus);
+              final failure = '${progress['reason'] ?? progress['message'] ?? 'Agent worker failed'}';
+              decision = {
+                'success': false,
+                'opened': false,
+                'decision_status': 'REJECTED',
+                'decision_reason': failure,
+                'reason': failure,
+              };
             }
             break;
           }
