@@ -101,7 +101,8 @@ class TestTradingCoordinator(unittest.TestCase):
         result = self.system.submit_chart_signal("futures", "BTCUSDT", "5m", 100, 102, 99)
         self.assertTrue(result["success"])
         self.assertFalse(result["opened"])
-        self.assertEqual(result["decision_status"], "WAIT")
+        self.assertEqual(result["decision_status"], "REJECTED")
+        self.assertTrue(result.get("decision_reason"))
         self.assertIn("No directional edge", result["decision_reason"])
 
     def test_chart_submission_rejects_invalid_proposed_level_order(self):
