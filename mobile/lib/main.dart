@@ -68,42 +68,164 @@ class _AITradeAppState extends State<AITradeApp> {
 class AppAtmospherePainter extends CustomPainter {
   final bool dark;
   const AppAtmospherePainter({required this.dark});
+
   @override
   void paint(Canvas canvas, Size size) {
-    canvas.drawRect(Offset.zero & size,
-      Paint()..color = dark ? const Color(0xFF07101D) : const Color(0xFFF1F6FC));
-    final accents = [
-      [Offset(size.width * .08, size.height * .16), size.width * .72,
-        dark ? const Color(0xFF00D9C2) : const Color(0xFF52B8B0)],
-      [Offset(size.width * .95, size.height * .53), size.width * .82,
-        dark ? const Color(0xFF7357D8) : const Color(0xFF9C8DE0)],
-      [Offset(size.width * .22, size.height * .94), size.width * .55,
-        dark ? const Color(0xFF7357D8) : const Color(0xFF9C8DE0)],
-    ];
-    for (final item in accents) {
-      final center = item[0] as Offset, radius = item[1] as double, color = item[2] as Color;
-      canvas.drawCircle(center, radius, Paint()..shader = RadialGradient(colors: [
-        color.withOpacity(dark ? .105 : .075), color.withOpacity(.018), Colors.transparent,
-      ], stops: const [0, .48, 1]).createShader(
-        Rect.fromCircle(center: center, radius: radius)));
+    final base = dark ? const Color(0xFF040916) : const Color(0xFFF1F6FC);
+    canvas.drawRect(Offset.zero & size, Paint()..color = base);
+
+    final glowA = Offset(size.width * .18, size.height * .30);
+    final glowB = Offset(size.width * .88, size.height * .64);
+    for (final entry in [
+      [glowA, size.width * .78, const Color(0xFF087BFF)],
+      [glowB, size.width * .72, const Color(0xFF00D9C2)],
+      [Offset(size.width * .56, size.height * .96), size.width * .55, const Color(0xFF754BFF)],
+    ]) {
+      final center = entry[0] as Offset;
+      final radius = entry[1] as double;
+      final color = entry[2] as Color;
+      canvas.drawCircle(
+        center,
+        radius,
+        Paint()
+          ..shader = RadialGradient(
+            colors: [
+              color.withOpacity(dark ? .17 : .075),
+              color.withOpacity(dark ? .055 : .025),
+              Colors.transparent,
+            ],
+            stops: const [0, .48, 1],
+          ).createShader(Rect.fromCircle(center: center, radius: radius)),
+      );
     }
+
+    // Faint technical grid.
     final grid = Paint()
-      ..color = (dark ? const Color(0xFF5ACFCB) : const Color(0xFF5B8EA7))
-          .withOpacity(dark ? .045 : .055)..strokeWidth = .7;
-    for (double x = 0; x < size.width; x += 34) {
+      ..color = (dark ? const Color(0xFF62CFFF) : const Color(0xFF527C9A))
+          .withOpacity(dark ? .055 : .045)
+      ..strokeWidth = .65;
+    for (double x = 0; x < size.width; x += 38) {
       canvas.drawLine(Offset(x, 0), Offset(x, size.height), grid);
     }
-    for (double y = 0; y < size.height; y += 34) {
+    for (double y = 0; y < size.height; y += 38) {
       canvas.drawLine(Offset(0, y), Offset(size.width, y), grid);
     }
-    final orbit = Paint()..style = PaintingStyle.stroke..strokeWidth = 1.1
-      ..color = (dark ? const Color(0xFF00D9C2) : const Color(0xFF52B8B0))
-          .withOpacity(.12);
-    canvas.drawOval(Rect.fromCenter(center: Offset(size.width * .82, size.height * .22),
-      width: size.width * .82, height: size.width * .24), orbit);
-    canvas.drawOval(Rect.fromCenter(center: Offset(size.width * .12, size.height * .76),
-      width: size.width * .70, height: size.width * .20), orbit);
+
+    // Holographic candlestick market stream on the right side.
+    final candleWidth = math.max(3.0, size.width * .009);
+    final gap = candleWidth * 1.8;
+    final chartLeft = size.width * .48;
+    final chartTop = size.height * .10;
+    final chartHeight = size.height * .72;
+    final up = Paint()..color = const Color(0xFF00E5B0).withOpacity(dark ? .30 : .13);
+    final down = Paint()..color = const Color(0xFFFF557D).withOpacity(dark ? .27 : .12);
+    final wickUp = Paint()..color = const Color(0xFF00E5B0).withOpacity(dark ? .42 : .20)..strokeWidth = 1;
+    final wickDown = Paint()..color = const Color(0xFFFF557D).withOpacity(dark ? .38 : .18)..strokeWidth = 1;
+    for (int i = 0; i < 34; i++) {
+      final x = chartLeft + i * gap;
+      if (x > size.width + candleWidth) break;
+      final wave = math.sin(i * .57) * .20 + math.cos(i * .21) * .14;
+      final centerY = chartTop + chartHeight * (.48 - wave - i * .004);
+      final bodyHeight = 8 + (math.sin(i * 1.73).abs() * size.height * .035);
+      final rising = math.sin(i * 1.31) > -.12;
+      final top = centerY - bodyHeight * .5;
+      final bottom = centerY + bodyHeight * .5;
+      canvas.drawLine(
+        Offset(x + candleWidth * .5, top - 7),
+        Offset(x + candleWidth * .5, bottom + 8),
+        rising ? wickUp : wickDown,
+      );
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTWH(x, top, candleWidth, bodyHeight),
+          const Radius.circular(1.5),
+        ),
+        rising ? up : down,
+      );
+    }
+
+    // AI neural network: connected nodes and illuminated signal paths.
+    final nodes = <Offset>[
+      Offset(size.width * .08, size.height * .18),
+      Offset(size.width * .27, size.height * .13),
+      Offset(size.width * .37, size.height * .31),
+      Offset(size.width * .16, size.height * .39),
+      Offset(size.width * .31, size.height * .57),
+      Offset(size.width * .08, size.height * .70),
+      Offset(size.width * .43, size.height * .78),
+      Offset(size.width * .68, size.height * .90),
+      Offset(size.width * .91, size.height * .22),
+    ];
+    final links = Paint()
+      ..color = const Color(0xFF25BFFF).withOpacity(dark ? .16 : .08)
+      ..strokeWidth = 1.1;
+    const pairs = [(0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (4, 6), (6, 7), (2, 8), (1, 4)];
+    for (final pair in pairs) {
+      canvas.drawLine(nodes[pair.$1], nodes[pair.$2], links);
+    }
+    for (int i = 0; i < nodes.length; i++) {
+      final color = i.isEven ? const Color(0xFF00E5C3) : const Color(0xFF7D83FF);
+      canvas.drawCircle(
+        nodes[i],
+        7,
+        Paint()..color = color.withOpacity(dark ? .055 : .025),
+      );
+      canvas.drawCircle(
+        nodes[i],
+        2.2,
+        Paint()..color = color.withOpacity(dark ? .40 : .18),
+      );
+    }
+
+    // Abstract AI core silhouette: luminous orbital rings, deliberately subtle
+    // so it never competes with the live trading controls or chart labels.
+    final core = Offset(size.width * .20, size.height * .48);
+    final orbit = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.4
+      ..color = const Color(0xFF00D9E8).withOpacity(dark ? .12 : .055);
+    canvas.save();
+    canvas.translate(core.dx, core.dy);
+    canvas.rotate(-.48);
+    canvas.drawOval(
+      Rect.fromCenter(center: Offset.zero, width: size.width * .62, height: size.width * .20),
+      orbit,
+    );
+    canvas.rotate(1.0);
+    orbit.color = const Color(0xFF8B70FF).withOpacity(dark ? .11 : .05);
+    canvas.drawOval(
+      Rect.fromCenter(center: Offset.zero, width: size.width * .50, height: size.width * .17),
+      orbit,
+    );
+    canvas.restore();
+    canvas.drawCircle(
+      core,
+      size.width * .12,
+      Paint()
+        ..shader = RadialGradient(
+          colors: [
+            const Color(0xFF00D9E8).withOpacity(dark ? .09 : .035),
+            Colors.transparent,
+          ],
+        ).createShader(Rect.fromCircle(center: core, radius: size.width * .12)),
+    );
+
+    // Small illuminated data rails.
+    final rail = Paint()
+      ..color = const Color(0xFF168DFF).withOpacity(dark ? .17 : .07)
+      ..strokeWidth = 1;
+    canvas.drawLine(
+      Offset(size.width * .04, size.height * .84),
+      Offset(size.width * .44, size.height * .84),
+      rail,
+    );
+    canvas.drawLine(
+      Offset(size.width * .60, size.height * .12),
+      Offset(size.width * .96, size.height * .12),
+      rail,
+    );
   }
+
   @override
   bool shouldRepaint(covariant AppAtmospherePainter old) => old.dark != dark;
 }
