@@ -1068,13 +1068,13 @@ class TradingCoordinator(SpotDemoMixin):
             is_short = direction == "SHORT"
             if not (is_long or is_short):
                 reason = signal.get("reason") or "Futures agent returned WAIT: no directional edge"
-                return {**base, "success": True, "decision_status": "WAIT",
+                return {**base, "success": True, "decision_status": "REJECTED",
                         "decision_reason": str(reason), "reason": str(reason),
                         "signal": signal}
         else:
             if direction != "BUY":
                 reason = signal.get("reason") or domain.title() + " agent did not approve a BUY setup"
-                return {**base, "success": True, "decision_status": "WAIT",
+                return {**base, "success": True, "decision_status": "REJECTED",
                         "decision_reason": str(reason), "reason": str(reason),
                         "signal": signal}
             is_long, is_short = True, False
