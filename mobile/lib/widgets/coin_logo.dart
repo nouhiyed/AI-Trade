@@ -1,8 +1,6 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 
-/// Uses CoinGecko's canonical coin registry first, with CoinCap as fallback.
+/// Prefers Binance's hosted asset logo, then uses a ticker-based fallback.
 class CoinLogo extends StatefulWidget {
   final String symbol;
   final double size;
@@ -21,30 +19,10 @@ class _CoinLogoState extends State<CoinLogo> {
     return aliases[value] ?? value;
   }
 
-  Future<String?> _resolve() => _cache.putIfAbsent(_ticker, () async {
-    final ticker = _ticker;
-    if (ticker.isEmpty) return null;
-    try {
-      final response = await http.get(
-        Uri.https('api.coingecko.com', '/api/v3/search', {'query': ticker}),
-        headers: const {'accept': 'application/json'},
-      ).timeout(const Duration(seconds: 8));
-      if (response.statusCode == 200) {
-        final decoded = jsonDecode(response.body);
-        final coins = decoded is Map ? decoded['coins'] : null;
-        if (coins is List) {
-          for (final coin in coins) {
-            if (coin is Map &&
-                (coin['symbol'] ?? '').toString().toLowerCase() == ticker &&
-                (coin['thumb'] ?? '').toString().startsWith('http')) {
-              return coin['thumb'].toString();
-            }
-          }
-        }
-      }
-    } catch (_) {}
-    return 'https://bin.bnbstatic.com/static/assets/logos/$ticker.png';
-  });
+  Future<String?> _resolve() async {
+    if (_ticker.isEmpty) return null;
+    return 'https://bin.bnbstatic.com/static/assets/logos/$_ticker.png';
+  }
 
   @override
   Widget build(BuildContext context) {
