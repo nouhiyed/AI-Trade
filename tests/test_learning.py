@@ -45,7 +45,7 @@ class TestLearningEngine(unittest.TestCase):
         self.assertEqual(report["closed_trades"], 20)
         features = {item["feature"]: item for item in report["features"]}
         self.assertTrue(features["rsi_oversold:on"]["mature"])
-        self.assertEqual(features["rsi_oversold"]["trades"], 20)
+        self.assertEqual(features["rsi_oversold:on"]["trades"], 20)
 
     def test_setup_key_separates_entry_strategy(self):
         a = setup_key("SHORT", 80, 2.1, "futures", "liquidity_reversal")
