@@ -7,10 +7,10 @@
 pkg install python python-pandas python-numpy   # أو pip install -r requirements.txt
 pip install -r requirements.txt
 pkg install python-pillow                        # اختياري: صور التشارت لـ Telegram
-python -m api.main                               # الخادم على 127.0.0.1:8000
+python -m api.main                               # الخادم على 127.0.0.1:8001
 ```
-متغيرات اختيارية: `DEMO_INITIAL_BALANCE`, `AI_TRADER_HOST`, `AI_TRADER_PORT`,
-`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
+متغيرات اختيارية: `DEMO_INITIAL_BALANCE`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
+منفذ الخادم ثابت على `8001` لتوحيد اتصال التطبيق وخدمة Android.
 
 ## ما الجديد
 - **Autopilot** (`core/autopilot.py`): يفحص السوق كل دقيقتين ويفتح صفقات DEMO وفق حدود المخاطر. مطفأ افتراضياً؛ يُفعَّل من شاشة «الأداء والآلي».
