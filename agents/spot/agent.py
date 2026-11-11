@@ -143,11 +143,20 @@ class SpotAgent(BaseAgent):
             scores["BUY"] += buy
             scores["SELL"] += sell
 
+            smc["bearish_bos"] = bearish_bos
+            smc["bearish_choch"] = bearish_choch
             details[tf] = {
                 "buy_score": buy,
                 "sell_score": sell,
                 "rsi": round(rsi, 2),
                 "adx": round(adx, 2),
+                "ema_bull_stack": ema9 > ema21 > ema50,
+                "ema_bear_stack": ema9 < ema21 < ema50,
+                "price_above_ema200": close > ema200,
+                "macd_bullish": macd > macd_signal,
+                "macd_bearish": macd < macd_signal,
+                "rsi_bullish_zone": 50 < rsi < 70,
+                "rsi_bearish_zone": 30 < rsi < 50,
                 "smc": smc
             }
 
