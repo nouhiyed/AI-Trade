@@ -6,29 +6,20 @@ __pycache__/
 venv/
 data/
 logs/
+*.log
 config/risk_state.json
 config/*secret*
 config/*key*
-*.log
-
-# Local trading state and credentials
-config/risk_state.json
 
 # Local backups and generated APKs
 backup/
 apk/
+apk-output/
 *.backup
 *.pre_*
 *.empty
 
-# Python cache
-__pycache__/
-*.py[cod]
-
-# Generated APK output
-apk-output/
-
-# Demo runtime state
+# DEMO runtime state
 config/demo_state.json
 config/autopilot.json
 
