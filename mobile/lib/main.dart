@@ -1492,10 +1492,10 @@ class _TradeShellState extends State<TradeShell>
                     ),
                     const SizedBox(height: 19),
                     Text(
-                      tr('ثلاثة وكلاء.', 'Three Agents.'),
+                      tr('نظام متعدد الوكلاء', 'MULTI-AGENT SYSTEM'),
                       style: TextStyle(
                         color: widget.text,
-                        fontSize: 25,
+                        fontSize: 20,
                         fontWeight: FontWeight.w900,
                       ),
                     ),
@@ -1611,7 +1611,7 @@ class _TradeShellState extends State<TradeShell>
     final wallet = money(['wallet_balance', 'balance']);
     final margin = money(['locked_margin', 'used_margin']);
     final unrealized = money(['unrealized_pnl', 'unrealized_profit']);
-    final realized = money(['realized_pnl', 'realized_profit']);
+    final realized = money(['net_realized_pnl']);
     final fees = money(['total_fees', 'fees']);
     final openCount = demoData['open_count'] ??
         (demoData['open_positions'] is List
@@ -1671,7 +1671,7 @@ class _TradeShellState extends State<TradeShell>
           Row(
             children: [
               _metric(tr('ربح عائم', 'UNREALIZED PNL'), apiOnline ? unrealized : '—', widget.text),
-              _metric(tr('ربح محقق', 'REALIZED PNL'), apiOnline ? realized : '—', widget.text),
+              _metric(tr('صافي بعد الرسوم', 'NET AFTER FEES'), apiOnline ? realized : '—', widget.text),
               _metric(tr('الرسوم', 'FEES'), apiOnline ? fees : '—', widget.text),
             ],
           ),
@@ -2688,7 +2688,7 @@ class HeroMarketAIPainter extends CustomPainter {
       );
     }
 
-    // Circuit-board links from the core to three independent trading agents.
+    // Circuit-board links from the shared trading brain to the Futures and Spot domains.
     final nodes = <Offset>[
       Offset(size.width * .12, size.height * .18),
       Offset(size.width * .80, size.height * .16),
@@ -2789,11 +2789,14 @@ class HeroMarketAIPainter extends CustomPainter {
     )..layout();
     ai.paint(canvas, Offset(center.dx - ai.width / 2, center.dy - ai.height / 2));
 
-    // Three compact agent markers at the base of the processor.
-    for (int i = 0; i < 3; i++) {
-      final x = center.dx + (i - 1) * coreRadius * .52;
-      canvas.drawCircle(Offset(x, center.dy + coreRadius * 1.95), 3.5,
-          Paint()..color = [const Color(0xFF00E5C3), const Color(0xFF4C9BFF), const Color(0xFF9A78FF)][i]);
+    // Two compact domain markers: Futures and Spot.
+    for (int i = 0; i < 2; i++) {
+      final x = center.dx + (i == 0 ? -1 : 1) * coreRadius * .34;
+      canvas.drawCircle(
+        Offset(x, center.dy + coreRadius * 1.95),
+        3.5,
+        Paint()..color = i == 0 ? const Color(0xFF00E5C3) : const Color(0xFF4C9BFF),
+      );
     }
   }
 
