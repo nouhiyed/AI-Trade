@@ -18,7 +18,7 @@ class TestTradePlanner(unittest.TestCase):
                              "close": low + 0.18, "atr": atr, "support": 99.0,
                              "resistance": 105.0})
             rows[80].update({"open": 100.0, "high": 100.5, "low": 99.0, "close": 100.2})
-            rows[95].update({"open": 103.0, "high": 105.0, "low": 102.8, "close": 104.0})
+            rows[95].update({"open": 103.5, "high": 105.0, "low": 103.0, "close": 104.0})
             rows[98].update({"open": 104.0, "high": 105.0, "low": 103.2, "close": 104.5})
             rows[99].update({"open": 104.4, "high": 104.9, "low": 103.6, "close": 103.5})
         else:
@@ -71,6 +71,9 @@ class TestTradePlanner(unittest.TestCase):
         frame.loc[:, "high"] = 103.4
         frame.loc[:, "open"] = 103.3
         frame.loc[:, "close"] = 103.35
+        frame.loc[95, ["open", "high", "low", "close"]] = [103.5, 105.0, 103.3, 104.0]
+        frame.loc[98, ["open", "high", "low", "close"]] = [104.0, 105.0, 103.3, 104.5]
+        frame.loc[99, ["open", "high", "low", "close"]] = [103.8, 104.9, 103.2, 103.6]
         plan = self.planner.create({"symbol": "ZECUSDT", "5m": frame}, "SHORT")
         self.assertFalse(plan["success"])
         self.assertTrue("fees" in plan["reason"].lower() or "reward/risk" in plan["reason"].lower())
