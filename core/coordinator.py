@@ -1104,8 +1104,8 @@ class TradingCoordinator(SpotDemoMixin):
                 )
 
                 signal = agent.analyze(agent_data)
+                direction = str(signal.get("direction", "WAIT")).upper() if isinstance(signal, dict) else "WAIT"
                 if domain == "futures" and isinstance(signal, dict):
-                    direction = str(signal.get("direction", "WAIT")).upper()
                     if direction in ("LONG", "SHORT"):
                         signal["trade_plan"] = self.trade_planner.create(
                             agent_data, direction,
@@ -1132,8 +1132,11 @@ class TradingCoordinator(SpotDemoMixin):
                     signal["strategy_tag"] = "structure_breakout"
                 else:
                     signal["strategy_tag"] = "momentum"
-                if self.market_context is not None and signal.get("trade_plan", {}).get("success") is True:
-                    assessment = self.market_context.assess(symbol, direction)
+                if (self.market_context is not None and
+                        isinstance(signal.get("trade_plan"), dict) and
+                        signal["trade_plan"].get("success") is True):
+                    context_direction = "LONG" if direction == "BUY" else direction
+                    assessment = self.market_context.assess(symbol, context_direction)
                     signal["market_context"] = assessment
                     if assessment.get("veto"):
                         signal["trade_plan"] = {
