@@ -363,6 +363,12 @@ class TradingCoordinator(SpotDemoMixin):
                          "bearish_choch", "bullish_sweep", "bearish_sweep",
                          "bullish_fvg", "bearish_fvg", "bullish_ob", "bearish_ob"):
                 features[f"{tf}:{name}"] = bool(smc.get(name))
+            for factor in ("ema_bull_stack", "ema_bear_stack",
+                           "price_above_ema200", "macd_bullish",
+                           "macd_bearish", "rsi_bullish_zone",
+                           "rsi_bearish_zone"):
+                if factor in values:
+                    features[f"{tf}:{factor}"] = bool(values.get(factor))
             rsi = values.get("rsi")
             adx = values.get("adx")
             if rsi is not None:
