@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 from uuid import uuid4
 
-API_VERSION = "2026.11.10.4"
+API_VERSION = "2026.11.11.1"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
@@ -32,7 +32,10 @@ def initialize_runtime():
     if not math.isfinite(initial_balance) or initial_balance <= 0:
         raise ValueError("DEMO_INITIAL_BALANCE must be a finite positive number")
     coordinator = TradingCoordinator(initial_balance=initial_balance)
-    autopilot = Autopilot(coordinator, context=MarketContext())
+    market_context = MarketContext(news_ttl=43200, urgent_news_ttl=900,
+                                   news_max_age_h=12)
+    coordinator.market_context = market_context
+    autopilot = Autopilot(coordinator, context=market_context)
 
 
 submission_store_path = PROJECT_ROOT / "data" / "agent_submissions.json"
