@@ -57,6 +57,35 @@ class TradePlanner:
                 unique.append(value)
         return unique[:6]
 
+    @staticmethod
+    def _entry_style(frame, direction):
+        """Classify the confirmed entry family from the same closed-candle SMC data."""
+        cols = {str(c).strip().lower(): c for c in frame.columns}
+        side = "BULLISH" if direction == "LONG" else "BEARISH"
+
+        def active(column, expected=None):
+            name = cols.get(column.lower())
+            if name is None:
+                return False
+            for value in frame[name].tail(5).tolist():
+                if expected is not None:
+                    if str(value).strip().upper() == expected:
+                        return True
+                elif bool(value):
+                    return True
+            return False
+
+        sweep = active("bullish_sweep" if direction == "LONG" else "bearish_sweep")
+        choch = active("choch", side)
+        bos = active("bos", side)
+        if sweep and choch:
+            return "liquidity_sweep_reversal"
+        if choch:
+            return "market_structure_shift"
+        if bos:
+            return "breakout_retest"
+        return "support_resistance_rejection"
+
     @classmethod
     def _confirmed_rejection(cls, frame, direction, level, atr):
         """Require a closed rejection candle at the relevant zone, not a raw indicator vote."""
@@ -197,6 +226,7 @@ class TradePlanner:
             "resistance": resistances[0] if resistances else None,
             "next_resistance": resistances[1] if len(resistances) > 1 else None,
             "entry_confirmation": confirmation_reason,
+            "entry_strategy": self._entry_style(frame, direction),
             "risk_distance": risk, "reward_risk": round(reward / risk, 3),
             "net_reward_risk": round(net_rr, 3),
             "estimated_round_trip_cost_pct": round(round_trip_cost_pct * 100, 4),
