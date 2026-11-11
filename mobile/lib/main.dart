@@ -2932,13 +2932,12 @@ class NetworkPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size s) {
     final center = Offset(s.width * .5, s.height * .49);
-    final colors = [cyan, blue, violet];
+    final colors = [cyan, blue];
     final nodes = [
-      Offset(s.width * .5, s.height * .17),
-      Offset(s.width * .22, s.height * .72),
-      Offset(s.width * .78, s.height * .72),
+      Offset(s.width * .25, s.height * .72),
+      Offset(s.width * .75, s.height * .72),
     ];
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 2; i++) {
       canvas.drawLine(
         center,
         nodes[i],
