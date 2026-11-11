@@ -55,6 +55,30 @@ class TestTradingCoordinator(unittest.TestCase):
         self.assertTrue(closed["success"])
         self.assertAlmostEqual(self.system.risk.balance, 1010)
 
+    def test_chart_submission_analyzes_only_selected_domain(self):
+        calls = []
+
+        def analyze(symbol, preferred_timeframe=None, domains=None):
+            calls.append((symbol, preferred_timeframe, domains))
+            return {"signals": {"futures": {
+                "symbol": symbol,
+                "direction": "LONG",
+                "confidence": 80,
+                "trade_plan": {"success": False, "reason": "not required"},
+            }}}
+
+        self.system.analyze_live = analyze
+        self.system.request_demo_futures_trade = lambda *args, **kwargs: {
+            "approved": True, "position_id": "selected-domain-test"
+        }
+
+        result = self.system.submit_chart_signal(
+            "futures", "BTCUSDT", "5m", 100, 102, 99
+        )
+
+        self.assertTrue(result["opened"], result)
+        self.assertEqual(calls, [("BTCUSDT", "5m", ["futures"])])
+
     def test_chart_submission_routes_approved_trade_to_executor(self):
         self.system.analyze_live = lambda symbol, preferred_timeframe=None, domains=None: {
             "signals": {
