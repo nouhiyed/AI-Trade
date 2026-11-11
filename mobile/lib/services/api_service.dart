@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 class ApiService {
-  static const String baseUrl = 'http://127.0.0.1:8001';
+  static const String baseUrl = 'http://127.0.0.1:8000';
   static const Duration timeout = Duration(seconds: 30);
 
   static Future<Map<String, dynamic>> _request(
@@ -147,6 +147,7 @@ class ApiService {
       _request(
         'GET',
         '/agent/submission?id=${Uri.encodeQueryComponent(requestId)}',
+        requestTimeout: const Duration(seconds: 8),
         allowNotFound: true,
       );
 
