@@ -15,7 +15,7 @@ class TestLearningEngine(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def add_closed(self, count, pnl, setup="futures:momentum|SHORT|c80|rr2+"):
+    def add_closed(self, count, pnl, setup="momentum|SHORT|c80|rr2+"):
         for i in range(count):
             trade_id = f"{setup}-{i}"
             self.journal.record_open(
@@ -36,7 +36,7 @@ class TestLearningEngine(unittest.TestCase):
         disabled = self.learning.evaluate()
         self.assertEqual(len(disabled), 1)
         self.assertIn("20 trades", disabled[0]["reason"])
-        self.assertFalse(self.learning.allows("futures:momentum|SHORT|c80|rr2+"))
+        self.assertFalse(self.learning.allows("momentum|SHORT|c80|rr2+"))
 
     def test_report_ranks_features_and_marks_sample_maturity(self):
         self.add_closed(20, 1)
@@ -44,7 +44,7 @@ class TestLearningEngine(unittest.TestCase):
         self.assertEqual(report["min_samples"], 20)
         self.assertEqual(report["closed_trades"], 20)
         features = {item["feature"]: item for item in report["features"]}
-        self.assertTrue(features["rsi_oversold"]["mature"])
+        self.assertTrue(features["rsi_oversold:on"]["mature"])
         self.assertEqual(features["rsi_oversold"]["trades"], 20)
 
     def test_setup_key_separates_entry_strategy(self):
