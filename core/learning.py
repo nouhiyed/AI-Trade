@@ -54,14 +54,19 @@ class LearningEngine:
             context = trade.get("context") or {}
             features = context.get("features") or {}
             for feature, active in features.items():
-                if active is True or (isinstance(active, (int, float)) and active > 0):
+                if isinstance(active, bool):
+                    bucket = f"{feature}:{'on' if active else 'off'}"
+                    groups.setdefault(bucket, []).append(trade)
+                elif isinstance(active, (int, float)) and active > 0:
                     groups.setdefault(feature, []).append(trade)
         rows = []
         for name, items in groups.items():
             summary = performance.summarize(items)
             rows.append({"feature": name, **summary,
                          "mature": len(items) >= 20})
-        return sorted(rows, key=lambda x: (x["expectancy"] or 0), reverse=True)
+        return sorted(rows, key=lambda x: (
+            x["expectancy_r"] if x["expectancy_r"] is not None else
+            (x["expectancy"] or 0)), reverse=True)
 
     def report(self):
         trades = self.journal.closed_trades()
