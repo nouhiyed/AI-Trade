@@ -89,7 +89,7 @@ class TradingKeepAliveService : Service() {
                 exit 7
               fi
               mkdir -p logs
-              nohup env PYTHONPATH=. AI_TRADER_PORT=8001 python -u -m api.main >> logs/api-background.log 2>&1 </dev/null &
+              nohup env PYTHONPATH=. python -u -m api.main >> logs/api-background.log 2>&1 </dev/null &
             fi
         """.trimIndent()
 
