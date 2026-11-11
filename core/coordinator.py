@@ -362,8 +362,7 @@ class TradingCoordinator(SpotDemoMixin):
             for name in ("bullish_bos", "bearish_bos", "bullish_choch",
                          "bearish_choch", "bullish_sweep", "bearish_sweep",
                          "bullish_fvg", "bearish_fvg", "bullish_ob", "bearish_ob"):
-                if smc.get(name):
-                    features[f"{tf}:{name}"] = True
+                features[f"{tf}:{name}"] = bool(smc.get(name))
             rsi = values.get("rsi")
             adx = values.get("adx")
             if rsi is not None:
