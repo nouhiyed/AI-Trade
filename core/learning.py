@@ -15,10 +15,11 @@ def confidence_band(confidence):
     return "c80"
 
 
-def setup_key(direction, confidence, reward_risk, domain="futures"):
-    rr = "rr2+" if float(reward_risk or 0) >= 2 else "rr1.5"
+def setup_key(direction, confidence, reward_risk, domain="futures", strategy="momentum"):
+    rr = "rr2+" if float(reward_risk or 0) >= 2 else "rr1+"
     prefix = "" if domain == "futures" else f"{domain}:"
-    return f"{prefix}{str(direction).upper()}|{confidence_band(confidence)}|{rr}"
+    safe_strategy = str(strategy or "momentum").strip().lower().replace(" ", "_")
+    return f"{prefix}{safe_strategy}|{str(direction).upper()}|{confidence_band(confidence)}|{rr}"
 
 
 class LearningEngine:
