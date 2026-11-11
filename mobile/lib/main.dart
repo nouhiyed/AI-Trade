@@ -823,7 +823,6 @@ class _TradeShellState extends State<TradeShell>
 
     final isDemo = widget.mode.toUpperCase() == 'DEMO';
     if (!isDemo) return;
-    if (!isDemo) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
