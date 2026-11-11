@@ -206,10 +206,12 @@ class Autopilot:
                 assessment = signal.get("market_context")
                 if assessment is None and cfg["use_context"] and self.context is not None:
                     assessment = self.context.assess(symbol, direction)
+                if assessment is not None:
                     if assessment.get("veto"):
                         skip("Context veto: " + assessment["veto"])
                         continue
-                    confidence += assessment["score"] * 5
+                    confidence += float(assessment.get("score") or 0) * 5
+                    confidence = max(0.0, min(100.0, confidence))
                     if confidence < float(cfg["min_confidence"]):
                         skip("Confidence below minimum after context")
                         continue
@@ -217,6 +219,7 @@ class Autopilot:
                 signal = dict(signal)
                 signal["market_context"] = assessment
                 signal["setup_key"] = key
+                signal["confidence"] = confidence
                 signal["confidence_adjusted"] = confidence
                 self.c.last_signals[domain] = signal
 
