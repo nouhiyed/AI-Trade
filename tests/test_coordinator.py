@@ -56,7 +56,7 @@ class TestTradingCoordinator(unittest.TestCase):
         self.assertAlmostEqual(self.system.risk.balance, 1010)
 
     def test_chart_submission_routes_approved_trade_to_executor(self):
-        self.system.analyze_live = lambda symbol, preferred_timeframe=None: {
+        self.system.analyze_live = lambda symbol, preferred_timeframe=None, domains=None: {
             "signals": {
                 "futures": {
                     "symbol": symbol,
@@ -88,7 +88,7 @@ class TestTradingCoordinator(unittest.TestCase):
         self.assertEqual(result["trade_plan"]["stop_loss"], 99)
 
     def test_spot_chart_submission_uses_user_levels_when_atr_plan_fails(self):
-        self.system.analyze_live = lambda symbol, preferred_timeframe=None: {
+        self.system.analyze_live = lambda symbol, preferred_timeframe=None, domains=None: {
             "signals": {"spot": {
                 "symbol": symbol, "direction": "BUY", "confidence": 82,
                 "trade_plan": {"success": False, "reason": "ATR unavailable"},
@@ -107,7 +107,7 @@ class TestTradingCoordinator(unittest.TestCase):
         self.assertEqual(calls[0][2]["trade_plan"]["stop_loss"], 98)
 
     def test_chart_submission_does_not_execute_rejected_signal(self):
-        self.system.analyze_live = lambda symbol, preferred_timeframe=None: {
+        self.system.analyze_live = lambda symbol, preferred_timeframe=None, domains=None: {
             "signals": {"futures": {
                 "symbol": symbol, "direction": "WAIT", "confidence": 12,
                 "reason": "No directional edge",
@@ -123,7 +123,7 @@ class TestTradingCoordinator(unittest.TestCase):
         self.assertIn("No directional edge", result["decision_reason"])
 
     def test_chart_submission_rejects_invalid_proposed_level_order(self):
-        self.system.analyze_live = lambda symbol, preferred_timeframe=None: {
+        self.system.analyze_live = lambda symbol, preferred_timeframe=None, domains=None: {
             "signals": {"futures": {
                 "symbol": symbol, "direction": "LONG", "confidence": 80,
                 "trade_plan": {
