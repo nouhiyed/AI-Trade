@@ -1,6 +1,6 @@
 # AI Trade
 
-وكلاء ذكاء اصطناعي (Futures / Spot / Alpha) على بيانات Binance الحقيقية. الوضع الحالي: **DEMO فقط** (أسعار حقيقية، تنفيذ تجريبي داخلي بدفتر محاسبي). **LIVE مقفل.**
+وكلاء ذكاء اصطناعي (Futures / Spot) على بيانات Binance الحقيقية. الوضع الحالي: **DEMO فقط** (أسعار حقيقية، تنفيذ تجريبي داخلي بدفتر محاسبي). **LIVE مقفل.**
 
 ## التشغيل (Termux)
 ```bash
@@ -21,14 +21,12 @@ python -m api.main                               # الخادم على 127.0.0.1
 - **Telegram**: رسالة + صورة تشارت (دخول/وقف/أهداف) عند فتح الصفقة وعند إغلاقها.
 - **تشارت احترافي** في التطبيق (Lightweight Charts): EMA, Bollinger, VWAP, RSI, MACD, حجم، وخطوط الصفقات.
 
-## Spot وAlpha (DEMO)
-- **Spot:** شراء فقط (Long) بسعر الـ ask وبيع بسعر الـ bid، مع وقف/هدف من خطة الصفقة وتعويض الانقطاع بالشموع.
-- **Alpha:** أسعار وشموع Alpha الحقيقية، فحص أمان تلقائي من عقد التوكن (DexScreener)، حد أدنى للسيولة والحجم، وانزلاق إضافي 0.3%. بدون نتيجة أمان `PASS` لا تُفتح الصفقة.
-- كلاهما يمرّ بنفس إدارة المخاطر والسجل والتعلّم والإشعارات.
-- تشغيل/إيقاف كل سوق في الآلي من شاشة «الأداء والآلي».
+## Spot (DEMO)
+- شراء فقط (Long) بسعر الـ ask وبيع بسعر الـ bid، مع وقف/هدف من خطة الصفقة وتعويض الانقطاع بالشموع.
+- يمر عبر إدارة المخاطر والسجل والتعلّم والإشعارات.
 
 ## Endpoints جديدة
-`GET /performance /journal /learning /autopilot` · `POST /autopilot /autopilot/run /learning/enable /scan/spot /scan/alpha` · `POST /demo/open` يقبل `"domain": "futures|spot|alpha"`
+`GET /performance /journal /learning /autopilot` · `POST /autopilot /autopilot/run /learning/enable /scan/spot` · `POST /demo/open` يقبل `"domain": "futures|spot"`
 
 ## الاختبارات
 ```bash

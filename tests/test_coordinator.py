@@ -19,7 +19,7 @@ class TestTradingCoordinator(unittest.TestCase):
     def test_agents_loaded(self):
         self.assertEqual(
             set(self.system.agents),
-            {"futures", "spot", "alpha"},
+            {"futures", "spot"},
         )
 
     def test_trade_requires_signal(self):
@@ -63,9 +63,7 @@ class TestTradingCoordinator(unittest.TestCase):
                     "direction": "LONG",
                     "confidence": 82,
                     "trade_plan": {
-                        "success": True, "direction": "LONG",
-                        "entry": 100, "stop_loss": 99,
-                        "take_profit": 102, "atr": 0.5,
+                        "success": False, "reason": "ATR planner unavailable",
                     },
                 }
             }
@@ -88,6 +86,25 @@ class TestTradingCoordinator(unittest.TestCase):
         self.assertEqual(result["trade_plan"]["entry"], 100)
         self.assertEqual(result["trade_plan"]["take_profit"], 102)
         self.assertEqual(result["trade_plan"]["stop_loss"], 99)
+
+    def test_spot_chart_submission_uses_user_levels_when_atr_plan_fails(self):
+        self.system.analyze_live = lambda symbol, preferred_timeframe=None: {
+            "signals": {"spot": {
+                "symbol": symbol, "direction": "BUY", "confidence": 82,
+                "trade_plan": {"success": False, "reason": "ATR unavailable"},
+            }}
+        }
+        calls = []
+        def execute_spot(symbol, domain="spot", signal_override=None):
+            calls.append((symbol, domain, signal_override))
+            return {"approved": True, "position_id": "spot-chart-test"}
+        self.system.request_demo_spot_trade = execute_spot
+        result = self.system.submit_chart_signal("spot", "ETHUSDT", "5m", 100, 103, 98)
+        self.assertTrue(result["opened"], result)
+        self.assertEqual(calls[0][0:2], ("ETHUSDT", "spot"))
+        self.assertEqual(calls[0][2]["trade_plan"]["entry"], 100)
+        self.assertEqual(calls[0][2]["trade_plan"]["take_profit"], 103)
+        self.assertEqual(calls[0][2]["trade_plan"]["stop_loss"], 98)
 
     def test_chart_submission_does_not_execute_rejected_signal(self):
         self.system.analyze_live = lambda symbol, preferred_timeframe=None: {
@@ -122,9 +139,8 @@ class TestTradingCoordinator(unittest.TestCase):
         self.assertEqual(result["decision_status"], "REJECTED")
         self.assertIn("Stop Loss", result["decision_reason"])
 
-    def test_spot_and_alpha_accept_one_minute_chart_timeframe(self):
+    def test_spot_accepts_one_minute_chart_timeframe(self):
         self.assertIn("1m", self.system.required_timeframes["spot"])
-        self.assertIn("1m", self.system.required_timeframes["alpha"])
 
     def test_market_data_failure_before_order_releases_reservation(self):
         self.system.last_signals["futures"] = {
@@ -153,20 +169,6 @@ class TestTradingCoordinator(unittest.TestCase):
                                                 {"entry": 100, "atr": 2.0}), 2)
         self.assertEqual(
             self.system.select_futures_leverage({"confidence": 54}, plan), 1)
-
-    def test_alpha_execution_remains_disabled(self):
-        result = self.system.request_trade(
-            domain="alpha",
-            symbol="TOKEN",
-            direction="LONG",
-            entry=1,
-            stop_loss=0.9,
-        )
-        self.assertFalse(result["approved"])
-        self.assertEqual(
-            result["reason"], "Alpha execution disabled"
-        )
-
 
     def test_paper_is_gone_and_live_is_locked(self):
         self.assertFalse(hasattr(self.system, "paper"))

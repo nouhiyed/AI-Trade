@@ -246,7 +246,7 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
         Wrap(
           spacing: 8,
           children: [
-            for (final m in const ['futures', 'spot', 'alpha'])
+            for (final m in const ['futures', 'spot'])
               FilterChip(
                 label: Text(m.toUpperCase(), style: const TextStyle(fontSize: 11)),
                 selected: cfg['trade_$m'] != false,
