@@ -969,14 +969,14 @@ class TradingCoordinator(SpotDemoMixin):
     def get_agent_controls(self):
         return {d: {"enabled": self._agent_enabled(d)} for d in self.agents}
 
-    def analyze_live(self, symbol, preferred_timeframe=None):
+    def analyze_live(self, symbol, preferred_timeframe=None, domains=None):
         symbol = str(symbol).strip().upper()
 
         if not symbol:
             return {"error": "Symbol cannot be empty"}
 
         try:
-            live_data = self.market_engine.build_live(symbol)
+            live_data = self.market_engine.build_live(symbol, domains=domains)
         except Exception as error:
             return {
                 "symbol": symbol,
@@ -986,8 +986,15 @@ class TradingCoordinator(SpotDemoMixin):
             }
 
         results = {}
+        selected_domains = set(domains or self.agents.keys())
+        unknown_domains = selected_domains.difference(self.agents)
+        if unknown_domains:
+            return {"symbol": symbol, "source": "binance_rest", "signals": {},
+                    "data_errors": {"domain": "Unknown domain(s): " + ", ".join(sorted(unknown_domains))}}
 
         for domain, agent in self.agents.items():
+            if domain not in selected_domains:
+                continue
             if not self._agent_enabled(domain):
                 results[domain] = {
                     "status": "STOPPED",
@@ -1061,7 +1068,11 @@ class TradingCoordinator(SpotDemoMixin):
             return {**base, "decision_status": "REJECTED",
                     "decision_reason": reason, "reason": reason}
 
-        analysis = self.analyze_live(symbol, preferred_timeframe=timeframe)
+        # A chart submission belongs to one selected market/agent. Do not
+        # fetch the other market or run its agent on this request.
+        analysis = self.analyze_live(
+            symbol, preferred_timeframe=timeframe, domains=[domain]
+        )
         signal = analysis.get("signals", {}).get(domain, {})
         if not isinstance(signal, dict) or signal.get("error"):
             reason = (signal.get("error") if isinstance(signal, dict) else None) or "Analysis unavailable"
