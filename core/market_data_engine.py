@@ -132,7 +132,7 @@ class MarketDataEngine:
 
         return result
 
-    def build_live(self, symbol):
+    def build_live(self, symbol, domains=None):
         symbol = str(symbol).strip().upper()
 
         if not symbol:
@@ -157,7 +157,14 @@ class MarketDataEngine:
             "spot": "spot"
         }
 
+        selected_domains = set(domains or market_domains.values())
+        unknown_domains = selected_domains.difference(market_domains.values())
+        if unknown_domains:
+            raise ValueError("Unknown market domain(s): " + ", ".join(sorted(unknown_domains)))
+
         for market, domain in market_domains.items():
+            if domain not in selected_domains:
+                continue
             frames = self.timeframes[domain]
 
             try:

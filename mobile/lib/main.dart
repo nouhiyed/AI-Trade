@@ -2538,8 +2538,8 @@ class _TradeShellState extends State<TradeShell>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: TextStyle(color: widget.muted, fontSize: 9)),
-            const SizedBox(height: 5),
+            Text(title, style: TextStyle(color: widget.muted, fontSize: 10, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 6),
             Text(value, style: TextStyle(color: color, fontSize: 15, fontWeight: FontWeight.w900)),
           ],
         ),
