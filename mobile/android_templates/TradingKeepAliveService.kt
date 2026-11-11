@@ -83,13 +83,13 @@ class TradingKeepAliveService : Service() {
 
         val script = """
             cd /data/data/com.termux/files/home/AI-Trader-clean || exit 7
-            if ! python -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=2)' >/dev/null 2>&1; then
+            if ! python -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8001/health", timeout=2)' >/dev/null 2>&1; then
               if [ ! -f api/main.py ]; then
                 echo "AI-Trader repository not found in ~/AI-Trader-clean" >&2
                 exit 7
               fi
               mkdir -p logs
-              nohup env PYTHONPATH=. python -u api/main.py >> logs/api-background.log 2>&1 </dev/null &
+              nohup env PYTHONPATH=. AI_TRADER_PORT=8001 python -u -m api.main >> logs/api-background.log 2>&1 </dev/null &
             fi
         """.trimIndent()
 
@@ -115,7 +115,7 @@ class TradingKeepAliveService : Service() {
     private fun checkBackend(): Boolean {
         var connection: HttpURLConnection? = null
         return try {
-            connection = URL("http://127.0.0.1:8000/health").openConnection() as HttpURLConnection
+            connection = URL("http://127.0.0.1:8001/health").openConnection() as HttpURLConnection
             connection.requestMethod = "GET"
             connection.connectTimeout = 2500
             connection.readTimeout = 2500
