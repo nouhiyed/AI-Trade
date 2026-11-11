@@ -81,15 +81,17 @@ def parse_rss(xml_text):
 class MarketContext:
 
     def __init__(self, session=None, timeout=6, clock=time.time,
-                 news_ttl=300, news_max_age_h=12, feeds=FEEDS):
+                 news_ttl=43200, urgent_news_ttl=900, news_max_age_h=12, feeds=FEEDS):
         self.session = session or requests.Session()
         self.session.headers.update({"User-Agent": "AI-Trader-Context/1.0"})
         self.timeout = timeout
         self.clock = clock
         self.news_ttl = news_ttl
+        self.urgent_news_ttl = urgent_news_ttl
         self.news_max_age = news_max_age_h * 3600
         self.feeds = tuple(feeds)
         self._news_cache = None
+        self._urgent_news_cache = None
         self._lock = threading.Lock()
 
     def _json(self, path, params):
@@ -156,19 +158,47 @@ class MarketContext:
             self._news_cache = (now, items)
         return items
 
+    def _urgent_news(self):
+        """Refresh recent headlines every 15m, independent of the 12h digest."""
+        now = self.clock()
+        with self._lock:
+            if self._urgent_news_cache and now - self._urgent_news_cache[0] < self.urgent_news_ttl:
+                return self._urgent_news_cache[1]
+        items = []
+        for url in self.feeds:
+            try:
+                response = self.session.get(url, timeout=self.timeout)
+                response.raise_for_status()
+                items.extend(parse_rss(response.text))
+            except Exception:
+                continue
+        recent = [item for item in items if item.get("ts") is None or now - item["ts"] <= 6 * 3600]
+        with self._lock:
+            self._urgent_news_cache = (now, recent)
+        return recent
+
     def news(self, symbol):
         base = symbol[:-4] if symbol.endswith("USDT") else symbol
         words = [re.escape(base.lower())] + [re.escape(n) for n in NAMES.get(base, ())]
         pattern = re.compile(r"\b(" + "|".join(words) + r")\b")
         now = self.clock()
         matched = []
-        for item in self._all_news():
-            if item["ts"] and now - item["ts"] > self.news_max_age:
+        combined = {}
+        # Full 12h digest plus a separate 15m urgent-news poll.
+        for item in self._all_news() + self._urgent_news():
+            if item.get("ts") and now - item["ts"] > self.news_max_age:
                 continue
+            combined[item["title"].strip().lower()] = item
+        for item in combined.values():
             if pattern.search(item["title"].lower()):
                 matched.append({"title": item["title"],
-                                "sentiment": classify_headline(item["title"])})
-        return {"items": matched[:5], "score": sum(i["sentiment"] for i in matched)}
+                                "sentiment": classify_headline(item["title"]),
+                                "published_at": item.get("ts")})
+        matched.sort(key=lambda item: item.get("published_at") or 0, reverse=True)
+        return {"items": matched[:5], "score": sum(i["sentiment"] for i in matched),
+                "digest_interval_hours": 12,
+                "urgent_refresh_seconds": self.urgent_news_ttl,
+                "sources": list(self.feeds)}
 
     # ---- decision support --------------------------------------------------
 
