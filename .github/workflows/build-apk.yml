@@ -1,5 +1,7 @@
 name: Build AI Trade APK
 
+# Rebuild trigger: refresh the Android APK pipeline.
+
 concurrency:
   group: ai-trade-${{ github.ref }}
   cancel-in-progress: true
