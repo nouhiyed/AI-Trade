@@ -196,14 +196,15 @@ class Autopilot:
                     skip("Confidence below minimum")
                     continue
 
+                strategy_tag = signal.get("strategy_tag") or "momentum"
                 key = setup_key(
-                    direction, confidence, plan.get("reward_risk"), domain)
+                    direction, confidence, plan.get("reward_risk"), domain, strategy_tag)
                 if not self.c.learning.allows(key):
                     skip("Setup disabled by learning: " + key)
                     continue
 
-                assessment = None
-                if cfg["use_context"] and self.context is not None:
+                assessment = signal.get("market_context")
+                if assessment is None and cfg["use_context"] and self.context is not None:
                     assessment = self.context.assess(symbol, direction)
                     if assessment.get("veto"):
                         skip("Context veto: " + assessment["veto"])
