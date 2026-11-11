@@ -365,14 +365,21 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
     final suggestions = _learning['suggestions'] is List
         ? (_learning['suggestions'] as List).map((e) => '$e').toList()
         : <String>[];
-    final minSamples = _learning['min_samples'] ?? 30;
+    final features = _learning['features'] is List
+        ? (_learning['features'] as List).whereType<Map>().toList()
+        : <Map>[];
+    final matureFeatures = features.where((f) => f['mature'] == true).toList();
+    final bestFeatures = matureFeatures.take(3).toList();
+    final weakestFeatures = matureFeatures.reversed.take(3).toList();
+    final minSamples = _learning['min_samples'] ?? 20;
+    final closedCount = _learning['closed_trades'] ?? 0;
     return _card(Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _title(t('التعلّم الذاتي', 'Learning')),
         Text(
-          t('لا تغيير قبل $minSamples صفقة مغلقة لكل نمط. النمط الخاسر يُوقَف تلقائياً.',
-              'No change before $minSamples closed trades per setup. Losing setups are paused automatically.'),
+          t('العينة الحالية: $closedCount صفقة مغلقة. لا يُقيّم النمط قبل $minSamples صفقة؛ ولا تُحذف المؤشرات تلقائياً.',
+              'Current sample: $closedCount closed trades. A setup is evaluated after $minSamples trades; indicators are never auto-deleted.'),
           style: TextStyle(color: widget.muted, fontSize: 11),
         ),
         const SizedBox(height: 8),
@@ -381,6 +388,34 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
             padding: const EdgeInsets.only(bottom: 4),
             child: Text('• $tip', style: TextStyle(color: widget.text, fontSize: 11)),
           ),
+        if (bestFeatures.isNotEmpty || weakestFeatures.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          _title(t('تقييم المؤشرات والعوامل', 'Indicator & factor review')),
+          for (final f in bestFeatures)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 3),
+              child: Row(children: [
+                const Icon(Icons.trending_up, color: _green, size: 15),
+                const SizedBox(width: 6),
+                Expanded(child: Text('${f['feature']}', style: TextStyle(color: widget.text, fontSize: 11))),
+                Text('R ${_n(f['expectancy'], 4)} · ${_n(f['win_rate'], 0)}%', style: const TextStyle(color: _green, fontSize: 10)),
+              ]),
+            ),
+          if (weakestFeatures.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(t('الأضعف في العينة', 'Weakest in sample'), style: TextStyle(color: widget.muted, fontSize: 10, fontWeight: FontWeight.bold)),
+            for (final f in weakestFeatures)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 3),
+                child: Row(children: [
+                  const Icon(Icons.trending_down, color: _red, size: 15),
+                  const SizedBox(width: 6),
+                  Expanded(child: Text('${f['feature']}', style: TextStyle(color: widget.text, fontSize: 11))),
+                  Text('R ${_n(f['expectancy'], 4)} · ${_n(f['win_rate'], 0)}%', style: const TextStyle(color: _red, fontSize: 10)),
+                ]),
+              ),
+          ],
+        ],
         for (final s in setups)
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 5),
