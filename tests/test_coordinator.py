@@ -64,7 +64,7 @@ class TestTradingCoordinator(unittest.TestCase):
                 "symbol": symbol,
                 "direction": "LONG",
                 "confidence": 80,
-                "trade_plan": {"success": False, "reason": "not required"},
+                "trade_plan": {"success": True, "direction": "LONG", "entry": 100, "take_profit": 102, "stop_loss": 99, "reward_risk": 2.0},
             }}}
 
         self.system.analyze_live = analyze
@@ -87,7 +87,7 @@ class TestTradingCoordinator(unittest.TestCase):
                     "direction": "LONG",
                     "confidence": 82,
                     "trade_plan": {
-                        "success": False, "reason": "ATR planner unavailable",
+                        "success": True, "direction": "LONG", "entry": 100, "stop_loss": 99, "take_profit": 102, "reward_risk": 2.0,
                     },
                 }
             }
@@ -111,11 +111,11 @@ class TestTradingCoordinator(unittest.TestCase):
         self.assertEqual(result["trade_plan"]["take_profit"], 102)
         self.assertEqual(result["trade_plan"]["stop_loss"], 99)
 
-    def test_spot_chart_submission_uses_user_levels_when_atr_plan_fails(self):
+    def test_spot_chart_submission_uses_agent_structure_levels_not_chart_overrides(self):
         self.system.analyze_live = lambda symbol, preferred_timeframe=None, domains=None: {
             "signals": {"spot": {
                 "symbol": symbol, "direction": "BUY", "confidence": 82,
-                "trade_plan": {"success": False, "reason": "ATR unavailable"},
+                "trade_plan": {"success": True, "direction": "LONG", "entry": 100, "stop_loss": 99, "take_profit": 102, "reward_risk": 2.0},
             }}
         }
         calls = []
@@ -127,8 +127,8 @@ class TestTradingCoordinator(unittest.TestCase):
         self.assertTrue(result["opened"], result)
         self.assertEqual(calls[0][0:2], ("ETHUSDT", "spot"))
         self.assertEqual(calls[0][2]["trade_plan"]["entry"], 100)
-        self.assertEqual(calls[0][2]["trade_plan"]["take_profit"], 103)
-        self.assertEqual(calls[0][2]["trade_plan"]["stop_loss"], 98)
+        self.assertEqual(calls[0][2]["trade_plan"]["take_profit"], 102)
+        self.assertEqual(calls[0][2]["trade_plan"]["stop_loss"], 99)
 
     def test_chart_submission_does_not_execute_rejected_signal(self):
         self.system.analyze_live = lambda symbol, preferred_timeframe=None, domains=None: {
@@ -152,7 +152,7 @@ class TestTradingCoordinator(unittest.TestCase):
                 "symbol": symbol, "direction": "LONG", "confidence": 80,
                 "trade_plan": {
                     "success": True, "direction": "LONG",
-                    "entry": 100, "stop_loss": 99, "take_profit": 102,
+                    "entry": 100, "stop_loss": 99, "take_profit": 98,
                 },
             }}
         }
@@ -161,7 +161,7 @@ class TestTradingCoordinator(unittest.TestCase):
         result = self.system.submit_chart_signal(
             "futures", "BTCUSDT", "1m", 100, 98, 99)
         self.assertEqual(result["decision_status"], "REJECTED")
-        self.assertIn("Stop Loss", result["decision_reason"])
+        self.assertIn("Agent LONG plan", result["decision_reason"])
 
     def test_spot_accepts_one_minute_chart_timeframe(self):
         self.assertIn("1m", self.system.required_timeframes["spot"])
