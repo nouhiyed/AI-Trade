@@ -17,7 +17,6 @@ from core.token_safety_engine import TokenSafetyEngine
 from core.binance_market_data import BinanceMarketData
 from core.market_scanner import FuturesMarketScanner
 from core.trade_planner import TradePlanner
-from core.binance_execution import BinanceExecutionEngine
 from core.demo.database import DemoDatabase
 from core.demo.ledger import Ledger
 from core.demo.engine import DemoEngine
