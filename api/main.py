@@ -142,10 +142,7 @@ class APIHandler(BaseHTTPRequestHandler):
         try:
             if path == "/market/symbols":
                 market = params.get("market", ["spot"])[0].lower()
-                if market == "alpha":
-                    symbols = coordinator.alpha_feed.symbols()
-                    source = "binance_alpha"
-                elif market in {"spot", "futures"}:
+                if market in {"spot", "futures"}:
                     symbols = coordinator.market_feed.fetch_symbols(market)
                     source = "binance_rest"
                 else:
@@ -170,12 +167,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 end_time = params.get("endTime", [None])[0]
                 start_time = int(start_time) if start_time is not None else None
                 end_time = int(end_time) if end_time is not None else None
-                if market == "alpha":
-                    candles = coordinator.market_feed.fetch_alpha_candles(
-                        symbol, interval, limit=min(max(limit, 2), 1000),
-                        start_time=start_time, end_time=end_time,
-                    )
-                elif market in {"spot", "futures"}:
+                if market in {"spot", "futures"}:
                     candles = coordinator.market_feed.fetch_candles(
                         market, symbol, interval,
                         limit=min(max(limit, 2), 1000),
@@ -261,13 +253,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 if not symbol:
                     return self.send_json({"success": False, "reason": "Trade symbol is missing"}, 400)
 
-                if domain == "alpha":
-                    candles_frame = coordinator.market_feed.fetch_alpha_candles(
-                        symbol, timeframe, limit=1000,
-                        start_time=start_time, end_time=end_time,
-                    )
-                else:
-                    candles_frame = coordinator.market_feed.fetch_candles(
+                candles_frame = coordinator.market_feed.fetch_candles(
                         market, symbol, timeframe, limit=1000,
                         closed_only=False, start_time=start_time, end_time=end_time,
                     )
@@ -404,9 +390,6 @@ class APIHandler(BaseHTTPRequestHandler):
             if path == "/scan/spot":
                 return self.send_json(coordinator.scan_spot(limit=data.get("limit", 8)))
 
-            if path == "/scan/alpha":
-                return self.send_json(coordinator.scan_alpha(limit=data.get("limit", 6)))
-
             if path == "/analyze":
                 symbol = data.get("symbol", "BTCUSDT")
                 return self.send_json(coordinator.analyze_live(symbol))
@@ -519,7 +502,7 @@ class APIHandler(BaseHTTPRequestHandler):
 
             if path == "/demo/open":
                 domain = str(data.get("domain", "futures")).lower()
-                if domain in ("spot", "alpha"):
+                if domain == "spot"
                     result = coordinator.request_demo_spot_trade(
                         symbol=data["symbol"], domain=domain,
                         risk_pct=data.get("risk_pct", 0.5))

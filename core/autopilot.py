@@ -21,7 +21,7 @@ DEFAULTS = {
     "use_context": True,
     "trade_futures": True,
     "trade_spot": True,
-    "trade_alpha": True,
+
 }
 LIMITS = {
     "interval_sec": (30, 3600), "scan_limit": (3, 40),
@@ -129,8 +129,6 @@ class Autopilot:
                     sources.append(("futures", lambda: self.c.scan_futures(limit=limit)))
                 if cfg["trade_spot"]:
                     sources.append(("spot", lambda: self.c.scan_spot(limit=min(limit, 8))))
-                if cfg["trade_alpha"]:
-                    sources.append(("alpha", lambda: self.c.scan_alpha(limit=min(limit, 6))))
 
                 # Scan every enabled market independently. One failed scanner or
                 # domain processor must not hide results from the other domains.
@@ -205,7 +203,7 @@ class Autopilot:
                     continue
 
                 assessment = None
-                if cfg["use_context"] and self.context is not None and domain != "alpha":
+                if cfg["use_context"] and self.context is not None:
                     assessment = self.context.assess(symbol, direction)
                     if assessment.get("veto"):
                         skip("Context veto: " + assessment["veto"])

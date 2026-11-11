@@ -1,8 +1,7 @@
-"""DEMO trading for Spot and Alpha (long-only), same lifecycle as Futures.
+"""DEMO trading for Spot (long-only), sharing the Futures lifecycle.
 
-Mixed into TradingCoordinator. Money moves only inside the internal DEMO
-ledger; prices are real Binance data. Spot uses the real order book (ask to
-buy, bid to sell). Alpha uses the token price with extra slippage.
+Money moves only inside the internal DEMO ledger; prices are real Binance
+Spot order-book data (ask to buy, bid to sell).
 """
 import os
 import time
@@ -10,7 +9,7 @@ from decimal import Decimal, ROUND_DOWN
 
 from core.learning import setup_key as make_setup_key
 
-SPOT_LIKE = ("spot", "alpha")
+SPOT_LIKE = ("spot",)
 MAX_ENTRY_DEVIATION = Decimal("0.01")
 MIN_NOTIONAL = Decimal("10")
 
@@ -22,14 +21,9 @@ class SpotDemoMixin:
     def _spot_like_price(self, domain, symbol, side):
         """Reference price for a BUY/SELL, also stored as the account mark."""
         side = side.upper()
-        if domain == "spot":
-            quote = self.market_feed.fetch_book_ticker("spot", symbol)
-            mid = Decimal(str(quote["mid_price"]))
-            ref = Decimal(str(quote["ask"] if side == "BUY" else quote["bid"]))
-        else:
-            mid = Decimal(str(self.alpha_feed.price(symbol)))
-            slip = Decimal(str(self.alpha_feed.EXTRA_SLIPPAGE))
-            ref = mid * (1 + slip) if side == "BUY" else mid * (1 - slip)
+        quote = self.market_feed.fetch_book_ticker("spot", symbol)
+        mid = Decimal(str(quote["mid_price"]))
+        ref = Decimal(str(quote["ask"] if side == "BUY" else quote["bid"]))
         if not ref.is_finite() or ref <= 0 or not mid.is_finite() or mid <= 0:
             raise ValueError("Invalid market price")
         self.demo_execution.update_mark_price(symbol, "SPOT", mid, source="BINANCE")
@@ -102,10 +96,6 @@ class SpotDemoMixin:
             return None
         if str(signal.get("direction", "")).upper() != "BUY":
             return None
-        if domain == "alpha":
-            safety = signal.get("token_safety") or {}
-            if str(safety.get("status", "")).upper() != "PASS":
-                return None
         plan = signal.get("trade_plan")
         if not isinstance(plan, dict) or plan.get("success") is not True:
             return None
@@ -125,88 +115,6 @@ class SpotDemoMixin:
                 "opportunities": opportunities, "errors": errors,
                 "rejections": rejections or {},
                 "rejection_samples": rejection_samples or []}
-
-    def _alpha_safety(self, token):
-        """Auto token-safety from the contract data of the Alpha token list."""
-        cache = getattr(self, "_alpha_safety_cache", None)
-        if cache is None:
-            cache = self._alpha_safety_cache = {}
-        key = token["symbol"]
-        hit = cache.get(key)
-        if hit and time.time() - hit[0] < 3600:
-            return hit[1]
-        unknown = {"status": "UNKNOWN", "passed": False, "critical": False}
-        if not token.get("chain_id") or not token.get("address"):
-            result = unknown
-        else:
-            try:
-                result = self.safety_engine.check_token(
-                    token["chain_id"], token["address"])
-                if not isinstance(result, dict):
-                    result = unknown
-            except Exception:
-                result = unknown
-        cache[key] = (time.time(), result)
-        return result
-
-    def analyze_alpha(self, token, preferred_timeframe=None):
-        """Run the Alpha agent on real Alpha candles with automatic safety."""
-        symbol = token["symbol"]
-        live = {"symbol": symbol, "timeframes": {"alpha": {}},
-                "orderbooks": {"alpha": {}}, "errors": {}}
-        for tf in self.market_engine.timeframes["alpha"]:
-            df = self.market_feed.fetch_alpha_candles(symbol, tf, limit=300)
-            live["timeframes"]["alpha"][tf] = self.market_engine._prepare_frame(
-                df, symbol, "alpha", tf)
-        data = self.market_engine.for_live_agent(live, "alpha")
-        data["token_safety"] = self._alpha_safety(token)
-        signal = self.agents["alpha"].analyze(data)
-        if isinstance(signal, dict) and str(signal.get("direction")).upper() == "BUY":
-            signal["trade_plan"] = self.trade_planner.create(
-                data, "LONG", preferred_timeframe=preferred_timeframe
-            )
-        return signal
-
-    def scan_alpha(self, limit=6):
-        if not self._agent_enabled("alpha"):
-            return {"success": False, "reason": "Alpha agent is stopped",
-                    "opportunities": []}
-        try:
-            universe = self.alpha_feed.universe(limit=limit)
-        except Exception as error:
-            return {"success": False,
-                    "reason": "Alpha universe scan failed: " + str(error),
-                    "opportunities": []}
-        opportunities, errors = [], {}
-        rejections, rejection_samples = {}, []
-
-        def reject(symbol, reason):
-            reason = str(reason or "No actionable signal")
-            rejections[reason] = rejections.get(reason, 0) + 1
-            if len(rejection_samples) < 10:
-                rejection_samples.append({"symbol": symbol, "reason": reason})
-
-        for token in universe:
-            try:
-                signal = self.analyze_alpha(token)
-                item = {"symbol": token["symbol"], "display": token["display"],
-                        "quote_volume": token["volume_24h"],
-                        "liquidity": token["liquidity"]}
-                opp = self._as_opportunity(item, signal, "alpha")
-                if opp:
-                    opportunities.append(opp)
-                elif str((signal.get("token_safety") or {}).get("status", "")).upper() != "PASS":
-                    reject(token["symbol"], "Token safety is not PASS")
-                elif str(signal.get("direction", "")).upper() != "BUY":
-                    reject(token["symbol"], signal.get("reason") or "Alpha signal is not BUY")
-                else:
-                    plan = signal.get("trade_plan") or {}
-                    reject(token["symbol"], plan.get("reason") or "Trade plan rejected")
-            except Exception as error:
-                errors[token["symbol"]] = str(error)
-        return self._finish_scan(
-            "alpha", universe, opportunities, errors,
-            rejections=rejections, rejection_samples=rejection_samples)
 
     # ---- open --------------------------------------------------------------------
 
@@ -246,10 +154,6 @@ class SpotDemoMixin:
             return {"approved": False, "reason": "Symbol does not match latest signal"}
         if str(signal.get("direction", "")).upper() != "BUY":
             return {"approved": False, "reason": "Latest signal is not BUY"}
-        if domain == "alpha":
-            status = str((signal.get("token_safety") or {}).get("status", "")).upper()
-            if status != "PASS":
-                return {"approved": False, "reason": "Alpha token safety is not PASS"}
         plan = signal.get("trade_plan")
         if not isinstance(plan, dict) or plan.get("success") is not True:
             return {"approved": False, "reason": "No approved trade plan"}
@@ -290,16 +194,10 @@ class SpotDemoMixin:
                 market_type="SPOT", side="BUY", quantity=quantity,
                 market_price=price)
 
-            token = {}
-            if domain == "alpha":
-                try:
-                    token = self.alpha_feed.token(symbol)
-                except Exception:
-                    token = {}
             record = {
                 "position_id": trade_id, "trade_id": trade_id,
                 "domain": domain, "symbol": symbol,
-                "display_symbol": token.get("display") or symbol,
+                "display_symbol": symbol,
                 "direction": "LONG",
                 "quantity": str(execution["quantity"]),
                 "entry_price": str(execution["execution_price"]),

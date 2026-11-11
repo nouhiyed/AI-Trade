@@ -30,26 +30,6 @@ class Feed:
     def fetch_candles(self, market, symbol, interval="1m", limit=500, closed_only=True):
         return self._build(symbol)
 
-    def fetch_alpha_candles(self, symbol, interval="1m", limit=200):
-        return self._build(symbol)
-
-
-class FakeAlpha:
-    EXTRA_SLIPPAGE = 0.003
-
-    def __init__(self):
-        self.prices = {"ALPHA_9USDT": 1.0}
-
-    def price(self, symbol):
-        return self.prices[symbol]
-
-    def token(self, symbol):
-        return {"symbol": symbol, "display": "XYZ", "price": self.prices[symbol],
-                "volume_24h": 5e6, "liquidity": 1e6, "chain_id": "56", "address": "0x1"}
-
-    def universe(self, limit=10):
-        return [self.token(s) for s in self.prices]
-
 
 def signal(symbol, entry, stop, target, safety=None):
     out = {"symbol": symbol, "direction": "BUY", "confidence": 80,
@@ -68,7 +48,6 @@ class Base(unittest.TestCase):
         self.c = TradingCoordinator(initial_balance=10000)
         self.feed = Feed()
         self.c.market_feed = self.feed
-        self.c.alpha_feed = FakeAlpha()
 
     def tearDown(self):
         self.c.demo_database.connection.close()
@@ -129,33 +108,6 @@ class TestSpot(Base):
         self.assertFalse(self.c.request_demo_spot_trade("ETHUSDT", "spot")["approved"])
 
 
-class TestAlpha(Base):
-    def test_requires_safety_pass(self):
-        self.c.last_signals["alpha"] = signal("ALPHA_9USDT", 1.0, 0.95, 1.1, "UNKNOWN")
-        r = self.c.request_demo_spot_trade("ALPHA_9USDT", "alpha")
-        self.assertFalse(r["approved"])
-        self.assertIn("safety", r["reason"])
-
-    def test_alpha_open_close_with_extra_slippage(self):
-        self.c.last_signals["alpha"] = signal("ALPHA_9USDT", 1.0, 0.95, 1.1, "PASS")
-        r = self.c.request_demo_spot_trade("ALPHA_9USDT", "alpha", 0.25)
-        self.assertTrue(r["approved"], r)
-        self.assertGreater(float(r["entry_price"]), 1.003)       # 0.3% extra + 0.05% engine
-        self.assertEqual(r["display_symbol"], "XYZ")
-        self.c.alpha_feed.prices["ALPHA_9USDT"] = 1.12
-        ev = self.c.monitor_demo_positions()["events"]
-        self.assertEqual(ev[0]["reason"], "TAKE_PROFIT")
-        self.assertAlmostEqual(self.c.risk.balance, self.wallet(), places=6)
-        self.assertEqual(self.c.journal.closed_trades()[0]["domain"], "alpha")
-
-    def test_scan_alpha_wiring(self):
-        self.c.analyze_alpha = lambda token: signal(token["symbol"], 1.0, 0.95, 1.1, "PASS")
-        scan = self.c.scan_alpha(limit=3)
-        self.assertTrue(scan["success"])
-        self.assertEqual(scan["opportunities"][0]["symbol"], "ALPHA_9USDT")
-        self.assertEqual(scan["opportunities"][0]["direction"], "LONG")
-
-
 class TestAutopilotMarkets(Base):
     def test_autopilot_config_persists_across_backend_restart(self):
         config_path = "config/autopilot-persist.json"
@@ -163,14 +115,12 @@ class TestAutopilotMarkets(Base):
         first.update({
             "enabled": True,
             "trade_futures": False,
-            "trade_alpha": True,
             "risk_pct": 0.35,
         })
 
         restored = Autopilot(self.c, config_path=config_path)
         self.assertTrue(restored.config["enabled"])
         self.assertFalse(restored.config["trade_futures"])
-        self.assertTrue(restored.config["trade_alpha"])
         self.assertAlmostEqual(restored.config["risk_pct"], 0.35)
 
     def test_all_agents_are_scanned_when_entry_slots_are_full(self):
@@ -185,15 +135,14 @@ class TestAutopilotMarkets(Base):
             return run
         self.c.scan_futures = scan("futures")
         self.c.scan_spot = scan("spot")
-        self.c.scan_alpha = scan("alpha")
         ap = Autopilot(self.c, config_path="config/ap-full.json")
         ap.update({"enabled": True, "max_concurrent": 1,
                    "use_context": False})
         result = ap.tick()
-        self.assertEqual(calls, ["futures", "spot", "alpha"])
+        self.assertEqual(calls, ["futures", "spot"])
         self.assertEqual(result["opened"], [])
 
-    def test_trades_all_three_markets(self):
+    def test_trades_futures_and_spot(self):
         self.feed.prices.update({"BTCUSDT": 100.0, "ETHUSDT": 100.0})
 
         def opp(domain, symbol, plan_signal):
@@ -209,18 +158,14 @@ class TestAutopilotMarkets(Base):
         self.c.scan_spot = lambda limit=8, **k: {
             "success": True, "scanned": 1, "actionable": 1,
             "opportunities": [opp("spot", "ETHUSDT", signal("ETHUSDT", 100, 98, 104))]}
-        self.c.scan_alpha = lambda limit=6, **k: {
-            "success": True, "scanned": 1, "actionable": 1,
-            "opportunities": [opp("alpha", "ALPHA_9USDT",
-                                  signal("ALPHA_9USDT", 1.0, 0.95, 1.1, "PASS"))]}
         ap = Autopilot(self.c, config_path="config/ap.json")
         ap.update({"enabled": True, "max_concurrent": 3, "use_context": False,
                    "risk_pct": 0.1})
         out = ap.tick()
         self.assertEqual(sorted(o["domain"] for o in out["opened"]),
-                         ["alpha", "futures", "spot"], out)
-        ap.update({"trade_alpha": False, "trade_spot": False})
-        self.assertFalse(ap.config["trade_alpha"])
+                         ["futures", "spot"], out)
+        ap.update({"trade_spot": False})
+        self.assertFalse(ap.config["trade_spot"])
 
 
 if __name__ == "__main__":

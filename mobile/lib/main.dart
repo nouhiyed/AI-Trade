@@ -442,12 +442,10 @@ class _TradeShellState extends State<TradeShell>
   final Map<String, String> _selectedSymbols = {
     'futures': 'BTCUSDT',
     'spot': 'BTCUSDT',
-    'alpha': '',
   };
   final Map<String, String> _selectedIntervals = {
     'futures': '5m',
     'spot': '5m',
-    'alpha': '5m',
   };
   final Set<String> _marketLoading = {};
   bool _marketRefreshing = false;
@@ -657,7 +655,7 @@ class _TradeShellState extends State<TradeShell>
     if (_marketRefreshing) return;
     _marketRefreshing = true;
     try {
-      for (final market in ['futures', 'spot', 'alpha']) {
+      for (final market in ['futures', 'spot']) {
         if (loadSymbols || !(_marketSymbols[market]?.isNotEmpty ?? false)) {
           await _loadMarketSymbols(market);
         }
@@ -671,11 +669,7 @@ class _TradeShellState extends State<TradeShell>
           if (item is! Map) continue;
           final position = Map<String, dynamic>.from(item);
           final domain = '${position['domain'] ?? position['market_type'] ?? 'spot'}'.toLowerCase();
-          final market = domain.contains('future')
-              ? 'futures'
-              : domain.contains('alpha')
-                  ? 'alpha'
-                  : 'spot';
+          final market = domain.contains('future') ? 'futures' : 'spot';
           final symbol = '${position['symbol'] ?? ''}';
           final key = '$market:$symbol:5m';
           if (symbol.isNotEmpty && refreshed.add(key)) {
@@ -773,23 +767,6 @@ class _TradeShellState extends State<TradeShell>
               color: accent, fontSize: 9, fontWeight: FontWeight.bold,
             )),
           ]),
-          if (market == 'alpha' && _marketSymbolErrors[market] != null) ...[
-            const SizedBox(height: 7),
-            Text(
-              _marketSymbolErrors[market]!,
-              style: const TextStyle(color: red, fontSize: 10),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-            Align(
-              alignment: AlignmentDirectional.centerStart,
-              child: TextButton.icon(
-                onPressed: () => _loadMarketSymbols(market),
-                icon: const Icon(Icons.refresh, size: 15),
-                label: Text(tr('إعادة جلب القائمة', 'Retry token list')),
-              ),
-            ),
-          ],
           const SizedBox(height: 7),
           Row(children: [
             CoinLogo(
@@ -825,11 +802,9 @@ class _TradeShellState extends State<TradeShell>
             key: ValueKey('market-pro-chart-$market-${_selectedSymbols[market] ?? ''}'),
             embedded: true,
             initialMarket: market,
-            initialSymbol: market == 'alpha'
-                ? (_selectedSymbols[market] ?? '')
-                : ((_selectedSymbols[market]?.isNotEmpty ?? false)
-                    ? _selectedSymbols[market]!
-                    : 'BTCUSDT'),
+            initialSymbol: ((_selectedSymbols[market]?.isNotEmpty ?? false)
+                ? _selectedSymbols[market]!
+                : 'BTCUSDT'),
             english: en,
             bg: widget.bg,
             panel: widget.panel,
@@ -950,7 +925,7 @@ class _TradeShellState extends State<TradeShell>
   }
 
   bool get allAgentsEnabled {
-    const domains = ['futures', 'spot', 'alpha'];
+    const domains = ['futures', 'spot'];
     return domains.every((d) =>
         agentControls[d] is Map &&
         (agentControls[d]['enabled'] == true));
@@ -1447,13 +1422,12 @@ class _TradeShellState extends State<TradeShell>
           _portfolioCard(),
           _heading(
             tr('فريق الوكلاء', 'AGENT NETWORK'),
-            '3 AGENTS',
+            '2 AGENTS',
             Icons.hub,
           ),
           const SizedBox(height: 10),
           _agentRow('futures', 'FUTURES AGENT', tr('العقود الآجلة', 'Futures'), cyan),
           _agentRow('spot', 'SPOT AGENT', tr('السوق الفوري', 'Spot'), blue),
-          _agentRow('alpha', 'ALPHA AGENT', tr('اكتشاف الأصول', 'Asset discovery'), violet),
           const SizedBox(height: 12),
           _activityCard(),
         ],
@@ -1756,8 +1730,6 @@ class _TradeShellState extends State<TradeShell>
               tr('العقود الآجلة', 'Futures'), cyan),
           _agentRow('spot', 'SPOT AGENT',
               tr('السوق الفوري', 'Spot'), blue),
-          _agentRow('alpha', 'ALPHA AGENT',
-              tr('اكتشاف الأصول', 'Asset discovery'), violet),
           const SizedBox(height: 12),
           _panel(
             child: Column(
@@ -1862,17 +1834,12 @@ class _TradeShellState extends State<TradeShell>
       const SizedBox(height: 13),
       _marketPanel('spot', tr('السوق الفوري', 'SPOT'), blue),
       const SizedBox(height: 13),
-      _marketPanel('alpha', 'ALPHA', violet),
     ],
   );
 
   Widget _positionLiveChart(Map<String, dynamic> position) {
     final domain = '${position['domain'] ?? 'spot'}'.toLowerCase();
-    final market = domain.contains('future')
-        ? 'futures'
-        : domain.contains('alpha')
-            ? 'alpha'
-            : 'spot';
+    final market = domain.contains('future') ? 'futures' : 'spot';
     final symbol = '${position['symbol'] ?? ''}';
     final key = '$market:$symbol:5m';
     final candles = _marketCandles[key] ?? [];
@@ -2996,7 +2963,7 @@ class NetworkPainter extends CustomPainter {
       );
       final label = TextPainter(
         text: TextSpan(
-          text: ['FUTURES', 'SPOT', 'ALPHA'][i],
+          text: ['FUTURES', 'SPOT'][i],
           style: TextStyle(color: colors[i], fontSize: 9, fontWeight: FontWeight.bold),
         ),
         textDirection: TextDirection.ltr,

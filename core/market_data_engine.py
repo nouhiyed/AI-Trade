@@ -17,7 +17,6 @@ class MarketDataEngine:
         self.timeframes = {
             "futures": ["1m", "5m", "15m", "1h"],
             "spot": ["1m", "5m", "15m", "1h", "4h"],
-            "alpha": ["1m", "5m", "15m", "1h"],
         }
 
         self.structure_columns = [
@@ -144,8 +143,7 @@ class MarketDataEngine:
             "source": "binance_rest",
             "timeframes": {
                 "futures": {},
-                "spot": {},
-                "alpha": {}
+                "spot": {}
             },
             "orderbooks": {
                 "futures": {},
@@ -192,15 +190,6 @@ class MarketDataEngine:
 
             except Exception as error:
                 result["errors"][f"{market}_snapshot"] = str(error)
-
-        # Alpha currently analyzes Spot market candles.
-        result["timeframes"]["alpha"] = {
-            timeframe: result["timeframes"]["spot"][timeframe]
-            for timeframe in self.timeframes["alpha"]
-            if timeframe in result["timeframes"]["spot"]
-        }
-
-        result["orderbooks"]["alpha"] = result["orderbooks"]["spot"]
 
         return result
 
