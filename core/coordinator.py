@@ -1226,13 +1226,16 @@ class TradingCoordinator(SpotDemoMixin):
                         "signal": signal}
             is_long, is_short = True, False
 
-        # The agent decides direction. The chart levels are independently
-        # validated below and form the execution plan; a failed auxiliary ATR
-        # planner must not prevent the agent from reviewing a valid setup.
+        # Chart prices are reference annotations only. The execution levels must
+        # come from the same structure-rejection planner used by autopilot.
         agent_plan = signal.get("trade_plan") or {}
+        if not isinstance(agent_plan, dict) or agent_plan.get("success") is not True:
+            reason = (agent_plan.get("reason") if isinstance(agent_plan, dict) else None) or (
+                "No confirmed support/resistance rejection; agent must wait")
+            return {**base, "success": True, "decision_status": "REJECTED",
+                    "decision_reason": str(reason), "reason": str(reason),
+                    "signal": signal, "trade_plan": agent_plan}
 
-        # The user supplies all three proposed levels; the selected agent
-        # reviews the setup and the backend enforces the strategy/risk rules.
         try:
             proposed = {
                 "entry": Decimal(str(entry_price)),
@@ -1240,27 +1243,37 @@ class TradingCoordinator(SpotDemoMixin):
                 "stop_loss": Decimal(str(stop_loss)),
             }
         except Exception:
-            reason = "Entry, take-profit and stop-loss prices are required numeric values"
+            reason = "Chart reference prices must be numeric"
             return {**base, "success": True, "decision_status": "REJECTED",
                     "decision_reason": reason, "reason": reason,
                     "signal": signal, "trade_plan": agent_plan}
         if not all(value.is_finite() and value > 0 for value in proposed.values()):
-            reason = "All proposed prices must be finite positive numbers"
+            reason = "Chart reference prices must be finite positive numbers"
             return {**base, "success": True, "decision_status": "REJECTED",
                     "decision_reason": reason, "reason": reason,
                     "signal": signal, "trade_plan": agent_plan}
-        plan_source = "USER_PROPOSAL_REVIEWED_BY_AGENT"
 
-        entry = proposed["entry"]
-        target = proposed["take_profit"]
-        stop = proposed["stop_loss"]
+        try:
+            entry = Decimal(str(agent_plan["entry"]))
+            target = Decimal(str(agent_plan["take_profit"]))
+            stop = Decimal(str(agent_plan["stop_loss"]))
+        except (KeyError, TypeError, ValueError):
+            reason = "Agent structure plan is missing entry, target or stop"
+            return {**base, "success": True, "decision_status": "REJECTED",
+                    "decision_reason": reason, "reason": reason,
+                    "signal": signal, "trade_plan": agent_plan}
+        if not all(value.is_finite() and value > 0 for value in (entry, target, stop)):
+            reason = "Agent structure plan contains invalid prices"
+            return {**base, "success": True, "decision_status": "REJECTED",
+                    "decision_reason": reason, "reason": reason,
+                    "signal": signal, "trade_plan": agent_plan}
         if is_long and not stop < entry < target:
-            reason = "For LONG/BUY, Stop Loss must be below Entry and Take Profit above Entry"
+            reason = "Agent LONG plan must place stop below entry and target above entry"
             return {**base, "success": True, "decision_status": "REJECTED",
                     "decision_reason": reason, "reason": reason,
                     "signal": signal, "trade_plan": agent_plan}
         if is_short and not target < entry < stop:
-            reason = "For SHORT, Take Profit must be below Entry and Stop Loss above Entry"
+            reason = "Agent SHORT plan must place target below entry and stop above entry"
             return {**base, "success": True, "decision_status": "REJECTED",
                     "decision_reason": reason, "reason": reason,
                     "signal": signal, "trade_plan": agent_plan}
@@ -1268,8 +1281,8 @@ class TradingCoordinator(SpotDemoMixin):
         risk_distance = abs(entry - stop)
         reward_distance = abs(target - entry)
         reward_risk = reward_distance / risk_distance if risk_distance else Decimal("0")
-        if reward_risk < Decimal("1.5"):
-            reason = "Proposed reward/risk is below the strategy minimum of 1.5"
+        if reward_risk < Decimal("1.0"):
+            reason = "Agent structure target has reward/risk below 1.0"
             return {**base, "success": True, "decision_status": "REJECTED",
                     "decision_reason": reason, "reason": reason,
                     "signal": signal, "trade_plan": agent_plan,
@@ -1281,8 +1294,9 @@ class TradingCoordinator(SpotDemoMixin):
             "success": True, "direction": "SHORT" if is_short else "LONG",
             "entry": float(entry), "stop_loss": float(stop),
             "take_profit": float(target), "reward_risk": round(float(reward_risk), 4),
-            "timeframe": timeframe, "method": plan_source,
-            "agent_generated_plan": agent_plan,
+            "timeframe": timeframe,
+            "method": "AGENT_STRUCTURE_REJECTION_PLAN",
+            "chart_reference_levels": {k: str(v) for k, v in proposed.items()},
         })
         signal["trade_plan"] = plan
         self.last_signals[domain] = signal
