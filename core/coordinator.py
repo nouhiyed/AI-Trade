@@ -9,15 +9,12 @@ from uuid import uuid4
 
 from agents.futures.agent import FuturesAgent
 from agents.spot.agent import SpotAgent
-from agents.alpha.agent import AlphaAgent
 
 from core.risk_manager import RiskManager
 from core.market_data_engine import MarketDataEngine
-from core.token_safety_engine import TokenSafetyEngine
 from core.binance_market_data import BinanceMarketData
 from core.market_scanner import FuturesMarketScanner
 from core.trade_planner import TradePlanner
-from core.binance_execution import BinanceExecutionEngine
 from core.demo.database import DemoDatabase
 from core.demo.ledger import Ledger
 from core.demo.engine import DemoEngine
@@ -25,7 +22,6 @@ from core.journal import TradeJournal
 from core.learning import LearningEngine, setup_key as make_setup_key
 from core.notifier import Notifier
 from core.chart_image import render_trade_chart
-from core.alpha_feed import AlphaFeed
 from core.spot_demo import SpotDemoMixin
 
 
@@ -37,25 +33,21 @@ class TradingCoordinator(SpotDemoMixin):
         self.market_engine = MarketDataEngine()
         self.market_scanner = FuturesMarketScanner()
         self.trade_planner = TradePlanner()
-        self.safety_engine = TokenSafetyEngine()
 
         self.agents = {
             "futures": FuturesAgent(),
-            "spot": SpotAgent(),
-            "alpha": AlphaAgent()
+            "spot": SpotAgent()
         }
 
         self.required_timeframes = {
             "futures": ["1m", "5m", "15m", "1h"],
-            "spot": ["1m", "5m", "15m", "1h", "4h"],
-            "alpha": ["1m", "5m", "15m", "1h"]
+            "spot": ["1m", "5m", "15m", "1h", "4h"]
         }
 
         self.last_signals = {}
         self._demo_lock = threading.RLock()
         self._demo_position_locks = {}
         self._demo_position_locks_guard = threading.Lock()
-        self.alpha_config_path = Path("config/alpha_tokens.json")
         self.mode = "DEMO"
         self.demo_state_path = Path("config/demo_state.json")
         self.demo_positions = self._load_demo_state()
@@ -78,7 +70,6 @@ class TradingCoordinator(SpotDemoMixin):
         self.journal = TradeJournal(Path("data/journal.db"))
         self.learning = LearningEngine(self.journal)
         self.notifier = Notifier()
-        self.alpha_feed = AlphaFeed()
         self.max_concurrent_demo = 3
         self._recover_demo_positions()
 
@@ -404,13 +395,9 @@ class TradingCoordinator(SpotDemoMixin):
             "; ".join(ctx.get("flags", [])))
         try:
             domain = record.get("domain", "futures")
-            if domain == "alpha":
-                frame = self.market_feed.fetch_alpha_candles(
-                    record["symbol"], "5m", limit=90)
-            else:
-                frame = self.market_feed.fetch_candles(
-                    "spot" if domain == "spot" else "futures",
-                    record["symbol"], "5m", limit=90, closed_only=False)
+            frame = self.market_feed.fetch_candles(
+                "spot" if domain == "spot" else "futures",
+                record["symbol"], "5m", limit=90, closed_only=False)
             candles = frame[["open", "high", "low", "close"]].to_dict("records")
             png = render_trade_chart(
                 candles, record["direction"], float(record["entry_price"]),
@@ -439,12 +426,9 @@ class TradingCoordinator(SpotDemoMixin):
         limit = min(1000, max(2, int(math.ceil((now_ms - since) / 60_000)) + 2))
         domain = record.get("domain", "futures")
         symbol = str(record["symbol"]).upper()
-        if domain == "alpha":
-            frame = self.market_feed.fetch_alpha_candles(symbol, "1m", limit=limit)
-        else:
-            frame = self.market_feed.fetch_candles(
-                "spot" if domain == "spot" else "futures", symbol, "1m",
-                limit=limit, closed_only=False)
+        frame = self.market_feed.fetch_candles(
+            "spot" if domain == "spot" else "futures", symbol, "1m",
+            limit=limit, closed_only=False)
         for row in frame.itertuples(index=False):
             if row.open_time.timestamp() * 1000 <= since:
                 continue
@@ -489,7 +473,7 @@ class TradingCoordinator(SpotDemoMixin):
 
             try:
                 # Binance I/O is deliberately outside _demo_lock.
-                if domain in ("spot", "alpha"):
+                if domain == "spot":
                     exit_price = self._spot_like_price(domain, symbol, "SELL")
                 else:
                     exit_price = self._demo_market_price(symbol)
@@ -527,7 +511,7 @@ class TradingCoordinator(SpotDemoMixin):
         ):
             return {"success": False, "reason": "Position is not closable"}
 
-        if record.get("domain") in ("spot", "alpha"):
+        if record.get("domain") == "spot":
             try:
                 result = self._close_spot_like(
                     position_id, record, "MANUAL", exit_price=exit_price
@@ -985,51 +969,6 @@ class TradingCoordinator(SpotDemoMixin):
     def get_agent_controls(self):
         return {d: {"enabled": self._agent_enabled(d)} for d in self.agents}
 
-    def _get_alpha_safety(self, symbol):
-        unknown = {
-            "status": "UNKNOWN",
-            "passed": False,
-            "critical": False
-        }
-
-        try:
-            with open(self.alpha_config_path, "r") as f:
-                config = json.load(f)
-
-            if config.get("enabled") is not True:
-                return unknown
-
-            tokens = config.get("tokens", [])
-
-            token = next(
-                (
-                    x for x in tokens
-                    if isinstance(x, dict)
-                    and str(x.get("symbol", "")).upper()
-                    == str(symbol).upper()
-                ),
-                None
-            )
-
-            if not token:
-                return unknown
-
-            chain = token.get("chain")
-            address = token.get("address")
-
-            if not chain or not address:
-                return unknown
-
-            result = self.safety_engine.check_token(
-                chain, address
-            )
-
-            return result if isinstance(result, dict) else unknown
-
-        except Exception:
-            return unknown
-
-
     def analyze_live(self, symbol, preferred_timeframe=None):
         symbol = str(symbol).strip().upper()
 
@@ -1061,11 +1000,6 @@ class TradingCoordinator(SpotDemoMixin):
                     live_data, domain
                 )
 
-                if domain == "alpha":
-                    agent_data["token_safety"] = (
-                        self._get_alpha_safety(symbol)
-                    )
-
                 signal = agent.analyze(agent_data)
                 if domain == "futures" and isinstance(signal, dict):
                     direction = str(signal.get("direction", "WAIT")).upper()
@@ -1075,20 +1009,12 @@ class TradingCoordinator(SpotDemoMixin):
                             preferred_timeframe=preferred_timeframe,
                         )
 
-                if domain in {"spot", "alpha"} and isinstance(signal, dict):
+                if domain == "spot" and isinstance(signal, dict):
                     if str(signal.get("direction", "")).upper() == "BUY":
                         signal["trade_plan"] = self.trade_planner.create(
                             agent_data, "LONG",
                             preferred_timeframe=preferred_timeframe,
                         )
-
-                if domain == "alpha" and isinstance(signal, dict):
-                    safety_status = str(
-                        agent_data.get("token_safety", {}).get("status", "")
-                    ).upper()
-                    signal["execution_enabled"] = (
-                        self.mode == "DEMO" and safety_status == "PASS"
-                    )
 
                 results[domain] = signal
                 self.last_signals[domain] = signal
@@ -1115,7 +1041,6 @@ class TradingCoordinator(SpotDemoMixin):
         allowed_timeframes = {
             "futures": {"1m", "5m", "15m", "1h"},
             "spot": {"1m", "5m", "15m", "1h", "4h"},
-            "alpha": {"1m", "5m", "15m", "1h"},
         }
         base = {
             "success": False, "opened": False, "domain": domain,
@@ -1136,22 +1061,8 @@ class TradingCoordinator(SpotDemoMixin):
             return {**base, "decision_status": "REJECTED",
                     "decision_reason": reason, "reason": reason}
 
-        if domain == "alpha":
-            try:
-                token = self.alpha_feed.token(symbol)
-                signal = self.analyze_alpha(token, preferred_timeframe=timeframe)
-                analysis = {
-                    "symbol": symbol,
-                    "source": "binance_alpha",
-                    "signals": {"alpha": signal},
-                }
-            except Exception as error:
-                reason = "Alpha analysis failed: " + str(error)
-                return {**base, "success": True, "decision_status": "REJECTED",
-                        "decision_reason": reason, "reason": reason}
-        else:
-            analysis = self.analyze_live(symbol, preferred_timeframe=timeframe)
-            signal = analysis.get("signals", {}).get(domain, {})
+        analysis = self.analyze_live(symbol, preferred_timeframe=timeframe)
+        signal = analysis.get("signals", {}).get(domain, {})
         if not isinstance(signal, dict) or signal.get("error"):
             reason = (signal.get("error") if isinstance(signal, dict) else None) or "Analysis unavailable"
             return {**base, "success": True, "decision_status": "REJECTED",
@@ -1171,7 +1082,7 @@ class TradingCoordinator(SpotDemoMixin):
                 return {**base, "success": True, "decision_status": "REJECTED",
                         "decision_reason": str(reason), "reason": str(reason),
                         "signal": signal}
-        else:
+        elif domain == "spot":
             if direction != "BUY":
                 reason = signal.get("reason") or domain.title() + " agent did not approve a BUY setup"
                 return {**base, "success": True, "decision_status": "REJECTED",
@@ -1179,19 +1090,10 @@ class TradingCoordinator(SpotDemoMixin):
                         "signal": signal}
             is_long, is_short = True, False
 
-        safety = signal.get("token_safety") or {}
-        if domain == "alpha" and str(safety.get("status", "")).upper() != "PASS":
-            reason = "Alpha token safety is not PASS"
-            return {**base, "success": True, "decision_status": "REJECTED",
-                    "decision_reason": reason, "reason": reason,
-                    "signal": signal, "token_safety": safety}
-
-        agent_plan = signal.get("trade_plan")
-        if not isinstance(agent_plan, dict) or agent_plan.get("success") is not True:
-            reason = str((agent_plan or {}).get("reason", "Agent did not produce a valid strategy plan"))
-            return {**base, "success": True, "decision_status": "REJECTED",
-                    "decision_reason": reason, "reason": reason,
-                    "signal": signal, "trade_plan": agent_plan}
+        # The agent decides direction. The chart levels are independently
+        # validated below and form the execution plan; a failed auxiliary ATR
+        # planner must not prevent the agent from reviewing a valid setup.
+        agent_plan = signal.get("trade_plan") or {}
 
         # The user supplies all three proposed levels; the selected agent
         # reviews the setup and the backend enforces the strategy/risk rules.
@@ -1275,7 +1177,6 @@ class TradingCoordinator(SpotDemoMixin):
             "decision_status": status, "decision_reason": reason,
             "decision": status + ": " + reason,
             "signal": signal, "trade_plan": plan, "execution": execution,
-            "token_safety": safety if domain == "alpha" else None,
             "proposed_levels": {k: str(v) for k, v in proposed.items()},
         }
 
@@ -1401,13 +1302,6 @@ class TradingCoordinator(SpotDemoMixin):
                         if tf in market_data:
                             agent_data[tf] = market_data[tf]
 
-                if domain == "alpha":
-                    agent_data["token_safety"] = (
-                        self._get_alpha_safety(
-                            agent_data.get("symbol", "UNKNOWN")
-                        )
-                    )
-
                 signal = agent.analyze(agent_data)
                 results[domain] = signal
                 self.last_signals[domain] = signal
@@ -1425,12 +1319,6 @@ class TradingCoordinator(SpotDemoMixin):
             return {"approved": False, "reason": "Unknown agent"}
         if not self._agent_enabled(domain):
             return {"approved": False, "reason": "Agent is stopped"}
-
-        if domain == "alpha":
-            return {
-                "approved": False,
-                "reason": "Alpha execution disabled"
-            }
 
         signal = self.last_signals.get(domain, {})
 

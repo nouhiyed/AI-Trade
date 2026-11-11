@@ -73,7 +73,7 @@ class _ProChartScreenState extends State<ProChartScreen> {
     if (_market == 'spot') return ['1m', '5m', '15m', '1h', '4h'];
     return ['1m', '5m', '15m', '1h'];
   }
-  static const _markets = ['futures', 'spot', 'alpha'];
+  static const _markets = ['futures', 'spot'];
 
   String t(String ar, String en) => widget.english ? en : ar;
 
@@ -331,7 +331,7 @@ class _ProChartScreenState extends State<ProChartScreen> {
                     setState(() {
                       _market = m;
                       _symbols = [];
-                      _symbol = m == 'alpha' ? '' : 'BTCUSDT';
+                      _symbol = 'BTCUSDT';
                       if (!_availableIntervals.contains(_interval)) {
                         _interval = '5m';
                       }

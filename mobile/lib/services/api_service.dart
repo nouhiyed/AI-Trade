@@ -147,6 +147,7 @@ class ApiService {
       _request(
         'GET',
         '/agent/submission?id=${Uri.encodeQueryComponent(requestId)}',
+        requestTimeout: const Duration(seconds: 8),
         allowNotFound: true,
       );
 

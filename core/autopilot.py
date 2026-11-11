@@ -21,7 +21,7 @@ DEFAULTS = {
     "use_context": True,
     "trade_futures": True,
     "trade_spot": True,
-    "trade_alpha": True,
+
 }
 LIMITS = {
     "interval_sec": (30, 3600), "scan_limit": (3, 40),
@@ -97,111 +97,157 @@ class Autopilot:
                                        "DEMO_RECONCILIATION_REQUIRED")}
 
     def tick(self, force=False):
-        """Run one cycle. Returns a summary dict (also stored in status)."""
+        """Run one cycle and always publish its latest outcome."""
         with self._lock:
-            cfg = self.config
-            result = {"opened": [], "skipped": []}
-            if not (cfg["enabled"] or force):
-                return {"skipped": [{"reason": "Autopilot is off"}], "opened": []}
-            if self.c.mode != "DEMO":
-                return {"skipped": [{"reason": "Not in DEMO mode"}], "opened": []}
-
+            cfg = dict(self.config)
+            result = {"status": "RUNNING", "opened": [], "skipped": [],
+                      "scanned": 0, "actionable": 0}
             self.last_run = int(self.clock())
-            open_symbols = self._open_symbols()
-            slots = int(cfg["max_concurrent"]) - len(open_symbols)
-            if slots <= 0:
-                result["skipped"].append({"reason": "Max concurrent trades reached"})
+            self.last_result = dict(result)
 
-            sources = []
-            limit = int(cfg["scan_limit"])
-            if cfg["trade_futures"]:
-                sources.append(("futures", lambda: self.c.scan_futures(limit=limit)))
-            if cfg["trade_spot"]:
-                sources.append(("spot", lambda: self.c.scan_spot(limit=min(limit, 8))))
-            if cfg["trade_alpha"]:
-                sources.append(("alpha", lambda: self.c.scan_alpha(limit=min(limit, 6))))
+            if not (cfg["enabled"] or force):
+                result["status"] = "IDLE"
+                result["skipped"].append({"reason": "Autopilot is off"})
+                self.last_result = result
+                return result
+            if self.c.mode != "DEMO":
+                result["status"] = "SKIPPED"
+                result["skipped"].append({"reason": "Not in DEMO mode"})
+                self.last_result = result
+                return result
 
-            result["scanned"] = 0
-            result["actionable"] = 0
-            # Keep every enabled market scanner running even when entry slots
-            # are full; only execution is blocked by the shared slot limit.
-            for domain, scan_fn in sources:
-                try:
-                    scan = scan_fn()
-                except Exception as error:
-                    result["skipped"].append({"domain": domain, "reason": str(error)})
-                    continue
-                result["scanned"] += scan.get("scanned") or 0
-                result["actionable"] += scan.get("actionable") or 0
-                if scan.get("rejections"):
-                    result.setdefault("rejections", {})[domain] = scan["rejections"]
-                if scan.get("rejection_samples"):
-                    result.setdefault("rejection_samples", []).extend(
-                        scan["rejection_samples"][:8])
-                if not scan.get("success"):
+            try:
+                open_symbols = self._open_symbols()
+                slots = int(cfg["max_concurrent"]) - len(open_symbols)
+                if slots <= 0:
                     result["skipped"].append(
-                        {"domain": domain, "reason": scan.get("reason", "Scan failed")})
-                    continue
-                slots = self._process(domain, scan, cfg, open_symbols, slots, result)
-            self.last_result = result
+                        {"reason": "Max concurrent trades reached"})
+
+                sources = []
+                limit = int(cfg["scan_limit"])
+                if cfg["trade_futures"]:
+                    sources.append(("futures", lambda: self.c.scan_futures(limit=limit)))
+                if cfg["trade_spot"]:
+                    sources.append(("spot", lambda: self.c.scan_spot(limit=min(limit, 8))))
+
+                # Scan every enabled market independently. One failed scanner or
+                # domain processor must not hide results from the other domains.
+                for domain, scan_fn in sources:
+                    try:
+                        scan = scan_fn()
+                        if not isinstance(scan, dict):
+                            raise TypeError("Scanner returned an invalid response")
+                        result["scanned"] += scan.get("scanned") or 0
+                        result["actionable"] += scan.get("actionable") or 0
+                        if scan.get("rejections"):
+                            result.setdefault("rejections", {})[domain] = scan["rejections"]
+                        if scan.get("rejection_samples"):
+                            result.setdefault("rejection_samples", []).extend(
+                                scan["rejection_samples"][:8])
+                        if not scan.get("success"):
+                            result["skipped"].append({
+                                "domain": domain,
+                                "reason": scan.get("reason", "Scan failed"),
+                            })
+                            continue
+                        slots = self._process(
+                            domain, scan, cfg, open_symbols, slots, result)
+                    except Exception as error:
+                        result["skipped"].append({
+                            "domain": domain,
+                            "reason": "Domain processing error: " + str(error),
+                        })
+                result["status"] = "COMPLETED"
+            except Exception as error:
+                result["status"] = "ERROR"
+                result["error"] = str(error)
+                result["skipped"].append({
+                    "reason": "Autopilot cycle error: " + str(error),
+                })
+            finally:
+                # Never leave the dashboard showing a previous cycle's result.
+                self.last_result = result
             return result
 
     def _process(self, domain, scan, cfg, open_symbols, slots, result):
         for opp in scan.get("opportunities", []):
             if slots <= 0:
                 break
-            symbol, direction = opp["symbol"], opp["direction"]
-            signal, plan = opp["signal"], opp["trade_plan"]
-            confidence = float(opp.get("confidence") or 0)
+            symbol = str(opp.get("symbol", "")).upper()
+            try:
+                direction = opp["direction"]
+                signal, plan = opp["signal"], opp["trade_plan"]
+                confidence = float(opp.get("confidence") or 0)
 
-            def skip(reason):
-                result["skipped"].append(
-                    {"domain": domain, "symbol": symbol, "reason": reason})
+                def skip(reason):
+                    result["skipped"].append({
+                        "domain": domain, "symbol": symbol, "reason": str(reason)})
 
-            if symbol in open_symbols:
-                skip("Already open"); continue
-            if self._cooldown.get(symbol, 0) > self.clock():
-                skip("Cooldown after a recent trade"); continue
-            if confidence < float(cfg["min_confidence"]):
-                skip("Confidence below minimum"); continue
-
-            key = setup_key(direction, confidence, plan.get("reward_risk"), domain)
-            if not self.c.learning.allows(key):
-                skip("Setup disabled by learning: " + key); continue
-
-            assessment = None
-            if cfg["use_context"] and self.context is not None and domain != "alpha":
-                assessment = self.context.assess(symbol, direction)
-                if assessment.get("veto"):
-                    skip("Context veto: " + assessment["veto"]); continue
-                confidence += assessment["score"] * 5
+                if not symbol:
+                    skip("Missing symbol")
+                    continue
+                if symbol in open_symbols:
+                    skip("Already open")
+                    continue
+                if self._cooldown.get(symbol, 0) > self.clock():
+                    skip("Cooldown after a recent trade")
+                    continue
                 if confidence < float(cfg["min_confidence"]):
-                    skip("Confidence below minimum after context"); continue
+                    skip("Confidence below minimum")
+                    continue
 
-            signal = dict(signal)
-            signal["market_context"] = assessment
-            signal["setup_key"] = key
-            signal["confidence_adjusted"] = confidence
-            self.c.last_signals[domain] = signal
+                key = setup_key(
+                    direction, confidence, plan.get("reward_risk"), domain)
+                if not self.c.learning.allows(key):
+                    skip("Setup disabled by learning: " + key)
+                    continue
 
-            if domain == "futures":
-                selected_leverage = self.c.select_futures_leverage(signal, plan)
-                trade = self.c.request_demo_futures_trade(
-                    symbol, direction, risk_pct=float(cfg["risk_pct"]),
-                    leverage=selected_leverage)
-            else:
-                trade = self.c.request_demo_spot_trade(
-                    symbol, domain=domain, risk_pct=float(cfg["risk_pct"]))
-            if trade.get("approved"):
-                slots -= 1
-                open_symbols.add(symbol)
-                self._cooldown[symbol] = self.clock() + cfg["cooldown_min"] * 60
-                result["opened"].append({"domain": domain, "symbol": symbol,
-                                         "direction": direction,
-                                         "leverage": trade.get("leverage", selected_leverage if domain == "futures" else 1),
-                                         "trade_id": trade.get("trade_id")})
-            else:
-                skip(trade.get("reason", "Rejected"))
+                assessment = None
+                if cfg["use_context"] and self.context is not None:
+                    assessment = self.context.assess(symbol, direction)
+                    if assessment.get("veto"):
+                        skip("Context veto: " + assessment["veto"])
+                        continue
+                    confidence += assessment["score"] * 5
+                    if confidence < float(cfg["min_confidence"]):
+                        skip("Confidence below minimum after context")
+                        continue
+
+                signal = dict(signal)
+                signal["market_context"] = assessment
+                signal["setup_key"] = key
+                signal["confidence_adjusted"] = confidence
+                self.c.last_signals[domain] = signal
+
+                selected_leverage = 1
+                if domain == "futures":
+                    selected_leverage = self.c.select_futures_leverage(signal, plan)
+                    trade = self.c.request_demo_futures_trade(
+                        symbol, direction, risk_pct=float(cfg["risk_pct"]),
+                        leverage=selected_leverage)
+                else:
+                    trade = self.c.request_demo_spot_trade(
+                        symbol, domain=domain, risk_pct=float(cfg["risk_pct"]))
+
+                if trade.get("approved"):
+                    slots -= 1
+                    open_symbols.add(symbol)
+                    self._cooldown[symbol] = (
+                        self.clock() + cfg["cooldown_min"] * 60)
+                    result["opened"].append({
+                        "domain": domain, "symbol": symbol,
+                        "direction": direction,
+                        "leverage": trade.get("leverage", selected_leverage),
+                        "trade_id": trade.get("trade_id"),
+                    })
+                else:
+                    skip(trade.get("reason", "Rejected"))
+            except Exception as error:
+                # Isolate malformed opportunities and transient agent errors.
+                result["skipped"].append({
+                    "domain": domain, "symbol": symbol,
+                    "reason": "Opportunity processing error: " + str(error),
+                })
         return slots
 
     def run_forever(self, stop_event=None):

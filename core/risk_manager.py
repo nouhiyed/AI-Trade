@@ -30,8 +30,7 @@ class RiskManager:
 
         self.domains = {
             "futures": {"enabled": True},
-            "spot": {"enabled": True},
-            "alpha": {"enabled": True}
+            "spot": {"enabled": True}
         }
 
         self.day = datetime.now(timezone.utc).date()
@@ -207,8 +206,8 @@ class RiskManager:
                 return {"approved": False, "reason": "Invalid risk settings"}
             if domain == "futures" and leverage > 5:
                 return {"approved": False, "reason": "Futures leverage exceeds the hard 5x limit"}
-            if domain in ("spot", "alpha") and leverage != 1:
-                return {"approved": False, "reason": "Spot and Alpha must use 1x leverage"}
+            if domain == "spot" and leverage != 1:
+                return {"approved": False, "reason": "Spot must use 1x leverage"}
 
             if direction == "LONG" and stop_loss >= entry:
                 return {"approved": False, "reason": "Invalid LONG stop"}
