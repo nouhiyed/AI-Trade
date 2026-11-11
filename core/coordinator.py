@@ -347,6 +347,39 @@ class TradingCoordinator(SpotDemoMixin):
         threading.Thread(target=self.notifier.send_message, args=(text,),
                          daemon=True).start()
 
+    @staticmethod
+    def _learning_features(signal):
+        """Capture the exact factors visible when this trade was opened."""
+        signal = signal or {}
+        timeframes = signal.get("timeframes") or {}
+        features = {}
+        for tf, values in timeframes.items():
+            if not isinstance(values, dict):
+                continue
+            smc = values.get("smc") or {}
+            for name in ("bullish_bos", "bearish_bos", "bullish_choch",
+                         "bearish_choch", "bullish_sweep", "bearish_sweep",
+                         "bullish_fvg", "bearish_fvg", "bullish_ob", "bearish_ob"):
+                if smc.get(name):
+                    features[f"{tf}:{name}"] = True
+            if values.get("rsi") is not None:
+                features[f"{tf}:rsi_present"] = True
+            if values.get("adx") is not None:
+                features[f"{tf}:adx_present"] = True
+        scores = signal.get("scores") or {}
+        features["ema_macd_rsi_directional_edge"] = bool(
+            scores.get("LONG", scores.get("BUY", 0))
+            or scores.get("SHORT", scores.get("SELL", 0))
+        )
+        orderbook = signal.get("orderbook") or {}
+        features["orderbook_used"] = bool(orderbook.get("used"))
+        context = signal.get("market_context") or {}
+        details = context.get("details") or {}
+        news = details.get("news") or {}
+        features["news_present"] = bool(news.get("items"))
+        features["whale_flow_present"] = bool(details.get("whales"))
+        return features
+
     def _on_demo_open(self, record, signal, reservation):
         """Journal the new trade and (optionally) send a chart snapshot."""
         try:
@@ -362,7 +395,9 @@ class TradingCoordinator(SpotDemoMixin):
                 "confidence": signal.get("confidence"),
                 "scores": signal.get("scores"),
                 "market_context": signal.get("market_context"),
+                "trade_plan": plan,
                 "reward_risk": plan.get("reward_risk"),
+                "features": self._learning_features(signal),
                 "timeframe": record["timeframe"],
                 "chart_timeframe": record["timeframe"],
             }
@@ -613,7 +648,11 @@ class TradingCoordinator(SpotDemoMixin):
                 symbol = str(record["symbol"]).upper()
                 direction = str(record["direction"]).upper()
                 stop = Decimal(str(record["stop_loss"]))
-                target = Decimal(str(record["take_profit"]))
+                tp1_done = bool(record.get("tp1_done"))
+                target = Decimal(str(
+                    record.get("take_profit_2") if tp1_done and record.get("take_profit_2")
+                    else record["take_profit"]
+                ))
                 engine_position_id = record["engine_position_id"]
                 snapshot = dict(record)
 
@@ -674,17 +713,49 @@ class TradingCoordinator(SpotDemoMixin):
                             self._save_demo_state()
                             continue
 
+                        partial_tp1 = (
+                            reason == "TAKE_PROFIT"
+                            and not current.get("tp1_done")
+                            and current.get("take_profit_2") is not None
+                        )
+                        close_quantity = None
+                        close_reason = reason
+                        if partial_tp1:
+                            remaining = Decimal(str(
+                                current.get("remaining_quantity") or current.get("quantity")
+                            ))
+                            pct = Decimal(str(current.get("tp1_close_pct", 70)))
+                            close_quantity = remaining * pct / Decimal("100")
+                            if close_quantity <= 0 or close_quantity >= remaining:
+                                partial_tp1 = False
+                            else:
+                                close_reason = "TAKE_PROFIT_1"
+
                         result = self.demo_execution.close_futures_position(
                             self.demo_account_id,
                             engine_position_id,
                             market_price=exit_price,
-                            reason=reason,
+                            quantity=close_quantity,
+                            reason=close_reason,
                         )
                         current["status"] = (
                             "DEMO_CLOSED" if result["status"] == "CLOSED"
                             else "DEMO_PARTIALLY_CLOSED"
                         )
-                        current["close_reason"] = reason
+                        if partial_tp1 and result["status"] != "CLOSED":
+                            current["tp1_done"] = True
+                            entry_price = Decimal(str(current["entry_price"]))
+                            cost_buffer = Decimal("0.003")
+                            current["stop_loss"] = str(
+                                entry_price * (Decimal("1") + cost_buffer)
+                                if direction == "SHORT"
+                                else entry_price * (Decimal("1") - cost_buffer)
+                            )
+                            current["take_profit"] = str(current["take_profit_2"])
+                            current["tp1_closed_quantity"] = str(result["closed_quantity"])
+                        elif reason == "TAKE_PROFIT" and current.get("tp1_done"):
+                            close_reason = "TAKE_PROFIT_2"
+                        current["close_reason"] = close_reason
                         current["close_price"] = str(result["execution_price"])
                         current["realized_pnl"] = str(result["realized_pnl"])
                         current["close_fee"] = str(result["fee"])
@@ -881,6 +952,12 @@ class TradingCoordinator(SpotDemoMixin):
                 "entry_price": str(execution["entry_price"]),
                 "stop_loss": str(stop),
                 "take_profit": str(target),
+                "take_profit_2": (
+                    str(plan["take_profit_2"]) if plan.get("take_profit_2") else None
+                ),
+                "tp1_close_pct": float(plan.get("tp1_close_pct", 100)),
+                "tp1_done": False,
+                "remaining_quantity": str(execution["quantity"]),
                 "initial_margin": str(execution["initial_margin"]),
                 "entry_fee": str(execution["fee"]),
                 "status": "DEMO_OPEN",
