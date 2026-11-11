@@ -203,11 +203,11 @@ class TestLearningAndPerformance(Base):
 
     def test_no_change_before_enough_samples_then_disables_loser(self):
         key = "LONG|c80|rr2+"
-        for i in range(29):
+        for i in range(19):
             self._add(key, -10, -1, i)
         self.assertEqual(self.c.learning.evaluate(), [])
         self.assertTrue(self.c.learning.allows(key))
-        self._add(key, -10, -1, 29)
+        self._add(key, -10, -1, 19)
         self.assertEqual(len(self.c.learning.evaluate()), 1)
         self.assertFalse(self.c.learning.allows(key))
         rep = self.c.learning.report()
