@@ -1125,12 +1125,17 @@ class TradingCoordinator(SpotDemoMixin):
                     if isinstance(values, dict)
                     for flag, active in (values.get("smc") or {}).items() if active
                 ]
-                if any("sweep" in flag for flag in smc_flags) and any("choch" in flag for flag in smc_flags):
-                    signal["strategy_tag"] = "liquidity_reversal"
+                plan_style = (signal.get("trade_plan") or {}).get("entry_strategy")
+                if plan_style:
+                    signal["strategy_tag"] = plan_style
+                elif any("sweep" in flag for flag in smc_flags) and any("choch" in flag for flag in smc_flags):
+                    signal["strategy_tag"] = "liquidity_sweep_reversal"
+                elif any("choch" in flag for flag in smc_flags):
+                    signal["strategy_tag"] = "market_structure_shift"
                 elif any("bos" in flag for flag in smc_flags):
-                    signal["strategy_tag"] = "structure_breakout"
+                    signal["strategy_tag"] = "breakout_retest"
                 else:
-                    signal["strategy_tag"] = "momentum"
+                    signal["strategy_tag"] = "support_resistance_rejection"
                 if (self.market_context is not None and
                         isinstance(signal.get("trade_plan"), dict) and
                         signal["trade_plan"].get("success") is True):
