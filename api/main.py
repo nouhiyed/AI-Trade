@@ -559,7 +559,7 @@ def demo_monitor_worker():
 
 if __name__ == "__main__":
     host = os.environ.get("AI_TRADER_HOST", "127.0.0.1")
-    port = int(os.environ.get("AI_TRADER_PORT", "8000"))
+    port = 8001
     print(f"AI-Trader API: http://{host}:{port}")
 
     # Bind first. If another API instance owns the port, fail before starting
