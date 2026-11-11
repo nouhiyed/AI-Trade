@@ -33,6 +33,8 @@ class TradingCoordinator(SpotDemoMixin):
         self.market_engine = MarketDataEngine()
         self.market_scanner = FuturesMarketScanner()
         self.trade_planner = TradePlanner()
+        # Injected by the API runtime; kept optional for offline/unit-test use.
+        self.market_context = None
 
         self.agents = {
             "futures": FuturesAgent(),
@@ -362,10 +364,17 @@ class TradingCoordinator(SpotDemoMixin):
                          "bullish_fvg", "bearish_fvg", "bullish_ob", "bearish_ob"):
                 if smc.get(name):
                     features[f"{tf}:{name}"] = True
-            if values.get("rsi") is not None:
+            rsi = values.get("rsi")
+            adx = values.get("adx")
+            if rsi is not None:
                 features[f"{tf}:rsi_present"] = True
-            if values.get("adx") is not None:
+                features[f"{tf}:rsi_oversold"] = float(rsi) < 30
+                features[f"{tf}:rsi_overbought"] = float(rsi) > 70
+                features[f"{tf}:rsi_midrange"] = 40 <= float(rsi) <= 60
+            if adx is not None:
                 features[f"{tf}:adx_present"] = True
+                features[f"{tf}:adx_trending"] = float(adx) >= 20
+                features[f"{tf}:adx_strong_trend"] = float(adx) >= 25
         scores = signal.get("scores") or {}
         features["ema_macd_rsi_directional_edge"] = bool(
             scores.get("LONG", scores.get("BUY", 0))
@@ -373,11 +382,20 @@ class TradingCoordinator(SpotDemoMixin):
         )
         orderbook = signal.get("orderbook") or {}
         features["orderbook_used"] = bool(orderbook.get("used"))
+        imbalance = orderbook.get("imbalance")
+        if imbalance is not None:
+            features["orderbook_buy_imbalance"] = float(imbalance) >= 0.15
+            features["orderbook_sell_imbalance"] = float(imbalance) <= -0.15
         context = signal.get("market_context") or {}
         details = context.get("details") or {}
         news = details.get("news") or {}
         features["news_present"] = bool(news.get("items"))
+        features["news_supports_direction"] = bool(
+            news.get("score") and
+            (float(news.get("score") or 0) > 0) == (str(signal.get("direction", "")).upper() == "LONG")
+        )
         features["whale_flow_present"] = bool(details.get("whales"))
+        features["strategy:" + str(signal.get("strategy_tag") or "unclassified")] = True
         return features
 
     def _on_demo_open(self, record, signal, reservation):
@@ -397,6 +415,7 @@ class TradingCoordinator(SpotDemoMixin):
                 "market_context": signal.get("market_context"),
                 "trade_plan": plan,
                 "reward_risk": plan.get("reward_risk"),
+                "strategy_tag": signal.get("strategy_tag"),
                 "features": self._learning_features(signal),
                 "timeframe": record["timeframe"],
                 "chart_timeframe": record["timeframe"],
@@ -405,7 +424,7 @@ class TradingCoordinator(SpotDemoMixin):
             domain = record.get("domain", "futures")
             key = signal.get("setup_key") or make_setup_key(
                 record["direction"], confidence,
-                context["reward_risk"], domain)
+                context["reward_risk"], domain, signal.get("strategy_tag"))
             record["setup_key"] = key
             record["confidence"] = confidence
             record["risk_amount"] = reservation.get("risk")
@@ -1100,6 +1119,27 @@ class TradingCoordinator(SpotDemoMixin):
                             preferred_timeframe=preferred_timeframe,
                         )
 
+                # Strategy tag makes the journal able to compare actual entry styles.
+                tf_details = signal.get("timeframes") or {}
+                smc_flags = [
+                    flag for values in tf_details.values()
+                    if isinstance(values, dict)
+                    for flag, active in (values.get("smc") or {}).items() if active
+                ]
+                if any("sweep" in flag for flag in smc_flags) and any("choch" in flag for flag in smc_flags):
+                    signal["strategy_tag"] = "liquidity_reversal"
+                elif any("bos" in flag for flag in smc_flags):
+                    signal["strategy_tag"] = "structure_breakout"
+                else:
+                    signal["strategy_tag"] = "momentum"
+                if self.market_context is not None and signal.get("trade_plan", {}).get("success") is True:
+                    assessment = self.market_context.assess(symbol, direction)
+                    signal["market_context"] = assessment
+                    if assessment.get("veto"):
+                        signal["trade_plan"] = {
+                            **signal["trade_plan"], "success": False,
+                            "reason": "Market/news context veto: " + str(assessment["veto"]),
+                        }
                 results[domain] = signal
                 self.last_signals[domain] = signal
 
@@ -1160,6 +1200,11 @@ class TradingCoordinator(SpotDemoMixin):
         signal = dict(signal)
         signal.setdefault("symbol", symbol)
         signal["chart_timeframe"] = timeframe
+        market_context = signal.get("market_context") or {}
+        if market_context.get("veto"):
+            reason = "News/market context veto: " + str(market_context["veto"])
+            return {**base, "success": True, "decision_status": "REJECTED",
+                    "decision_reason": reason, "reason": reason, "signal": signal}
         signal["chart_market"] = domain
         direction = str(signal.get("direction", "WAIT")).strip().upper()
         if domain == "futures":
