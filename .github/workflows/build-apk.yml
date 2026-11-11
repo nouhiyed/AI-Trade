@@ -148,6 +148,14 @@ jobs:
         working-directory: mobile
         run: flutter pub get
 
+      - name: Enforce the single backend port
+        run: |
+          if grep -RInE '127\\.0\\.0\\.1:8000|localhost:8000|AI_TRADER_PORT[^#]*8000' api mobile README.md; then
+            echo "ERROR: obsolete backend port 8000 reference found"
+            exit 1
+          fi
+          echo "Verified: backend port 8001 is the only configured local API port"
+
       - name: Build APK with retries
         working-directory: mobile
         run: |
