@@ -1,5 +1,5 @@
 __pycache__/
-*.pyc
+*.py[cod]
 .env
 .env.*
 .venv/
@@ -12,8 +12,6 @@ config/*key*
 *.log
 
 # Local trading state and credentials
-config/paper_state.json
-config/alpha_tokens.json
 config/risk_state.json
 
 # Local backups and generated APKs
