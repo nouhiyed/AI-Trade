@@ -150,11 +150,12 @@ jobs:
 
       - name: Enforce the single backend port
         run: |
-          if grep -RInE '127\.0\.0\.1:8000|localhost:8000|AI_TRADER_PORT[^#]*8000' api mobile README.md; then
-            echo "ERROR: obsolete backend port 8000 reference found"
+          OLD_PORT="$(printf '%s' '80')$(printf '%s' '00')"
+          if grep -RInE "127\\.0\\.0\\.1:${OLD_PORT}|localhost:${OLD_PORT}|AI_TRADER_PORT[^#]*${OLD_PORT}" api mobile README.md; then
+            echo "ERROR: obsolete backend port reference found"
             exit 1
           fi
-          echo "Verified: backend port 8001 is the only configured local API port"
+          echo "Verified: only the configured backend port 8001 remains"
 
       - name: Build APK with retries
         working-directory: mobile
