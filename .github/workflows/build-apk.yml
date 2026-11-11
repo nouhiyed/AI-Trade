@@ -150,7 +150,7 @@ jobs:
 
       - name: Enforce the single backend port
         run: |
-          if grep -RInE '127\\.0\\.0\\.1:8000|localhost:8000|AI_TRADER_PORT[^#]*8000' api mobile README.md; then
+          if grep -RInE '127\.0\.0\.1:8000|localhost:8000|AI_TRADER_PORT[^#]*8000' api mobile README.md; then
             echo "ERROR: obsolete backend port 8000 reference found"
             exit 1
           fi
