@@ -154,7 +154,13 @@ class FuturesAgent(BaseAgent):
                 "bullish_bos": bullish_bos,
                 "bearish_bos": bearish_bos,
                 "bullish_choch": bullish_choch,
-                "bearish_choch": bearish_choch
+                "bearish_choch": bearish_choch,
+                "bullish_sweep": self._signal(last.get("Bullish_Sweep"), "LONG"),
+                "bearish_sweep": self._signal(last.get("Bearish_Sweep"), "SHORT"),
+                "bullish_fvg": self._signal(last.get("Bullish_FVG"), "LONG"),
+                "bearish_fvg": self._signal(last.get("Bearish_FVG"), "SHORT"),
+                "bullish_ob": self._signal(last.get("Bullish_OB"), "LONG"),
+                "bearish_ob": self._signal(last.get("Bearish_OB"), "SHORT")
             }
 
             scores["LONG"] += long_score
