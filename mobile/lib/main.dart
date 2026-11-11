@@ -1495,7 +1495,7 @@ class _TradeShellState extends State<TradeShell>
                       tr('نظام متعدد الوكلاء', 'MULTI-AGENT SYSTEM'),
                       style: TextStyle(
                         color: widget.text,
-                        fontSize: 25,
+                        fontSize: 20,
                         fontWeight: FontWeight.w900,
                       ),
                     ),
@@ -1671,7 +1671,7 @@ class _TradeShellState extends State<TradeShell>
           Row(
             children: [
               _metric(tr('ربح عائم', 'UNREALIZED PNL'), apiOnline ? unrealized : '—', widget.text),
-              _metric(tr('صافي الربح المحقق بعد الرسوم', 'NET REALIZED PNL AFTER FEES'), apiOnline ? realized : '—', widget.text),
+              _metric(tr('صافي بعد الرسوم', 'NET AFTER FEES'), apiOnline ? realized : '—', widget.text),
               _metric(tr('الرسوم', 'FEES'), apiOnline ? fees : '—', widget.text),
             ],
           ),
