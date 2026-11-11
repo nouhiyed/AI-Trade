@@ -85,7 +85,7 @@ class TradingKeepAliveService : Service() {
             cd /data/data/com.termux/files/home/AI-Trader-clean || exit 7
             if ! python -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=2)' >/dev/null 2>&1; then
               if [ ! -f api/main.py ]; then
-                echo "AI-Trader repository not found in ~/AI-Trader" >&2
+                echo "AI-Trader repository not found in ~/AI-Trader-clean" >&2
                 exit 7
               fi
               mkdir -p logs
