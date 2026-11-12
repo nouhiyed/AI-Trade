@@ -30,14 +30,19 @@ STARTING_CAPITAL = 10000.0
 MAX_NOTIONAL_MULTIPLE = 1.0
 
 
-def download_history(client, market, symbol, timeframe, start_ms, end_ms, cache_dir):
+def download_history(client, market, symbol, timeframe, start_ms, end_ms, cache_dir, years):
     cache_dir.mkdir(parents=True, exist_ok=True)
-    path = cache_dir / f"{market}_{symbol}_{timeframe}_{start_ms}_{end_ms}.csv"
+    path = cache_dir / f"{market}_{symbol}_{timeframe}_{years}y.csv"
+    pages, cursor, step = [], start_ms, INTERVAL_MS[timeframe]
     if path.exists():
         cached = pd.read_csv(path, parse_dates=["open_time", "close_time"])
         if len(cached) >= 210:
-            return cached
-    pages, cursor, step = [], start_ms, INTERVAL_MS[timeframe]
+            last_open_ms = int(pd.Timestamp(cached["open_time"].iloc[-1]).timestamp() * 1000)
+            last_close_ms = int(pd.Timestamp(cached["close_time"].iloc[-1]).timestamp() * 1000)
+            if last_close_ms >= end_ms - 2 * step:
+                return cached
+            pages.append(cached)
+            cursor = max(start_ms, last_open_ms + step)
     while cursor < end_ms:
         try:
             page = client.fetch_candles(
@@ -64,6 +69,7 @@ def download_history(client, market, symbol, timeframe, start_ms, end_ms, cache_
     frame = (pd.concat(pages, ignore_index=True)
              .drop_duplicates(subset=["open_time"])
              .sort_values("open_time").reset_index(drop=True))
+    frame = frame[pd.to_datetime(frame["open_time"], utc=True) >= pd.to_datetime(start_ms, unit="ms", utc=True)].reset_index(drop=True)
     frame.to_csv(path, index=False)
     return frame
 
@@ -163,7 +169,7 @@ def run_one(client, market_engine, planner, market, symbol, years, cache_dir):
     prepared = {}
     for tf in TIMEFRAMES[market]:
         print(f"Downloading {market} {symbol} {tf}...", flush=True)
-        raw = download_history(client, market, symbol, tf, start_ms, end_ms, cache_dir)
+        raw = download_history(client, market, symbol, tf, start_ms, end_ms, cache_dir, years)
         print(f"Preparing {market} {symbol} {tf}: {len(raw)} candles", flush=True)
         prepared[tf] = market_engine._prepare_frame(raw, symbol, market, tf)
 
