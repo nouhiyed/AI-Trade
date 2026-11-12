@@ -16,11 +16,11 @@ class TestTradePlanner(unittest.TestCase):
                 low = 102.0 + i * 0.01
                 rows.append({"open": low + 0.12, "high": low + 0.30, "low": low,
                              "close": low + 0.18, "atr": atr, "support": 99.0,
-                             "resistance": 105.0})
+                             "resistance": 104.0})
             rows[80].update({"open": 100.0, "high": 100.5, "low": 99.0, "close": 100.2})
-            rows[97].update({"open": 104.0, "high": 104.6, "low": 103.7, "close": 104.3})
-            rows[98].update({"open": 104.6, "high": 105.0, "low": 103.2, "close": 104.0})
-            rows[99].update({"open": 103.9, "high": 104.0, "low": 102.8, "close": 103.0})
+            rows[97].update({"open": 103.4, "high": 103.8, "low": 103.1, "close": 103.5})
+            rows[98].update({"open": 103.6, "high": 104.0, "low": 103.2, "close": 103.3})
+            rows[99].update({"open": 103.2, "high": 103.3, "low": 102.7, "close": 102.8})
         else:
             for i in range(100):
                 low = 96.6 + i * 0.001
