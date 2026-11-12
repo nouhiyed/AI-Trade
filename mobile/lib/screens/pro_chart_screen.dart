@@ -199,7 +199,8 @@ class _ProChartScreenState extends State<ProChartScreen> {
 
       add('entry_price', 'ENTRY ${p['direction'] ?? ''}', '#4287f5');
       add('stop_loss', 'SL', '#ef5350');
-      add('take_profit', 'TP', '#26a69a');
+      add('take_profit', 'TP1', '#26a69a');
+      add('take_profit_2', 'TP2', '#00d9c2');
     }
     _controller.runJavaScript('setLevels(${jsonEncode(levels)});');
   }
