@@ -17,8 +17,13 @@ on:
     paths:
       - 'scripts/backtest.py'
       - 'scripts/plot_backtest_trades.py'
+      - '.github/workflows/backtest.yml'
 permissions:
   contents: read
+
+concurrency:
+  group: ai-trader-historical-backtest
+  cancel-in-progress: true
 
 jobs:
   backtest:
