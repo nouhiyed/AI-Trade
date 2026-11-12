@@ -404,6 +404,38 @@ class TradingCoordinator(SpotDemoMixin):
         return features
 
     @staticmethod
+    def _validate_demo_entry_price(plan, direction, market_price, min_net_rr=1.5):
+        """Reject stale fills that distort structural levels or net reward/risk."""
+        try:
+            entry = Decimal(str(plan["entry"]))
+            stop = Decimal(str(plan["stop_loss"]))
+            target = Decimal(str(plan["take_profit"]))
+            atr = Decimal(str(plan["atr"]))
+            price = Decimal(str(market_price))
+            if not all(v.is_finite() and v > 0 for v in (entry, stop, target, atr, price)):
+                return False, "Invalid plan or execution price"
+            max_drift = max(atr * Decimal("0.10"), entry * Decimal("0.0002"))
+            if abs(price - entry) > max_drift:
+                return False, "Entry moved more than 0.10 ATR after confirmation; wait for a new setup"
+            if str(direction).upper() == "SHORT":
+                if not target < price < stop:
+                    return False, "Live price invalidated the SHORT structure"
+                risk, reward = stop - price, price - target
+            else:
+                if not stop < price < target:
+                    return False, "Live price invalidated the LONG structure"
+                risk, reward = price - stop, target - price
+            cost = Decimal("0.003")
+            net_reward = reward / price - cost
+            net_risk = risk / price + cost
+            net_rr = net_reward / net_risk if net_risk > 0 else Decimal("0")
+            if net_reward <= 0 or net_rr < Decimal(str(min_net_rr)):
+                return False, "Actual execution price reduces net reward/risk below 1.5 after fees and slippage"
+            return True, ""
+        except (KeyError, TypeError, ValueError, ArithmeticError):
+            return False, "Could not validate actual execution against the structural plan"
+
+    @staticmethod
     def _entry_chart_metadata(signal, opened_at_ms):
         """Persist the exact chart candle containing the actual execution time."""
         signal = signal if isinstance(signal, dict) else {}
@@ -945,13 +977,12 @@ class TradingCoordinator(SpotDemoMixin):
             self.risk.update_reservation_status(trade_id, "DEMO_PENDING")
 
             market_price = self._demo_market_price(symbol)
-            if abs(market_price - entry) / entry > Decimal("0.01"):
+            valid_entry, entry_reason = self._validate_demo_entry_price(
+                plan, direction, market_price, min_net_rr=1.5
+            )
+            if not valid_entry:
                 self.risk.release_reservation(trade_id)
-                return {
-                    "approved": False,
-                    "mode": "DEMO",
-                    "reason": "Market price moved more than 1% from the approved plan entry",
-                }
+                return {"approved": False, "mode": "DEMO", "reason": entry_reason}
             if direction == "LONG" and not stop < market_price < target:
                 self.risk.release_reservation(trade_id)
                 return {
