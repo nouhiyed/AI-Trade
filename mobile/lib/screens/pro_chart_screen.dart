@@ -162,6 +162,7 @@ class _ProChartScreenState extends State<ProChartScreen> {
           });
         }
         _pushLevels();
+        _pushTradeMarkers();
       }
     } catch (e) {
       if (mounted) {
@@ -192,6 +193,37 @@ class _ProChartScreenState extends State<ProChartScreen> {
       add('take_profit', 'TP', '#26a69a');
     }
     _controller.runJavaScript('setLevels(${jsonEncode(levels)});');
+  }
+
+  void _pushTradeMarkers() {
+    if (!_pageReady) return;
+    final markers = <Map<String, dynamic>>[];
+    final intervalSeconds = <String, int>{
+      '1m': 60, '5m': 300, '15m': 900, '1h': 3600, '4h': 14400,
+    }[_interval] ?? 300;
+    for (final p in widget.positions) {
+      if ('${p['symbol']}'.toUpperCase() != _symbol.toUpperCase()) continue;
+      final openedAtMs = int.tryParse('${p['opened_at_ms'] ?? p['entry_candle_time_ms'] ?? ''}');
+      final storedCandleTime = int.tryParse('${p['entry_candle_time'] ?? ''}');
+      final rawSeconds = openedAtMs != null
+          ? openedAtMs ~/ 1000
+          : storedCandleTime;
+      if (rawSeconds == null || rawSeconds <= 0) continue;
+      final candleTime = (rawSeconds ~/ intervalSeconds) * intervalSeconds;
+      final direction = '${p['direction'] ?? ''}'.toUpperCase();
+      final isShort = direction == 'SHORT';
+      final origin = '${p['entry_origin'] ?? 'AGENT'}'.toUpperCase();
+      final isAuto = origin == 'AUTOPILOT';
+      final timeframe = '${p['entry_timeframe'] ?? p['timeframe'] ?? _interval}';
+      markers.add({
+        'time': candleTime,
+        'position': isShort ? 'aboveBar' : 'belowBar',
+        'color': isShort ? '#ef5350' : '#26a69a',
+        'shape': isShort ? 'arrowDown' : 'arrowUp',
+        'text': '${isAuto ? 'AUTO' : 'ENTRY'} ${direction} · ${timeframe}',
+      });
+    }
+    _controller.runJavaScript('setTradeMarkers(${jsonEncode(markers)});');
   }
 
   Future<void> _chartZoom(double factor) async {
@@ -887,6 +919,7 @@ volume.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
 var data = [];
 var extra = [];       // indicator series currently on the chart
 var lines = [];       // trade price lines
+var tradeMarkers = null;
 var flags = { volume: true, ema: true, bb: false, vwap: false, rsi: false, macd: false };
 var lastLevels = [];
 
@@ -1033,6 +1066,14 @@ function resetChartView() {
   candle.priceScale().applyOptions({ autoScale: true });
 }
 function setIndicators(f) { flags = f; drawIndicators(); }
+function setTradeMarkers(markers) {
+  try {
+    if (tradeMarkers) tradeMarkers.setMarkers([]);
+    tradeMarkers = LW.createSeriesMarkers(candle, markers || []);
+  } catch (e) {
+    console.log('Trade marker rendering unavailable', e);
+  }
+}
 function setLevels(levels) {
   for (var i = 0; i < lines.length; i++) { try { candle.removePriceLine(lines[i]); } catch (e) {} }
   lines = [];
