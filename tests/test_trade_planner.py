@@ -67,14 +67,14 @@ class TestTradePlanner(unittest.TestCase):
 
     def test_rejects_target_that_does_not_cover_costs(self):
         frame = self.frame()
-        frame["support"] = 103.2
+        frame["support"] = 102.9
         frame.loc[:, "low"] = 103.2
         frame.loc[:, "high"] = 103.4
         frame.loc[:, "open"] = 103.3
         frame.loc[:, "close"] = 103.35
         frame.loc[95, ["open", "high", "low", "close"]] = [103.5, 105.0, 103.3, 104.0]
-        frame.loc[98, ["open", "high", "low", "close"]] = [104.0, 105.0, 103.3, 104.5]
-        frame.loc[99, ["open", "high", "low", "close"]] = [103.8, 104.9, 103.2, 103.6]
+        frame.loc[98, ["open", "high", "low", "close"]] = [104.5, 105.0, 103.3, 104.0]
+        frame.loc[99, ["open", "high", "low", "close"]] = [103.8, 103.9, 103.2, 103.25]
         plan = self.planner.create({"symbol": "ZECUSDT", "5m": frame}, "SHORT")
         self.assertFalse(plan["success"])
         self.assertTrue("fees" in plan["reason"].lower() or "reward/risk" in plan["reason"].lower())
