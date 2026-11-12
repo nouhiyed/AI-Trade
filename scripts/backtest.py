@@ -25,7 +25,7 @@ from core.binance_market_data import BinanceMarketData
 from core.market_data_engine import MarketDataEngine
 from core.trade_planner import TradePlanner
 
-SYMBOLS = ("BTCUSDT", "ETHUSDT", "BNBUSDT")
+SYMBOLS = ("BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT", "DOGEUSDT", "LINKUSDT")
 TIMEFRAMES = {
     "futures": ("1m", "5m", "15m", "1h"),
     "spot": ("5m", "15m", "1h", "4h"),
