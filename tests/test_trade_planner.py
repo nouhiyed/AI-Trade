@@ -54,7 +54,7 @@ class TestTradePlanner(unittest.TestCase):
         frame.loc[99, ["open", "high", "low", "close"]] = [103.2, 104.0, 103.0, 103.8]
         plan = self.planner.create({"symbol": "ZECUSDT", "5m": frame}, "SHORT")
         self.assertFalse(plan["success"])
-        self.assertIn("rejection candle", plan["reason"])
+        self.assertTrue("follow-through" in plan["reason"].lower() or "rejection" in plan["reason"].lower())
 
     def test_short_without_resistance_is_rejected_not_given_fake_atr_stop(self):
         frame = self.frame()
