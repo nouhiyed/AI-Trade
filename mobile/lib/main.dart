@@ -1991,6 +1991,9 @@ class _TradeShellState extends State<TradeShell>
             final target2 = position['take_profit_2']?.toString();
             final runnerPct = (100 - (double.tryParse('${position['tp1_close_pct']}') ?? 70))
                 .toStringAsFixed(0);
+            final confirmation = '${position['entry_confirmation'] ?? ''}'.trim();
+            final structureSupport = position['structure_support']?.toString();
+            final structureResistance = position['structure_resistance']?.toString();
             final isClosing = closingPositionIds.contains(id);
             final isShort = direction == 'SHORT';
 
@@ -2029,6 +2032,23 @@ class _TradeShellState extends State<TradeShell>
                     ),
                     const SizedBox(height: 12),
                     _positionLiveChart(position),
+                    if (confirmation.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        '${tr('تأكيد الدخول', 'ENTRY CONFIRMATION')}: $confirmation',
+                        style: TextStyle(color: widget.muted, fontSize: 10, height: 1.35),
+                      ),
+                    ],
+                    if ((structureSupport != null && structureSupport.isNotEmpty) ||
+                        (structureResistance != null && structureResistance.isNotEmpty)) ...[
+                      const SizedBox(height: 8),
+                      Row(children: [
+                        if (structureSupport != null && structureSupport.isNotEmpty)
+                          Expanded(child: _metric(tr('الدعم الهيكلي', 'STRUCTURAL SUPPORT'), structureSupport, green)),
+                        if (structureResistance != null && structureResistance.isNotEmpty)
+                          Expanded(child: _metric(tr('المقاومة الهيكلية', 'STRUCTURAL RESISTANCE'), structureResistance, red)),
+                      ]),
+                    ],
                     const SizedBox(height: 12),
                     Row(
                       children: [
