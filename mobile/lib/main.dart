@@ -737,10 +737,20 @@ class _TradeShellState extends State<TradeShell>
 
   Widget _marketPanel(String market, String title, Color accent) {
     final raw = demoData['open_positions'];
-    final positions = raw is List
+    final openPositions = raw is List
         ? raw.whereType<Map>()
             .map((item) => Map<String, dynamic>.from(item)).toList()
         : <Map<String, dynamic>>[];
+    final closedRaw = demoData['closed_positions'];
+    final closedPositions = closedRaw is List
+        ? closedRaw.whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item)).toList()
+        : <Map<String, dynamic>>[];
+    final positions = <Map<String, dynamic>>[
+      ...openPositions,
+      ...closedPositions,
+    ].where((p) => '${p['domain'] ?? market}'.toLowerCase() == market)
+      .toList();
 
     return _panel(
       child: Column(
