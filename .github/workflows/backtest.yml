@@ -13,15 +13,9 @@ on:
           - "3"
         default: "1"
 
-  workflow_run:
-    workflows:
-      - AI-Trader Backend Tests
-    types:
-      - completed
   push:
     paths:
       - 'scripts/backtest.py'
-      - '.github/workflows/backtest.yml'
 permissions:
   contents: read
 
