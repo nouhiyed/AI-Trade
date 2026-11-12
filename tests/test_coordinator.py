@@ -276,8 +276,8 @@ class TestTradingCoordinator(unittest.TestCase):
         opened_ids = []
 
         for symbol, entry, stop, target, atr in (
-            ("BTCUSDT", 100, 99, 102, 0.5),
-            ("ETHUSDT", 200, 198, 204, 1.0),
+            ("BTCUSDT", 100, 99, 103, 0.5),
+            ("ETHUSDT", 200, 198, 206, 1.0),
         ):
             signal = {
                 "symbol": symbol,
@@ -331,8 +331,8 @@ class TestTradingCoordinator(unittest.TestCase):
             "setup_key": "manual-close-monitor-priority",
             "trade_plan": {
                 "success": True, "direction": "LONG",
-                "entry": 100, "stop_loss": 99, "take_profit": 102,
-                "atr": 0.5, "reward_risk": 2.0, "timeframe": "5m",
+                "entry": 100, "stop_loss": 99, "take_profit": 103,
+                "atr": 0.5, "reward_risk": 3.0, "timeframe": "5m",
             },
         }
         self.system._demo_market_price = (
