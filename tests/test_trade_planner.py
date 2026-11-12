@@ -77,7 +77,7 @@ class TestTradePlanner(unittest.TestCase):
         frame = self.frame()
         frame["support"] = 102.9
         frame["resistance"] = 105.0
-        frame.loc[:, "low"] = 103.2
+        frame.loc[:, "low"] = 103.6
         frame.loc[:, "high"] = 103.4
         frame.loc[:, "open"] = 103.3
         frame.loc[:, "close"] = 103.35
