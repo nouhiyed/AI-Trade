@@ -1,0 +1,56 @@
+name: AI-Trader Historical Backtest
+
+on:
+  workflow_dispatch:
+    inputs:
+      years:
+        description: Historical period
+        required: true
+        type: choice
+        options:
+          - "1"
+          - "2"
+          - "3"
+        default: "1"
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Compile backend and backtest
+        run: python -m compileall -q agents core scripts
+
+      - name: Run BTC, ETH and BNB historical tests
+        run: |
+          python scripts/backtest.py \
+            --years "${{ inputs.years }}" \
+            --symbols BTCUSDT ETHUSDT BNBUSDT \
+            --output backtest_results
+
+      - name: Upload historical report
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Trader-Backtest-${{ inputs.years }}-year
+          path: |
+            backtest_results/summary.json
+            backtest_results/trades.csv
+          if-no-files-found: error
