@@ -821,11 +821,16 @@ class TradingCoordinator(SpotDemoMixin):
                         if partial_tp1 and result["status"] != "CLOSED":
                             current["tp1_done"] = True
                             entry_price = Decimal(str(current["entry_price"]))
-                            cost_buffer = Decimal("0.003")
+                            # Move the stop beyond entry only far enough to
+                            # cover this market's estimated round-trip fees/slippage.
+                            cost_buffer = Decimal("2") * (
+                                self.demo_execution.futures_fee_rate
+                                + self.demo_execution.futures_slippage_rate
+                            )
                             current["stop_loss"] = str(
-                                entry_price * (Decimal("1") + cost_buffer)
+                                entry_price * (Decimal("1") - cost_buffer)
                                 if direction == "SHORT"
-                                else entry_price * (Decimal("1") - cost_buffer)
+                                else entry_price * (Decimal("1") + cost_buffer)
                             )
                             current["take_profit"] = str(current["take_profit_2"])
                             current["tp1_closed_quantity"] = str(result["closed_quantity"])
