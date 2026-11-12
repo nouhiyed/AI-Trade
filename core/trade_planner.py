@@ -172,8 +172,9 @@ class TradePlanner:
         except (TypeError, ValueError):
             return {"success": False, "reason": "Invalid cost or reward/risk settings"}
         if (not all(isfinite(v) and v >= 0 for v in (min_reward_risk, fee, slip))
-                or min_reward_risk <= 0):
-            return {"success": False, "reason": "Invalid cost or reward/risk settings"}
+                or min_reward_risk < self.MIN_REWARD_RISK):
+            return {"success": False,
+                    "reason": "Minimum net reward/risk cannot be lower than 1.5 after costs"}
 
         preferred = str(preferred_timeframe or "").strip().lower()
         order = ((preferred,) if preferred and preferred in agent_data else ()) + tuple(
