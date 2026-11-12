@@ -505,7 +505,7 @@ class APIHandler(BaseHTTPRequestHandler):
 
             if path == "/demo/open":
                 domain = str(data.get("domain", "futures")).lower()
-                if domain == "spot"
+                if domain == "spot":
                     result = coordinator.request_demo_spot_trade(
                         symbol=data["symbol"], domain=domain,
                         risk_pct=data.get("risk_pct", 0.5))
