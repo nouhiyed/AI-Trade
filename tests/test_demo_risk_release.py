@@ -32,7 +32,7 @@ class TestDemoRiskRelease(unittest.TestCase):
         self.c.last_signals["futures"] = {
             "symbol": "BTCUSDT", "direction": "LONG",
             "trade_plan": {"success": True, "direction": "LONG",
-                           "entry": 100, "stop_loss": 99, "take_profit": 102},
+                           "entry": 100, "stop_loss": 99, "take_profit": 103, "atr": 0.5},
         }
 
     def test_repeated_trades_release_risk_and_match_ledger(self):
