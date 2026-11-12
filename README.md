@@ -28,6 +28,17 @@ python -m api.main                               # الخادم على 127.0.0.1
 ## Endpoints جديدة
 `GET /performance /journal /learning /autopilot` · `POST /autopilot /autopilot/run /learning/enable /scan/spot` · `POST /demo/open` يقبل `"domain": "futures|spot"`
 
+## الاختبار التاريخي للاستراتيجية
+
+من GitHub افتح **Actions → AI-Trader Historical Backtest → Run workflow**، واختر سنة أو سنتين أو ثلاث سنوات. سيختبر BTCUSDT وETHUSDT وBNBUSDT في Spot وFutures باستخدام الوكلاء وTrade Planner الفعليين، ويدرج التقرير والصفقات في Artifact قابل للتنزيل باسم `AI-Trader-Backtest`.
+
+التكاليف المفترضة لكل جهة: Spot taker ‏0.10%، Futures taker ‏0.05%، وانزلاق 0.05% لكل جهة في السوقين. الاختبار لا يتضمن حالياً تاريخ Order Book أو مدفوعات Futures Funding، ويستخدم دخولاً عند افتتاح شمعة 5m التالية بعد تأكيد الإشارة على شمعة مغلقة. لذلك تُقرأ نتائجه كتقييم تاريخي محافظ، لا ضماناً للأداء المستقبلي.
+
+التشغيل المحلي (بعد توفر بيانات الإنترنت):
+```bash
+python scripts/backtest.py --years 1 --symbols BTCUSDT ETHUSDT BNBUSDT
+```
+
 ## الاختبارات
 ```bash
 python -m unittest discover -s tests -t . -v
