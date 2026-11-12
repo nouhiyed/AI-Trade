@@ -194,6 +194,7 @@ class SpotDemoMixin:
                 market_type="SPOT", side="BUY", quantity=quantity,
                 market_price=price)
 
+            opened_at_ms = int(time.time() * 1000)
             record = {
                 "position_id": trade_id, "trade_id": trade_id,
                 "domain": domain, "symbol": symbol,
@@ -207,7 +208,8 @@ class SpotDemoMixin:
                 "status": "DEMO_OPEN",
                 "execution_source": "INTERNAL_DEMO",
                 "protection_verified": False,
-                "opened_at_ms": int(time.time() * 1000),
+                "opened_at_ms": opened_at_ms,
+                **self._entry_chart_metadata(signal, opened_at_ms),
                 "last_checked_ms": int(time.time() * 1000),
                 "leverage": "1",
             }
