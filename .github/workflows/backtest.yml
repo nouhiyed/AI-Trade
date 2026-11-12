@@ -11,7 +11,7 @@ on:
           - "1"
           - "2"
           - "3"
-        default: "1"
+        default: "2"
 
   push:
     paths:
@@ -47,11 +47,11 @@ jobs:
       - name: Compile backend and backtest
         run: python -m compileall -q agents core scripts
 
-      - name: Run BTC, ETH and BNB historical tests
+      - name: Run eight-asset two-year historical tests
         run: |
           python scripts/backtest.py \
-            --years "${{ inputs.years || '1' }}" \
-            --symbols BTCUSDT ETHUSDT BNBUSDT \
+            --years "${{ inputs.years || '2' }}" \
+            --symbols BTCUSDT ETHUSDT BNBUSDT SOLUSDT XRPUSDT ADAUSDT DOGEUSDT LINKUSDT \
             --output backtest_results
 
       - name: Render one chart for every completed trade
@@ -65,7 +65,7 @@ jobs:
       - name: Upload historical report and trade charts
         uses: actions/upload-artifact@v4
         with:
-          name: AI-Trader-Backtest-${{ inputs.years || '1' }}-year
+          name: AI-Trader-Backtest-${{ inputs.years || '2' }}-year
           path: |
             backtest_results/summary.json
             backtest_results/trades.csv
