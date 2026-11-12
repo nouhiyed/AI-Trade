@@ -151,7 +151,7 @@ class TestAutopilotMarkets(Base):
                     "domain": domain}
         fut = {"symbol": "BTCUSDT", "direction": "LONG", "confidence": 80,
                "trade_plan": {"success": True, "direction": "LONG", "entry": 100,
-                              "stop_loss": 99, "take_profit": 102, "reward_risk": 2.0}}
+                              "stop_loss": 99, "take_profit": 103, "atr": 1.0, "reward_risk": 3.0}}
         self.c.scan_futures = lambda limit=12, **k: {
             "success": True, "scanned": 1, "actionable": 1,
             "opportunities": [{**opp("futures", "BTCUSDT", fut)}]}
