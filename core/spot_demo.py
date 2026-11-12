@@ -169,8 +169,11 @@ class SpotDemoMixin:
                 raise ValueError("Invalid LONG trade plan levels")
 
             price = self._spot_like_price(domain, symbol, "BUY")
-            if abs(price - entry) / entry > MAX_ENTRY_DEVIATION:
-                return {"approved": False, "reason": "Price moved away from the plan entry"}
+            valid_entry, entry_reason = self._validate_demo_entry_price(
+                plan, "LONG", price, min_net_rr=1.5
+            )
+            if not valid_entry:
+                return {"approved": False, "reason": entry_reason}
             if not stop < price < target:
                 return {"approved": False, "reason": "Price is outside the plan range"}
 
