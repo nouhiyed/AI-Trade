@@ -13,16 +13,24 @@ on:
           - "3"
         default: "1"
 
-permissions:
+  workflow_run:
+    workflows:
+      - AI-Trader Backend Tests
+    types:
+      - completed
+\npermissions:
   contents: read
 
 jobs:
   backtest:
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Setup Python
         uses: actions/setup-python@v5
