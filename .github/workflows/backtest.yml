@@ -60,7 +60,7 @@ jobs:
             --trades backtest_results/trades.csv \
             --cache data/backtest_cache \
             --output backtest_results/trade_charts \
-            --years "${{ inputs.years || '1' }}"
+            --years "${{ inputs.years || '2' }}"
 
       - name: Upload historical report and trade charts
         uses: actions/upload-artifact@v4
