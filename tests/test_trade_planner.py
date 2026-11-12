@@ -82,6 +82,7 @@ class TestTradePlanner(unittest.TestCase):
         frame.loc[:, "open"] = 103.3
         frame.loc[:, "close"] = 103.35
         frame.loc[95, ["open", "high", "low", "close"]] = [103.5, 105.0, 103.3, 104.0]
+        frame.loc[97, ["open", "high", "low", "close"]] = [103.5, 103.6, 103.4, 103.5]
         frame.loc[98, ["open", "high", "low", "close"]] = [104.5, 105.0, 103.4, 104.0]
         frame.loc[99, ["open", "high", "low", "close"]] = [103.8, 103.9, 103.2, 103.25]
         plan = self.planner.create({"symbol": "ZECUSDT", "5m": frame}, "SHORT")
