@@ -9,15 +9,11 @@ concurrency:
 on:
   workflow_dispatch:
   pull_request:
+    paths:
+      - 'mobile/**'
   push:
     paths:
       - 'mobile/**'
-      - 'api/**'
-      - 'core/**'
-      - 'agents/**'
-      - 'tests/**'
-      - 'requirements*.txt'
-      - '.github/workflows/build-apk.yml'
 
 permissions:
   contents: read
