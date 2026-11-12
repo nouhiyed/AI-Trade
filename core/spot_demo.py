@@ -170,7 +170,7 @@ class SpotDemoMixin:
 
             price = self._spot_like_price(domain, symbol, "BUY")
             valid_entry, entry_reason = self._validate_demo_entry_price(
-                plan, "LONG", price, min_net_rr=1.5
+                plan, "LONG", price, min_net_rr=1.5, market="spot"
             )
             if not valid_entry:
                 return {"approved": False, "reason": entry_reason}
