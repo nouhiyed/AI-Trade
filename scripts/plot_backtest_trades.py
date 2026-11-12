@@ -123,7 +123,8 @@ def main() -> None:
     output.mkdir(parents=True, exist_ok=True)
     trades = pd.read_csv(trades_path)
     if trades.empty:
-        raise RuntimeError("Backtest produced no trades; refusing to create an empty chart package.")
+        print("Backtest produced zero trades; no trade charts are applicable.", flush=True)
+        return
 
     chart_files = []
     candle_cache: dict[tuple[str, str], pd.DataFrame] = {}
