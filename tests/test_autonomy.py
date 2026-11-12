@@ -33,7 +33,7 @@ class Feed:
         return pd.DataFrame(rows)
 
 
-def plan(symbol, direction="LONG", entry=100, stop=99, target=102):
+def plan(symbol, direction="LONG", entry=100, stop=99, target=103):
     return {"symbol": symbol, "direction": direction, "confidence": 80,
             "trade_plan": {"success": True, "direction": direction, "entry": entry,
                            "stop_loss": stop, "take_profit": target, "reward_risk": 2.0, "atr": 0.5}}
@@ -105,7 +105,7 @@ class TestOutageCatchUp(Base):
     def test_target_touched_during_outage(self):
         a = self.open("BTCUSDT")
         self.c.demo_positions[a["position_id"]]["last_checked_ms"] = int((time.time() - 600) * 1000)
-        self.feed.candles = [(4, 102.5, 100.1)]
+        self.feed.candles = [(4, 103.5, 100.1)]
         events = self.c.monitor_demo_positions()["events"]
         self.assertEqual(events[0]["reason"], "TAKE_PROFIT")
 
@@ -118,15 +118,21 @@ class TestOutageCatchUp(Base):
 
 class TestAutopilot(Base):
     def _scan(self, symbols):
+        fresh_by_symbol = {}
         def scan_futures(limit=12, **_):
             opps = []
             for s, conf in symbols:
                 p = plan(s)
+                p["confidence"] = conf
+                fresh_by_symbol[s] = p
                 opps.append({"symbol": s, "direction": "LONG", "confidence": conf,
                              "trade_plan": p["trade_plan"], "signal": p})
             return {"success": True, "scanned": len(opps), "actionable": len(opps),
                     "opportunities": opps}
         self.c.scan_futures = scan_futures
+        self.c.analyze_live = lambda symbol, domains=None: {
+            "signals": {domain: fresh_by_symbol[symbol] for domain in domains}
+        }
 
     def test_off_by_default(self):
         ap = Autopilot(self.c, config_path="config/ap.json")
