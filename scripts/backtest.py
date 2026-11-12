@@ -1,12 +1,16 @@
 """Causal historical backtest using the production Futures/Spot agents and TradePlanner."""
 from __future__ import annotations
 import argparse
+import io
 import json
 import math
-import time
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
 import sys
+import time
+import zipfile
+from datetime import datetime, timezone
+from pathlib import Path
+
+import requests
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -35,46 +39,84 @@ STARTING_CAPITAL = 10000.0
 MAX_NOTIONAL_MULTIPLE = 1.0
 
 
-def download_history(client, market, symbol, timeframe, start_ms, end_ms, cache_dir, years):
+def _month_starts(start_dt, end_dt):
+    current = start_dt.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    while current < end_dt:
+        yield current
+        month = current.month + 1
+        year = current.year + (1 if month == 13 else 0)
+        current = current.replace(year=year, month=1 if month == 13 else month)
+
+
+def _read_binance_archive(payload, symbol, timeframe):
+    with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+        csv_names = [name for name in archive.namelist() if name.lower().endswith(".csv")]
+        if not csv_names:
+            raise RuntimeError(f"Binance archive has no CSV: {symbol} {timeframe}")
+        frame = pd.read_csv(
+            io.BytesIO(archive.read(csv_names[0])),
+            header=None, names=BinanceMarketData.CANDLE_COLUMNS,
+        )
+    numeric = [
+        "open_time", "close_time", "open", "high", "low", "close",
+        "volume", "quote_volume", "trades", "taker_buy_base",
+        "taker_buy_quote",
+    ]
+    for column in numeric:
+        frame[column] = pd.to_numeric(frame[column], errors="coerce")
+    frame = frame.dropna(subset=["open_time", "close_time", "open", "high", "low", "close", "volume"])
+    # Binance Vision archives use microsecond timestamps for newer data sets.
+    if not frame.empty and float(frame["open_time"].median()) > 1e14:
+        frame["open_time"] = frame["open_time"] / 1000.0
+        frame["close_time"] = frame["close_time"] / 1000.0
+    frame["open_time"] = pd.to_datetime(frame["open_time"], unit="ms", utc=True)
+    frame["close_time"] = pd.to_datetime(frame["close_time"], unit="ms", utc=True)
+    frame["is_closed"] = True
+    frame.attrs.update({"symbol": symbol, "interval": timeframe, "source": "binance_vision"})
+    return frame
+
+
+def download_history(market, symbol, timeframe, start_dt, end_dt, cache_dir, years):
     cache_dir.mkdir(parents=True, exist_ok=True)
     path = cache_dir / f"{market}_{symbol}_{timeframe}_{years}y.csv"
-    pages, cursor, step = [], start_ms, INTERVAL_MS[timeframe]
+    start_ms = int(start_dt.timestamp() * 1000)
+    end_ms = int(end_dt.timestamp() * 1000)
+    step = INTERVAL_MS[timeframe]
     if path.exists():
         cached = pd.read_csv(path, parse_dates=["open_time", "close_time"])
         if len(cached) >= 210:
-            last_open_ms = int(pd.Timestamp(cached["open_time"].iloc[-1]).timestamp() * 1000)
-            last_close_ms = int(pd.Timestamp(cached["close_time"].iloc[-1]).timestamp() * 1000)
-            if last_close_ms >= end_ms - 2 * step:
-                return cached
-            pages.append(cached)
-            cursor = max(start_ms, last_open_ms + step)
-    while cursor < end_ms:
-        try:
-            page = client.fetch_candles(
-                market, symbol, interval=timeframe, limit=1000,
-                closed_only=True, start_time=cursor, end_time=end_ms,
-            )
-        except RuntimeError as error:
-            if "Not enough closed candles" in str(error):
-                break
-            raise
-        if page.empty:
-            break
-        pages.append(page)
-        last_ms = int(pd.Timestamp(page["open_time"].iloc[-1]).timestamp() * 1000)
-        next_cursor = last_ms + step
-        if next_cursor <= cursor:
-            raise RuntimeError(f"Binance pagination stalled: {market} {symbol} {timeframe}")
-        cursor = next_cursor
-        if len(page) < 1000:
-            break
-        time.sleep(0.05)
+            cached_start = pd.Timestamp(cached["open_time"].iloc[0]).timestamp() * 1000
+            cached_end = pd.Timestamp(cached["close_time"].iloc[-1]).timestamp() * 1000
+            if cached_start <= start_ms + step and cached_end >= end_ms - 2 * step:
+                return cached[
+                    (pd.to_datetime(cached["open_time"], utc=True) >= start_dt)
+                    & (pd.to_datetime(cached["open_time"], utc=True) < end_dt)
+                ].reset_index(drop=True)
+
+    market_path = "spot" if market == "spot" else "futures/um"
+    pages = []
+    for month_start in _month_starts(start_dt, end_dt):
+        month = month_start.strftime("%Y-%m")
+        filename = f"{symbol}-{timeframe}-{month}.zip"
+        url = f"https://data.binance.vision/data/{market_path}/monthly/klines/{symbol}/{timeframe}/{filename}"
+        response = requests.get(url, timeout=60, headers={"User-Agent": "AI-Trader-Backtest/1.0"})
+        if response.status_code == 404:
+            raise RuntimeError(f"Missing Binance historical archive: {market} {symbol} {timeframe} {month}")
+        response.raise_for_status()
+        pages.append(_read_binance_archive(response.content, symbol, timeframe))
+        print(f"Downloaded {market} {symbol} {timeframe} {month}", flush=True)
+
     if not pages:
-        raise RuntimeError(f"No historical candles: {market} {symbol} {timeframe}")
+        raise RuntimeError(f"No Binance archive data: {market} {symbol} {timeframe}")
     frame = (pd.concat(pages, ignore_index=True)
              .drop_duplicates(subset=["open_time"])
              .sort_values("open_time").reset_index(drop=True))
-    frame = frame[pd.to_datetime(frame["open_time"], utc=True) >= pd.to_datetime(start_ms, unit="ms", utc=True)].reset_index(drop=True)
+    frame = frame[
+        (pd.to_datetime(frame["open_time"], utc=True) >= start_dt)
+        & (pd.to_datetime(frame["open_time"], utc=True) < end_dt)
+    ].reset_index(drop=True)
+    if len(frame) < 210:
+        raise RuntimeError(f"Insufficient Binance archive candles: {market} {symbol} {timeframe} ({len(frame)})")
     frame.to_csv(path, index=False)
     return frame
 
@@ -168,13 +210,14 @@ def _metrics(trades, equity, max_drawdown, market, symbol, start, end):
 
 
 def run_one(client, market_engine, planner, market, symbol, years, cache_dir):
-    end_dt = datetime.now(timezone.utc)
-    start_dt = end_dt - timedelta(days=365 * years)
-    start_ms, end_ms = int(start_dt.timestamp() * 1000), int(end_dt.timestamp() * 1000)
+    now = datetime.now(timezone.utc)
+    end_dt = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    month_index = end_dt.year * 12 + end_dt.month - 1 - years * 12
+    start_dt = datetime(month_index // 12, month_index % 12 + 1, 1, tzinfo=timezone.utc)
     prepared = {}
     for tf in TIMEFRAMES[market]:
         print(f"Downloading {market} {symbol} {tf}...", flush=True)
-        raw = download_history(client, market, symbol, tf, start_ms, end_ms, cache_dir, years)
+        raw = download_history(market, symbol, tf, start_dt, end_dt, cache_dir, years)
         print(f"Preparing {market} {symbol} {tf}: {len(raw)} candles", flush=True)
         prepared[tf] = market_engine._prepare_frame(raw, symbol, market, tf)
 
@@ -321,12 +364,12 @@ def main():
 
     output = Path(args.output)
     output.mkdir(parents=True, exist_ok=True)
-    client, market_engine, planner = BinanceMarketData(timeout=12), MarketDataEngine(), TradePlanner()
+    market_engine, planner = MarketDataEngine(), TradePlanner()
     summaries, all_trades = [], []
     for market in ("futures", "spot"):
         for symbol in args.symbols:
             print(f"\n===== {market.upper()} {symbol} =====", flush=True)
-            metrics, trades = run_one(client, market_engine, planner, market, symbol, args.years, Path(args.cache))
+            metrics, trades = run_one(None, market_engine, planner, market, symbol, args.years, Path(args.cache))
             summaries.append(metrics)
             all_trades.extend(trades)
             print(json.dumps(metrics, ensure_ascii=False, indent=2), flush=True)
