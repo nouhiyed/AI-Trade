@@ -183,6 +183,16 @@ class Autopilot:
                     result["skipped"].append({
                         "domain": domain, "symbol": symbol, "reason": str(reason)})
 
+                if not symbol:
+                    skip("Missing symbol")
+                    continue
+                if symbol in open_symbols:
+                    skip("Already open")
+                    continue
+                if self._cooldown.get(symbol, 0) > self.clock():
+                    skip("Cooldown after a recent trade")
+                    continue
+
                 # Rebuild analysis from fresh, closed Binance candles immediately
                 # before execution. Scanner opportunities may be stale by the time
                 # the autopilot reaches them.
@@ -208,15 +218,6 @@ class Autopilot:
                     skip("Fresh confidence below minimum")
                     continue
 
-                if not symbol:
-                    skip("Missing symbol")
-                    continue
-                if symbol in open_symbols:
-                    skip("Already open")
-                    continue
-                if self._cooldown.get(symbol, 0) > self.clock():
-                    skip("Cooldown after a recent trade")
-                    continue
                 if confidence < float(cfg["min_confidence"]):
                     skip("Confidence below minimum")
                     continue
