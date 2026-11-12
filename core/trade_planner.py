@@ -89,38 +89,76 @@ class TradePlanner:
 
     @classmethod
     def _confirmed_rejection(cls, frame, direction, level, atr):
-        """Require a closed rejection candle at the relevant zone, not a raw indicator vote."""
-        if frame is None or len(frame) < 3 or level is None or atr is None:
-            return False, "Not enough closed candles to confirm a structure rejection"
+        """Require a structure touch, a rejection candle, then a separate follow-through close."""
+        if frame is None or len(frame) < 4 or level is None or atr is None:
+            return False, "Not enough closed candles for rejection plus follow-through"
         cols = cls._columns(frame)
         required = ("open", "high", "low", "close")
         if any(name not in cols for name in required):
             return False, "OHLC candle data is missing"
         try:
-            previous = {name: float(frame[cols[name]].iloc[-2]) for name in required}
-            candle = {name: float(frame[cols[name]].iloc[-1]) for name in required}
+            candles = [
+                {name: float(frame[cols[name]].iloc[i]) for name in required}
+                for i in (-3, -2, -1)
+            ]
         except (TypeError, ValueError, IndexError):
-            return False, "Invalid OHLC confirmation candle"
-        body = abs(candle["close"] - candle["open"])
-        span = max(candle["high"] - candle["low"], 1e-12)
-        near = cls.ENTRY_ZONE_ATR * atr
+            return False, "Invalid OHLC confirmation candles"
+        approach, rejection, confirm = candles
+        near = max(cls.ENTRY_ZONE_ATR * atr, level * 0.00015)
+        breakout_buffer = max(0.10 * atr, level * 0.0001)
+
         if direction == "SHORT":
-            touched = min(abs(previous["high"]-level), abs(candle["high"]-level)) <= near
-            upper_wick = candle["high"] - max(candle["open"], candle["close"])
-            rejected = (candle["close"] < candle["open"] and
-                        upper_wick >= max(body * 0.35, span * 0.12) and
-                        candle["close"] < level)
-            return (touched and rejected,
-                    "Bearish rejection candle confirmed at resistance" if touched and rejected
-                    else "Waiting for a closed bearish rejection candle at resistance")
-        touched = min(abs(previous["low"]-level), abs(candle["low"]-level)) <= near
-        lower_wick = min(candle["open"], candle["close"]) - candle["low"]
-        rejected = (candle["close"] > candle["open"] and
-                    lower_wick >= max(body * 0.35, span * 0.12) and
-                    candle["close"] > level)
-        return (touched and rejected,
-                "Bullish rejection candle confirmed at support" if touched and rejected
-                else "Waiting for a closed bullish rejection candle at support")
+            touched = abs(rejection["high"] - level) <= near
+            rejection_body = abs(rejection["close"] - rejection["open"])
+            rejection_span = max(rejection["high"] - rejection["low"], 1e-12)
+            upper_wick = rejection["high"] - max(rejection["open"], rejection["close"])
+            rejected = (
+                rejection["close"] < rejection["open"]
+                and rejection["close"] < level
+                and upper_wick >= max(rejection_body * 0.5, rejection_span * 0.2)
+            )
+            broke_out = max(approach["close"], rejection["close"], confirm["close"]) > level + breakout_buffer
+            follow_through = (
+                confirm["close"] < rejection["low"]
+                and confirm["close"] < confirm["open"]
+                and confirm["close"] < rejection["close"]
+            )
+            valid = touched and rejected and follow_through and not broke_out
+            if valid:
+                return True, "Resistance rejection and bearish follow-through confirmed on closed candles"
+            if broke_out:
+                reason = "Resistance breakout detected; SHORT blocked until a failed retest"
+            elif not touched or not rejected:
+                reason = "Waiting for a closed bearish rejection candle at resistance"
+            else:
+                reason = "Rejection seen; waiting for a separate bearish follow-through close below its low"
+            return False, reason
+
+        touched = abs(rejection["low"] - level) <= near
+        rejection_body = abs(rejection["close"] - rejection["open"])
+        rejection_span = max(rejection["high"] - rejection["low"], 1e-12)
+        lower_wick = min(rejection["open"], rejection["close"]) - rejection["low"]
+        rejected = (
+            rejection["close"] > rejection["open"]
+            and rejection["close"] > level
+            and lower_wick >= max(rejection_body * 0.5, rejection_span * 0.2)
+        )
+        broke_down = min(approach["close"], rejection["close"], confirm["close"]) < level - breakout_buffer
+        follow_through = (
+            confirm["close"] > rejection["high"]
+            and confirm["close"] > confirm["open"]
+            and confirm["close"] > rejection["close"]
+        )
+        valid = touched and rejected and follow_through and not broke_down
+        if valid:
+            return True, "Support rejection and bullish follow-through confirmed on closed candles"
+        if broke_down:
+            reason = "Support breakdown detected; LONG blocked until a reclaim retest"
+        elif not touched or not rejected:
+            reason = "Waiting for a closed bullish rejection candle at support"
+        else:
+            reason = "Rejection seen; waiting for a separate bullish follow-through close above its high"
+        return False, reason
 
     def create(self, agent_data, direction, min_reward_risk=1.5,
                preferred_timeframe=None, fee_rate=None, slippage_rate=None):
