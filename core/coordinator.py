@@ -58,7 +58,11 @@ class TradingCoordinator(SpotDemoMixin):
         self.demo_database = DemoDatabase(Path("data/demo_trading.db"))
         self.demo_ledger = Ledger(database=self.demo_database)
         self.demo_execution = DemoEngine(
-            self.demo_database, self.demo_ledger
+            self.demo_database, self.demo_ledger,
+            fee_rate=Decimal("0.001"),
+            slippage_rate=Decimal("0.0005"),
+            futures_fee_rate=Decimal("0.0005"),
+            futures_slippage_rate=Decimal("0.0005"),
         )
 
         account = self.demo_database.connection.execute(
@@ -1171,6 +1175,7 @@ class TradingCoordinator(SpotDemoMixin):
                         signal["trade_plan"] = self.trade_planner.create(
                             agent_data, direction, min_reward_risk=1.5,
                             preferred_timeframe=preferred_timeframe,
+                            market="futures",
                         )
 
                 if domain == "spot" and isinstance(signal, dict):
@@ -1178,6 +1183,7 @@ class TradingCoordinator(SpotDemoMixin):
                         signal["trade_plan"] = self.trade_planner.create(
                             agent_data, "LONG", min_reward_risk=1.5,
                             preferred_timeframe=preferred_timeframe,
+                            market="spot",
                         )
 
                 # Strategy tag makes the journal able to compare actual entry styles.
