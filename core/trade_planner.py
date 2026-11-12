@@ -8,6 +8,7 @@ class TradePlanner:
     FEE_RATE = 0.001
     SLIPPAGE_RATE = 0.0005
     TARGET_BUFFER_ATR = 0.12
+    MIN_REWARD_RISK = 1.5
     ENTRY_ZONE_ATR = 0.45
 
     @staticmethod
@@ -121,7 +122,7 @@ class TradePlanner:
                 "Bullish rejection candle confirmed at support" if touched and rejected
                 else "Waiting for a closed bullish rejection candle at support")
 
-    def create(self, agent_data, direction, min_reward_risk=1.0,
+    def create(self, agent_data, direction, min_reward_risk=1.5,
                preferred_timeframe=None, fee_rate=None, slippage_rate=None):
         direction = str(direction).strip().upper()
         if direction not in ("LONG", "SHORT"):
