@@ -1870,7 +1870,16 @@ class _TradeShellState extends State<TradeShell>
     final stop = double.tryParse('${position['stop_loss'] ?? ''}') ?? 0;
     final target = double.tryParse('${position['take_profit'] ?? ''}') ?? 0;
     final target2 = double.tryParse('${position['take_profit_2'] ?? ''}') ?? 0;
-    final entryCandleTime = int.tryParse('${position['entry_candle_time'] ?? ''}') ?? 0;
+    final timeframeSeconds = <String, int>{
+      '1m': 60, '5m': 300, '15m': 900, '1h': 3600, '4h': 14400,
+    }[interval] ?? 300;
+    final storedEntryTime = int.tryParse('${position['entry_candle_time'] ?? ''}') ?? 0;
+    final openedAtMs = int.tryParse('${position['opened_at_ms'] ?? ''}') ?? 0;
+    final entryCandleTime = storedEntryTime > 0
+        ? (storedEntryTime > 1000000000000 ? storedEntryTime ~/ 1000 : storedEntryTime)
+        : openedAtMs > 0
+            ? ((openedAtMs ~/ 1000) ~/ timeframeSeconds) * timeframeSeconds
+            : 0;
 
     if (symbol.isNotEmpty && candles.isEmpty && !_marketLoading.contains(key)) {
       Future.microtask(() => _loadPositionCandles(market, symbol, interval: interval));
@@ -1980,6 +1989,8 @@ class _TradeShellState extends State<TradeShell>
             final stop = position['stop_loss']?.toString() ?? '—';
             final target = position['take_profit']?.toString() ?? '—';
             final target2 = position['take_profit_2']?.toString();
+            final runnerPct = (100 - (double.tryParse('${position['tp1_close_pct']}') ?? 70))
+                .toStringAsFixed(0);
             final isClosing = closingPositionIds.contains(id);
             final isShort = direction == 'SHORT';
 
@@ -2032,7 +2043,7 @@ class _TradeShellState extends State<TradeShell>
                           Expanded(child: _metric('TAKE PROFIT 2', target2, cyan)),
                           Expanded(child: _metric(
                             tr('إغلاق متبقٍ', 'RUNNER'),
-                            '${position['tp1_close_pct'] == null ? '30%' : (100 - (double.tryParse('${position['tp1_close_pct']}') ?? 70)).toStringAsFixed(0) + '%'}',
+                            '$runnerPct%',
                             widget.muted,
                           )),
                         ]),
