@@ -34,7 +34,7 @@ class Feed:
 def signal(symbol, entry, stop, target, safety=None):
     out = {"symbol": symbol, "direction": "BUY", "confidence": 80,
            "trade_plan": {"success": True, "direction": "LONG", "entry": entry,
-                          "stop_loss": stop, "take_profit": target, "reward_risk": 2.0}}
+                          "stop_loss": stop, "take_profit": target, "atr": 1.0, "reward_risk": 2.0}}
     if safety is not None:
         out["token_safety"] = {"status": safety}
     return out
@@ -158,6 +158,13 @@ class TestAutopilotMarkets(Base):
         self.c.scan_spot = lambda limit=8, **k: {
             "success": True, "scanned": 1, "actionable": 1,
             "opportunities": [opp("spot", "ETHUSDT", signal("ETHUSDT", 100, 98, 104))]}
+        fresh_by_symbol = {
+            "BTCUSDT": {"futures": fut},
+            "ETHUSDT": {"spot": signal("ETHUSDT", 100, 98, 104)},
+        }
+        self.c.analyze_live = lambda symbol, domains=None: {
+            "signals": {domain: fresh_by_symbol[symbol][domain] for domain in domains}
+        }
         ap = Autopilot(self.c, config_path="config/ap.json")
         ap.update({"enabled": True, "max_concurrent": 3, "use_context": False,
                    "risk_pct": 0.1})
