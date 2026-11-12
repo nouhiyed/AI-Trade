@@ -519,33 +519,42 @@ class _TradeShellState extends State<TradeShell>
   List<Map<String, double>> _normalizeCandles(dynamic raw) {
     if (raw is! List) return [];
     final result = <Map<String, double>>[];
+    double n(dynamic v) => double.tryParse('$v') ?? 0;
+    double seconds(dynamic v) {
+      final value = n(v);
+      if (value >= 1000000000000) return value / 1000;
+      return value;
+    }
     for (final item in raw) {
       try {
+        late final Map<String, double> candle;
         if (item is Map) {
-          double n(dynamic v) => double.tryParse('$v') ?? 0;
-          final candle = {
+          candle = {
+            'time': seconds(item['time'] ?? item['open_time'] ?? item['timestamp'] ?? item['t']),
             'open': n(item['open'] ?? item['o']),
             'high': n(item['high'] ?? item['h']),
             'low': n(item['low'] ?? item['l']),
             'close': n(item['close'] ?? item['c']),
+            'volume': n(item['volume'] ?? item['v']),
           };
-          if (candle['high']! > 0 && candle['low']! > 0) {
-            result.add(candle);
-          }
         } else if (item is List && item.length >= 5) {
-          double n(dynamic v) => double.tryParse('$v') ?? 0;
-          final candle = {
+          candle = {
+            'time': seconds(item[0]),
             'open': n(item[1]),
             'high': n(item[2]),
             'low': n(item[3]),
             'close': n(item[4]),
+            'volume': item.length > 5 ? n(item[5]) : 0,
           };
-          if (candle['high']! > 0 && candle['low']! > 0) {
-            result.add(candle);
-          }
+        } else {
+          continue;
+        }
+        if (candle['time']! > 0 && candle['high']! > 0 && candle['low']! > 0) {
+          result.add(candle);
         }
       } catch (_) {}
     }
+    result.sort((a, b) => a['time']!.compareTo(b['time']!));
     return result;
   }
 
@@ -623,17 +632,19 @@ class _TradeShellState extends State<TradeShell>
     }
   }
 
-  Future<void> _loadPositionCandles(String market, String symbol) async {
+  Future<void> _loadPositionCandles(
+    String market, String symbol, {String interval = '5m'}
+  ) async {
     if (symbol.isEmpty) return;
-    final key = '$market:$symbol:5m';
+    final key = '$market:$symbol:$interval';
     if (_marketLoading.contains(key)) return;
     _marketLoading.add(key);
     try {
       final result = await ApiService.marketCandles(
         market: market,
         symbol: symbol,
-        interval: '5m',
-        limit: 80,
+        interval: interval,
+        limit: 180,
       );
       if (!mounted) return;
       final raw = result['candles'] ??
@@ -671,9 +682,10 @@ class _TradeShellState extends State<TradeShell>
           final domain = '${position['domain'] ?? position['market_type'] ?? 'spot'}'.toLowerCase();
           final market = domain.contains('future') ? 'futures' : 'spot';
           final symbol = '${position['symbol'] ?? ''}';
-          final key = '$market:$symbol:5m';
+          final interval = '${position['entry_timeframe'] ?? position['timeframe'] ?? '5m'}';
+          final key = '$market:$symbol:$interval';
           if (symbol.isNotEmpty && refreshed.add(key)) {
-            await _loadPositionCandles(market, symbol);
+            await _loadPositionCandles(market, symbol, interval: interval);
           }
         }
       }
@@ -1850,15 +1862,18 @@ class _TradeShellState extends State<TradeShell>
     final domain = '${position['domain'] ?? 'spot'}'.toLowerCase();
     final market = domain.contains('future') ? 'futures' : 'spot';
     final symbol = '${position['symbol'] ?? ''}';
-    final key = '$market:$symbol:5m';
+    final interval = '${position['entry_timeframe'] ?? position['timeframe'] ?? '5m'}';
+    final key = '$market:$symbol:$interval';
     final candles = _marketCandles[key] ?? [];
     final current = candles.isNotEmpty ? candles.last['close']! : 0.0;
     final entry = double.tryParse('${position['entry_price'] ?? ''}') ?? 0;
     final stop = double.tryParse('${position['stop_loss'] ?? ''}') ?? 0;
     final target = double.tryParse('${position['take_profit'] ?? ''}') ?? 0;
+    final target2 = double.tryParse('${position['take_profit_2'] ?? ''}') ?? 0;
+    final entryCandleTime = int.tryParse('${position['entry_candle_time'] ?? ''}') ?? 0;
 
     if (symbol.isNotEmpty && candles.isEmpty && !_marketLoading.contains(key)) {
-      Future.microtask(() => _loadPositionCandles(market, symbol));
+      Future.microtask(() => _loadPositionCandles(market, symbol, interval: interval));
     }
 
     final direction = '${position['direction'] ?? 'LONG'}'.toUpperCase();
@@ -1915,6 +1930,9 @@ class _TradeShellState extends State<TradeShell>
                       entry: entry,
                       stop: stop,
                       target: target,
+                      target2: target2,
+                      entryCandleTime: entryCandleTime,
+                      direction: direction,
                     ),
                     child: const SizedBox.expand(),
                   ),
@@ -1961,6 +1979,7 @@ class _TradeShellState extends State<TradeShell>
             final quantity = '${position['remaining_quantity'] ?? position['quantity'] ?? '—'}';
             final stop = position['stop_loss']?.toString() ?? '—';
             final target = position['take_profit']?.toString() ?? '—';
+            final target2 = position['take_profit_2']?.toString();
             final isClosing = closingPositionIds.contains(id);
             final isShort = direction == 'SHORT';
 
@@ -2003,9 +2022,21 @@ class _TradeShellState extends State<TradeShell>
                     Row(
                       children: [
                         Expanded(child: _metric('STOP LOSS', stop, red)),
-                        Expanded(child: _metric('TAKE PROFIT', target, green)),
+                        Expanded(child: _metric('TAKE PROFIT 1', target, green)),
                       ],
                     ),
+                    if (target2 != null && target2.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Row(children: [
+                          Expanded(child: _metric('TAKE PROFIT 2', target2, cyan)),
+                          Expanded(child: _metric(
+                            tr('إغلاق متبقٍ', 'RUNNER'),
+                            '${position['tp1_close_pct'] == null ? '30%' : (100 - (double.tryParse('${position['tp1_close_pct']}') ?? 70)).toStringAsFixed(0) + '%'}',
+                            widget.muted,
+                          )),
+                        ]),
+                      ),
                     const SizedBox(height: 14),
                     SizedBox(
                       width: double.infinity,
@@ -3016,24 +3047,30 @@ class LiveCandlePainter extends CustomPainter {
   final double entry;
   final double stop;
   final double target;
+  final double target2;
+  final int entryCandleTime;
+  final String direction;
 
   LiveCandlePainter(
     this.candles, {
     this.entry = 0,
     this.stop = 0,
     this.target = 0,
+    this.target2 = 0,
+    this.entryCandleTime = 0,
+    this.direction = 'LONG',
   });
 
   @override
   void paint(Canvas canvas, Size size) {
     if (candles.isEmpty || size.width <= 0 || size.height <= 0) return;
 
-    final visible = candles.length > 70
-        ? candles.sublist(candles.length - 70)
+    final visible = candles.length > 160
+        ? candles.sublist(candles.length - 160)
         : candles;
     var minPrice = visible.map((c) => c['low']!).reduce(math.min);
     var maxPrice = visible.map((c) => c['high']!).reduce(math.max);
-    for (final level in [entry, stop, target]) {
+    for (final level in [entry, stop, target, target2]) {
       if (level > 0) {
         minPrice = math.min(minPrice, level);
         maxPrice = math.max(maxPrice, level);
@@ -3102,6 +3139,55 @@ class LiveCandlePainter extends CustomPainter {
     drawLevel(entry, blue);
     drawLevel(stop, red);
     drawLevel(target, green);
+    drawLevel(target2, cyan);
+
+    // Mark the exact Binance candle recorded at execution, not a guessed
+    // candle based on the chart's current refresh time.
+    if (entryCandleTime > 0) {
+      final markerIndex = visible.indexWhere((c) =>
+          (c['time'] ?? 0).round() == entryCandleTime);
+      if (markerIndex >= 0) {
+        final candle = visible[markerIndex];
+        final x = step * markerIndex + step / 2;
+        final isShort = direction.toUpperCase() == 'SHORT';
+        final anchorY = y(isShort ? candle['high']! : candle['low']!);
+        final markerColor = isShort ? red : green;
+        final stemEnd = isShort ? 18.0 : size.height - 18.0;
+        final markerPaint = Paint()
+          ..color = markerColor
+          ..strokeWidth = 2.2;
+        canvas.drawLine(Offset(x, anchorY), Offset(x, stemEnd), markerPaint);
+        final triangle = Path();
+        if (isShort) {
+          triangle
+            ..moveTo(x, stemEnd + 1)
+            ..lineTo(x - 6, stemEnd - 9)
+            ..lineTo(x + 6, stemEnd - 9)
+            ..close();
+        } else {
+          triangle
+            ..moveTo(x, stemEnd - 1)
+            ..lineTo(x - 6, stemEnd + 9)
+            ..lineTo(x + 6, stemEnd + 9)
+            ..close();
+        }
+        canvas.drawPath(triangle, Paint()..color = markerColor);
+        final label = TextPainter(
+          text: TextSpan(
+            text: isShort ? 'SHORT ENTRY' : 'LONG ENTRY',
+            style: TextStyle(
+              color: markerColor,
+              fontSize: 9,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          textDirection: TextDirection.ltr,
+        )..layout(maxWidth: size.width * .42);
+        final labelX = (x + 7).clamp(2.0, math.max(2.0, size.width - label.width - 2));
+        final labelY = isShort ? 2.0 : size.height - label.height - 2;
+        label.paint(canvas, Offset(labelX, labelY));
+      }
+    }
   }
 
   @override
@@ -3109,7 +3195,10 @@ class LiveCandlePainter extends CustomPainter {
       old.candles != candles ||
       old.entry != entry ||
       old.stop != stop ||
-      old.target != target;
+      old.target != target ||
+      old.target2 != target2 ||
+      old.entryCandleTime != entryCandleTime ||
+      old.direction != direction;
 }
 
 class CandlePainter extends CustomPainter {
