@@ -22,6 +22,18 @@ class TestTradingCoordinator(unittest.TestCase):
             {"futures", "spot"},
         )
 
+    def test_market_specific_execution_cost_validation(self):
+        plan = {
+            "entry": 100, "stop_loss": 99, "take_profit": 102, "atr": 1,
+        }
+        futures_ok, futures_reason = self.system._validate_demo_entry_price(
+            plan, "LONG", 100, market="futures")
+        spot_ok, spot_reason = self.system._validate_demo_entry_price(
+            plan, "LONG", 100, market="spot")
+        self.assertTrue(futures_ok, futures_reason)
+        self.assertFalse(spot_ok)
+        self.assertIn("reward/risk", spot_reason.lower())
+
     def test_trade_requires_signal(self):
         result = self.system.request_trade(
             domain="futures",
