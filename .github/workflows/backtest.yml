@@ -50,7 +50,7 @@ jobs:
       - name: Run BTC, ETH and BNB historical tests
         run: |
           python scripts/backtest.py \
-            --years "${{ inputs.years }}" \
+            --years "${{ inputs.years || '1' }}" \
             --symbols BTCUSDT ETHUSDT BNBUSDT \
             --output backtest_results
 
