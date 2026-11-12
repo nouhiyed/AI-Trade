@@ -18,7 +18,11 @@ on:
       - AI-Trader Backend Tests
     types:
       - completed
-\npermissions:
+  push:
+    paths:
+      - 'scripts/backtest.py'
+      - '.github/workflows/backtest.yml'
+permissions:
   contents: read
 
 jobs:
@@ -57,7 +61,7 @@ jobs:
       - name: Upload historical report
         uses: actions/upload-artifact@v4
         with:
-          name: AI-Trader-Backtest-${{ inputs.years }}-year
+          name: AI-Trader-Backtest-${{ inputs.years || '1' }}-year
           path: |
             backtest_results/summary.json
             backtest_results/trades.csv
