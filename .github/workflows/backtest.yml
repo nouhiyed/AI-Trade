@@ -16,6 +16,7 @@ on:
   push:
     paths:
       - 'scripts/backtest.py'
+      - 'scripts/plot_backtest_trades.py'
 permissions:
   contents: read
 
@@ -41,6 +42,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
+          python -m pip install matplotlib
 
       - name: Compile backend and backtest
         run: python -m compileall -q agents core scripts
@@ -52,11 +54,20 @@ jobs:
             --symbols BTCUSDT ETHUSDT BNBUSDT \
             --output backtest_results
 
-      - name: Upload historical report
+      - name: Render one chart for every completed trade
+        run: |
+          python scripts/plot_backtest_trades.py \
+            --trades backtest_results/trades.csv \
+            --cache data/backtest_cache \
+            --output backtest_results/trade_charts \
+            --years "${{ inputs.years || '1' }}"
+
+      - name: Upload historical report and trade charts
         uses: actions/upload-artifact@v4
         with:
           name: AI-Trader-Backtest-${{ inputs.years || '1' }}-year
           path: |
             backtest_results/summary.json
             backtest_results/trades.csv
+            backtest_results/trade_charts/*.png
           if-no-files-found: error
