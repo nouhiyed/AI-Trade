@@ -24,4 +24,4 @@ config/demo_state.json
 config/autopilot.json
 
 # Local Telegram credentials (never commit)
-config/telegram.json
+config/telegram.json\n\n# Generated historical backtest reports\nbacktest_results/\n
