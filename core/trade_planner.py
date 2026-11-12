@@ -47,7 +47,11 @@ class TradePlanner:
         for i in range(radius, len(values) - radius - 2):
             value = values[i]
             window = values[i-radius:i+radius+1]
-            pivot = value == min(window) if side == "support" else value == max(window)
+            extreme = min(window) if side == "support" else max(window)
+            # Flat/equal-price plateaus are zones, not confirmed swing pivots.
+            # Count only a unique local extreme to avoid treating every candle
+            # in a flat range as a fresh support/resistance level.
+            pivot = value == extreme and window.count(value) == 1
             if pivot and ((side == "support" and value < entry) or
                           (side == "resistance" and value > entry)):
                 found.append(value)
