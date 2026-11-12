@@ -509,7 +509,7 @@ class _TradeShellState extends State<TradeShell>
       final version = '${data['api_version'] ?? ''}';
       setState(() {
         _apiVersion = version;
-        apiOnline = version == '2026.11.10.4';
+        apiOnline = version == '2026.11.12.1';
       });
     } finally {
       if (mounted) setState(() => apiBusy = false);
