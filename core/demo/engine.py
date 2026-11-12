@@ -22,6 +22,8 @@ class DemoEngine:
         *,
         fee_rate=Decimal("0.001"),
         slippage_rate=Decimal("0.0005"),
+        futures_fee_rate=Decimal("0.0005"),
+        futures_slippage_rate=Decimal("0.0005"),
     ):
         if not isinstance(database, DemoDatabase):
             raise TypeError("database must be a DemoDatabase")
@@ -37,10 +39,18 @@ class DemoEngine:
         self.slippage_rate = self._decimal(
             slippage_rate, "slippage_rate"
         )
+        self.futures_fee_rate = self._decimal(
+            futures_fee_rate, "futures_fee_rate"
+        )
+        self.futures_slippage_rate = self._decimal(
+            futures_slippage_rate, "futures_slippage_rate"
+        )
 
-        if self.fee_rate < 0 or self.slippage_rate < 0:
+        rates = (self.fee_rate, self.slippage_rate,
+                 self.futures_fee_rate, self.futures_slippage_rate)
+        if any(rate < 0 for rate in rates):
             raise ValueError("Rates cannot be negative")
-        if self.slippage_rate >= 1:
+        if self.slippage_rate >= 1 or self.futures_slippage_rate >= 1:
             raise ValueError("slippage_rate must be less than 1")
 
     @staticmethod
@@ -409,10 +419,10 @@ class DemoEngine:
                         "for opening short positions"
                     )
                 fill_price = calculate_fill_price(
-                    price, "BUY", self.slippage_rate
+                    price, "BUY", self.futures_slippage_rate
                 )
                 fee = calculate_fee(
-                    fill_price, quantity, self.fee_rate
+                    fill_price, quantity, self.futures_fee_rate
                 )
                 margin = calculate_initial_margin(
                     fill_price, quantity, leverage
@@ -526,12 +536,12 @@ class DemoEngine:
         reference_id = reference_id or uuid4().hex
         side = "BUY" if direction == "LONG" else "SELL"
         fill_price = calculate_fill_price(
-            price, side, self.slippage_rate
+            price, side, self.futures_slippage_rate
         )
         margin = calculate_initial_margin(
             fill_price, quantity, leverage
         )
-        fee = calculate_fee(fill_price, quantity, self.fee_rate)
+        fee = calculate_fee(fill_price, quantity, self.futures_fee_rate)
         position_id = uuid4().hex
 
         with self.database.transaction():
@@ -591,7 +601,7 @@ class DemoEngine:
             direction = position["direction"]
             exit_side = "SELL" if direction == "LONG" else "BUY"
             fill_price = calculate_fill_price(
-                price, exit_side, self.slippage_rate
+                price, exit_side, self.futures_slippage_rate
             )
             entry_price = Decimal(position["average_entry_price"])
             leverage = Decimal(position["leverage"])
@@ -600,7 +610,7 @@ class DemoEngine:
             pnl = calculate_futures_pnl(
                 entry_price, fill_price, close_qty, direction
             )
-            fee = calculate_fee(fill_price, close_qty, self.fee_rate)
+            fee = calculate_fee(fill_price, close_qty, self.futures_fee_rate)
 
             reservations = self.connection.execute(
                 """
@@ -632,7 +642,7 @@ class DemoEngine:
                     entry_price, fill_price, close_qty, direction
                 )
                 fee = calculate_fee(
-                    fill_price, close_qty, self.fee_rate
+                    fill_price, close_qty, self.futures_fee_rate
                 )
                 release = total_locked
                 new_remaining = Decimal("0")
@@ -809,7 +819,7 @@ class DemoEngine:
                 )
                 maintenance = qty * price * Decimal("0.005")
                 closing_fee = calculate_fee(
-                    price, qty, self.fee_rate
+                    price, qty, self.futures_fee_rate
                 )
 
                 if locked + unrealized <= maintenance + closing_fee:
