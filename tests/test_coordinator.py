@@ -215,7 +215,7 @@ class TestTradingCoordinator(unittest.TestCase):
                 "direction": "LONG",
                 "entry": 100,
                 "stop_loss": 99,
-                "take_profit": 102,
+                "take_profit": 103,
                 "atr": 0.5,
                 "reward_risk": 2.0,
                 "timeframe": "5m",
