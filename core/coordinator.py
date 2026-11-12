@@ -403,6 +403,22 @@ class TradingCoordinator(SpotDemoMixin):
         features["strategy:" + str(signal.get("strategy_tag") or "unclassified")] = True
         return features
 
+    @staticmethod
+    def _entry_chart_metadata(signal, opened_at_ms):
+        """Persist the exact chart candle containing the actual execution time."""
+        signal = signal if isinstance(signal, dict) else {}
+        plan = signal.get("trade_plan") or {}
+        timeframe = str(plan.get("timeframe") or signal.get("timeframe") or "5m").lower()
+        seconds = {"1m": 60, "5m": 300, "15m": 900, "1h": 3600, "4h": 14400}
+        interval = seconds.get(timeframe, 300)
+        candle_open_ms = (int(opened_at_ms) // (interval * 1000)) * interval * 1000
+        return {
+            "entry_candle_time": candle_open_ms // 1000,
+            "entry_candle_time_ms": candle_open_ms,
+            "entry_timeframe": timeframe,
+            "entry_origin": str(signal.get("entry_origin") or "AGENT").upper(),
+        }
+
     def _on_demo_open(self, record, signal, reservation):
         """Journal the new trade and (optionally) send a chart snapshot."""
         try:
@@ -965,6 +981,7 @@ class TradingCoordinator(SpotDemoMixin):
                 reference_id=trade_id,
             )
 
+            opened_at_ms = int(time.time() * 1000)
             record = {
                 "position_id": trade_id,
                 "trade_id": trade_id,
@@ -988,7 +1005,8 @@ class TradingCoordinator(SpotDemoMixin):
                 "protection_verified": False,
                 "execution_source": "INTERNAL_DEMO",
                 "total_fees": str(execution["fee"]),
-                "opened_at_ms": int(time.time() * 1000),
+                "opened_at_ms": opened_at_ms,
+                **self._entry_chart_metadata(signal, opened_at_ms),
                 "last_checked_ms": int(time.time() * 1000),
                 "leverage": str(leverage),
             }
@@ -1113,14 +1131,14 @@ class TradingCoordinator(SpotDemoMixin):
                 if domain == "futures" and isinstance(signal, dict):
                     if direction in ("LONG", "SHORT"):
                         signal["trade_plan"] = self.trade_planner.create(
-                            agent_data, direction,
+                            agent_data, direction, min_reward_risk=1.5,
                             preferred_timeframe=preferred_timeframe,
                         )
 
                 if domain == "spot" and isinstance(signal, dict):
                     if str(signal.get("direction", "")).upper() == "BUY":
                         signal["trade_plan"] = self.trade_planner.create(
-                            agent_data, "LONG",
+                            agent_data, "LONG", min_reward_risk=1.5,
                             preferred_timeframe=preferred_timeframe,
                         )
 
