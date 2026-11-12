@@ -87,6 +87,13 @@ class TestTradePlanner(unittest.TestCase):
         self.assertFalse(plan["success"])
         self.assertTrue("fees" in plan["reason"].lower() or "reward/risk" in plan["reason"].lower())
 
+    def test_cannot_lower_minimum_net_reward_risk_below_1_5(self):
+        plan = self.planner.create(
+            {"symbol": "BTCUSDT", "5m": self.frame()},
+            "SHORT", min_reward_risk=1.0)
+        self.assertFalse(plan["success"])
+        self.assertIn("1.5", plan["reason"])
+
     def test_rejects_invalid_minimum_reward_risk(self):
         plan = self.planner.create(
             {"symbol": "BTCUSDT", "5m": self.frame()},
