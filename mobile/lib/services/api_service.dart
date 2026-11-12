@@ -101,7 +101,7 @@ class ApiService {
       'GET', '/health', requestTimeout: const Duration(seconds: 5));
     return result['ok'] == true &&
         result['mode'] == 'DEMO' &&
-        result['api_version'] == '2026.11.11.1';
+        result['api_version'] == '2026.11.12.1';
   }
 
   static Future<Map<String, dynamic>> status() =>
