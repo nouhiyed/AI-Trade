@@ -18,9 +18,9 @@ class TestTradePlanner(unittest.TestCase):
                              "close": low + 0.18, "atr": atr, "support": 99.0,
                              "resistance": 105.0})
             rows[80].update({"open": 100.0, "high": 100.5, "low": 99.0, "close": 100.2})
-            rows[95].update({"open": 103.5, "high": 105.0, "low": 103.0, "close": 104.0})
-            rows[98].update({"open": 104.0, "high": 105.0, "low": 103.2, "close": 104.5})
-            rows[99].update({"open": 104.4, "high": 104.9, "low": 103.6, "close": 103.5})
+            rows[97].update({"open": 104.0, "high": 104.6, "low": 103.7, "close": 104.3})
+            rows[98].update({"open": 104.6, "high": 105.0, "low": 103.2, "close": 104.0})
+            rows[99].update({"open": 103.9, "high": 104.0, "low": 102.8, "close": 103.0})
         else:
             for i in range(100):
                 low = 96.6 + i * 0.001
@@ -29,8 +29,9 @@ class TestTradePlanner(unittest.TestCase):
                              "resistance": 101.0})
             rows[80].update({"open": 96.0, "high": 96.3, "low": 95.0, "close": 95.8})
             rows[95].update({"open": 100.0, "high": 101.0, "low": 99.5, "close": 100.2})
-            rows[98].update({"open": 96.0, "high": 97.0, "low": 95.0, "close": 95.5})
-            rows[99].update({"open": 96.4, "high": 96.8, "low": 96.3, "close": 96.5})
+            rows[97].update({"open": 96.2, "high": 96.8, "low": 96.0, "close": 96.4})
+            rows[98].update({"open": 95.3, "high": 96.3, "low": 95.0, "close": 96.0})
+            rows[99].update({"open": 96.2, "high": 97.2, "low": 96.1, "close": 97.1})
         return pd.DataFrame(rows)
 
     def test_short_enters_only_after_bearish_rejection_at_resistance(self):
