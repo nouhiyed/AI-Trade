@@ -5,7 +5,8 @@ from math import isfinite
 class TradePlanner:
     TIMEFRAME_PRIORITY = ("5m", "1m", "15m", "1h")
     MIN_STOP_ATR = 0.75
-    FEE_RATE = 0.001
+    SPOT_TAKER_FEE_RATE = 0.001
+    FUTURES_TAKER_FEE_RATE = 0.0005
     SLIPPAGE_RATE = 0.0005
     TARGET_BUFFER_ATR = 0.12
     MIN_REWARD_RISK = 1.5
@@ -165,13 +166,19 @@ class TradePlanner:
         return False, reason
 
     def create(self, agent_data, direction, min_reward_risk=1.5,
-               preferred_timeframe=None, fee_rate=None, slippage_rate=None):
+               preferred_timeframe=None, fee_rate=None, slippage_rate=None,
+               market="spot"):
         direction = str(direction).strip().upper()
         if direction not in ("LONG", "SHORT"):
             return {"success": False, "reason": "Invalid direction"}
         try:
             min_reward_risk = float(min_reward_risk)
-            fee = self.FEE_RATE if fee_rate is None else float(fee_rate)
+            market = str(market).strip().lower()
+            if market not in ("spot", "futures"):
+                raise ValueError("Market must be spot or futures")
+            default_fee = (self.SPOT_TAKER_FEE_RATE if market == "spot"
+                           else self.FUTURES_TAKER_FEE_RATE)
+            fee = default_fee if fee_rate is None else float(fee_rate)
             slip = self.SLIPPAGE_RATE if slippage_rate is None else float(slippage_rate)
         except (TypeError, ValueError):
             return {"success": False, "reason": "Invalid cost or reward/risk settings"}
