@@ -96,6 +96,19 @@ class TestTradePlanner(unittest.TestCase):
         self.assertFalse(plan["success"])
         self.assertIn("1.5", plan["reason"])
 
+    def test_market_specific_round_trip_costs(self):
+        spot = self.planner.create(
+            {"symbol": "BTCUSDT", "5m": self.frame()},
+            "SHORT", market="spot")
+        futures = self.planner.create(
+            {"symbol": "BTCUSDT", "5m": self.frame()},
+            "SHORT", market="futures")
+        self.assertTrue(spot["success"], spot)
+        self.assertTrue(futures["success"], futures)
+        self.assertAlmostEqual(spot["estimated_round_trip_cost_pct"], 0.3, places=4)
+        self.assertAlmostEqual(futures["estimated_round_trip_cost_pct"], 0.2, places=4)
+        self.assertGreaterEqual(futures["net_reward_risk"], 1.5)
+
     def test_rejects_invalid_minimum_reward_risk(self):
         plan = self.planner.create(
             {"symbol": "BTCUSDT", "5m": self.frame()},
