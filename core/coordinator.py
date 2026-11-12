@@ -407,8 +407,8 @@ class TradingCoordinator(SpotDemoMixin):
         features["strategy:" + str(signal.get("strategy_tag") or "unclassified")] = True
         return features
 
-    @staticmethod
-    def _validate_demo_entry_price(plan, direction, market_price, min_net_rr=1.5):
+    def _validate_demo_entry_price(self, plan, direction, market_price,
+                                   min_net_rr=1.5, market="futures"):
         """Reject stale fills that distort structural levels or net reward/risk."""
         try:
             entry = Decimal(str(plan["entry"]))
@@ -429,7 +429,16 @@ class TradingCoordinator(SpotDemoMixin):
                 if not stop < price < target:
                     return False, "Live price invalidated the LONG structure"
                 risk, reward = price - stop, target - price
-            cost = Decimal("0.003")
+            market = str(market).strip().lower()
+            if market == "spot":
+                fee_rate = self.demo_execution.fee_rate
+                slippage_rate = self.demo_execution.slippage_rate
+            elif market == "futures":
+                fee_rate = self.demo_execution.futures_fee_rate
+                slippage_rate = self.demo_execution.futures_slippage_rate
+            else:
+                return False, "Unknown market cost profile"
+            cost = Decimal("2") * (fee_rate + slippage_rate)
             net_reward = reward / price - cost
             net_risk = risk / price + cost
             net_rr = net_reward / net_risk if net_risk > 0 else Decimal("0")
@@ -987,7 +996,7 @@ class TradingCoordinator(SpotDemoMixin):
 
             market_price = self._demo_market_price(symbol)
             valid_entry, entry_reason = self._validate_demo_entry_price(
-                plan, direction, market_price, min_net_rr=1.5
+                plan, direction, market_price, min_net_rr=1.5, market="futures"
             )
             if not valid_entry:
                 self.risk.release_reservation(trade_id)
