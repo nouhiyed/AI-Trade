@@ -26,9 +26,9 @@ class TestTradePlanner(unittest.TestCase):
                 low = 96.6 + i * 0.001
                 rows.append({"open": low + 0.05, "high": low + 0.20, "low": low,
                              "close": low + 0.10, "atr": atr, "support": 95.0,
-                             "resistance": 101.0})
+                             "resistance": 102.5})
             rows[80].update({"open": 96.0, "high": 96.3, "low": 95.0, "close": 95.8})
-            rows[95].update({"open": 100.0, "high": 101.0, "low": 99.5, "close": 100.2})
+            rows[95].update({"open": 102.0, "high": 102.5, "low": 99.5, "close": 102.2})
             rows[97].update({"open": 96.2, "high": 96.8, "low": 96.0, "close": 96.4})
             rows[98].update({"open": 95.6, "high": 96.3, "low": 95.0, "close": 96.0})
             rows[99].update({"open": 96.2, "high": 97.2, "low": 96.1, "close": 97.1})
