@@ -181,7 +181,7 @@ def run_one(client, market_engine, planner, market, symbol, years, cache_dir):
     equity, peak, max_drawdown = STARTING_CAPITAL, STARTING_CAPITAL, 0.0
     first_time = None
 
-    for i in range(210, len(base) - 1):
+    for i in range(210, len(base)):
         bar, asof = base.iloc[i], int(base_times[i])
         if first_time is None:
             first_time = pd.Timestamp(bar["close_time"]).isoformat()
@@ -224,7 +224,7 @@ def run_one(client, market_engine, planner, market, symbol, years, cache_dir):
         peak = max(peak, mark_equity)
         if peak > 0:
             max_drawdown = max(max_drawdown, (peak - mark_equity) / peak)
-        if position is not None:
+        if position is not None or i + 1 >= len(base):
             continue
 
         agent_data = {"symbol": symbol, "orderbook": {"available": False}}
