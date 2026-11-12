@@ -218,6 +218,7 @@ class Autopilot:
 
                 signal = dict(signal)
                 signal["market_context"] = assessment
+                signal["entry_origin"] = "AUTOPILOT"
                 signal["setup_key"] = key
                 signal["confidence"] = confidence
                 signal["confidence_adjusted"] = confidence
@@ -228,10 +229,11 @@ class Autopilot:
                     selected_leverage = self.c.select_futures_leverage(signal, plan)
                     trade = self.c.request_demo_futures_trade(
                         symbol, direction, risk_pct=float(cfg["risk_pct"]),
-                        leverage=selected_leverage)
+                        leverage=selected_leverage, signal_override=signal)
                 else:
                     trade = self.c.request_demo_spot_trade(
-                        symbol, domain=domain, risk_pct=float(cfg["risk_pct"]))
+                        symbol, domain=domain, risk_pct=float(cfg["risk_pct"]),
+                        signal_override=signal)
 
                 if trade.get("approved"):
                     slots -= 1
