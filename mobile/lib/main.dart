@@ -3214,7 +3214,7 @@ class LiveCandlePainter extends CustomPainter {
           ),
           textDirection: TextDirection.ltr,
         )..layout(maxWidth: size.width * .42);
-        final labelX = (x + 7).clamp(2.0, math.max(2.0, size.width - label.width - 2));
+        final labelX = (x + 7).clamp(2.0, math.max(2.0, size.width - label.width - 2)).toDouble();
         final labelY = isShort ? 2.0 : size.height - label.height - 2;
         label.paint(canvas, Offset(labelX, labelY));
       }
