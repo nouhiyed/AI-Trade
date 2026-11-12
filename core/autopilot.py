@@ -175,13 +175,38 @@ class Autopilot:
                 break
             symbol = str(opp.get("symbol", "")).upper()
             try:
-                direction = opp["direction"]
+                direction = str(opp["direction"]).upper()
                 signal, plan = opp["signal"], opp["trade_plan"]
                 confidence = float(opp.get("confidence") or 0)
 
                 def skip(reason):
                     result["skipped"].append({
                         "domain": domain, "symbol": symbol, "reason": str(reason)})
+
+                # Rebuild analysis from fresh, closed Binance candles immediately
+                # before execution. Scanner opportunities may be stale by the time
+                # the autopilot reaches them.
+                fresh = self.c.analyze_live(symbol, domains=[domain])
+                fresh_signal = (fresh.get("signals") or {}).get(domain)
+                if not isinstance(fresh_signal, dict):
+                    skip("Fresh pre-entry analysis is unavailable")
+                    continue
+                fresh_direction = str(fresh_signal.get("direction", "WAIT")).upper()
+                normalized_direction = "LONG" if fresh_direction == "BUY" else fresh_direction
+                if normalized_direction != direction:
+                    skip("Direction changed during pre-entry confirmation")
+                    continue
+                fresh_plan = fresh_signal.get("trade_plan")
+                if not isinstance(fresh_plan, dict) or fresh_plan.get("success") is not True:
+                    skip((fresh_plan or {}).get("reason") or
+                         "Fresh structure confirmation failed; waiting for a better entry")
+                    continue
+                signal, plan = fresh_signal, fresh_plan
+                confidence = float(signal.get("confidence") or 0)
+
+                if confidence < float(cfg["min_confidence"]):
+                    skip("Fresh confidence below minimum")
+                    continue
 
                 if not symbol:
                     skip("Missing symbol")
