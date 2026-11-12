@@ -36,6 +36,9 @@ jobs:
           python -m pip install -r requirements.txt
           python -m pip install pytest Pillow
 
+      - name: Compile backend and test sources
+        run: python -m compileall -q agents api core tests
+
       - name: Run Python tests
         run: python -m unittest discover -s tests -t . -v
 
