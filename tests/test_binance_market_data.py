@@ -1,6 +1,8 @@
 import unittest
 from unittest.mock import patch
 
+import requests
+
 from core.binance_market_data import BinanceMarketData
 
 
@@ -55,6 +57,17 @@ class TestBinanceBookTicker(unittest.TestCase):
         self.assertEqual(params["startTime"], 1700000000000)
         self.assertEqual(params["endTime"], 1700000120000)
         self.assertEqual(len(frame), 2)
+
+
+    def test_fallback_hosts_share_one_total_request_budget(self):
+        client = BinanceMarketData(timeout=2, total_timeout=2)
+        with patch("core.binance_market_data.time.monotonic",
+                   side_effect=[0.0, 0.0, 2.1]):
+            with patch.object(client.session, "get",
+                              side_effect=requests.Timeout("host timed out")) as get:
+                with self.assertRaisesRegex(RuntimeError, "time budget exhausted"):
+                    client._request("futures", "/fapi/v1/time", {})
+        self.assertEqual(get.call_count, 1)
 
     def test_rejects_invalid_market(self):
         with self.assertRaises(ValueError):

@@ -36,8 +36,9 @@ class BinanceMarketData:
         "taker_buy_base", "taker_buy_quote", "ignore",
     ]
 
-    def __init__(self, timeout=12):
-        self.timeout = timeout
+    def __init__(self, timeout=6, total_timeout=8):
+        self.timeout = max(0.1, float(timeout))
+        self.total_timeout = max(0.1, float(total_timeout))
         self.session = requests.Session()
         self.session.headers.update({
             "User-Agent": "AI-Trader-MarketData/1.0"
@@ -50,14 +51,19 @@ class BinanceMarketData:
             raise ValueError("Market must be spot or futures")
 
         failures = []
-        # Binance publishes several official API hostnames. Try them in order
-        # so a DNS/route failure on one hostname does not disable an entire agent.
+        # Bound the complete fallback sequence, not just each individual host.
+        # A slow/unreachable hostname must not stall a scan for the whole cycle.
+        deadline = time.monotonic() + min(self.timeout, self.total_timeout)
         for base_url in self.FALLBACK_URLS[market]:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                failures.append("overall request time budget exhausted")
+                break
             try:
                 response = self.session.get(
                     base_url + endpoint,
                     params=params,
-                    timeout=min(self.timeout, 5),
+                    timeout=max(0.05, min(remaining, 2.5)),
                 )
                 response.raise_for_status()
                 payload = response.json()

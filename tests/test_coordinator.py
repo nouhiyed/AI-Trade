@@ -389,5 +389,42 @@ class TestTradingCoordinator(unittest.TestCase):
         )
 
 
+
+    def test_futures_scan_analyzes_only_futures_market_data(self):
+        self.system.market_scanner.scan_universe = lambda **kwargs: [
+            {"symbol": "BTCUSDT", "quote_volume": 100000000}
+        ]
+        calls = []
+
+        def analyze(symbol, preferred_timeframe=None, domains=None):
+            calls.append(domains)
+            return {"signals": {"futures": {
+                "direction": "WAIT", "confidence": 0,
+                "reason": "test signal",
+            }}}
+
+        self.system.analyze_live = analyze
+        result = self.system.scan_futures(limit=1)
+        self.assertTrue(result["success"])
+        self.assertEqual(calls, [["futures"]])
+
+    def test_spot_scan_analyzes_only_spot_market_data(self):
+        self.system.market_feed._request = lambda market, endpoint, params: [
+            {"symbol": "ETHUSDT", "quoteVolume": "30000000", "lastPrice": "100"}
+        ]
+        calls = []
+
+        def analyze(symbol, preferred_timeframe=None, domains=None):
+            calls.append(domains)
+            return {"signals": {"spot": {
+                "direction": "WAIT", "confidence": 0,
+                "reason": "test signal",
+            }}}
+
+        self.system.analyze_live = analyze
+        result = self.system.scan_spot(limit=1, min_quote_volume=1)
+        self.assertTrue(result["success"])
+        self.assertEqual(calls, [["spot"]])
+
 if __name__ == "__main__":
     unittest.main()

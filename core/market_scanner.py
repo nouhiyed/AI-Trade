@@ -3,8 +3,8 @@ from core.binance_market_data import BinanceMarketData
 
 
 class FuturesMarketScanner:
-    def __init__(self, timeout=12):
-        self.market = BinanceMarketData(timeout=timeout)
+    def __init__(self, timeout=6):
+        self.market = BinanceMarketData(timeout=timeout, total_timeout=timeout)
 
     def scan_universe(self, limit=12, min_quote_volume=None):
         limit = max(1, min(int(limit), 30))

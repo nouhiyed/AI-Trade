@@ -10,9 +10,9 @@ from core.binance_market_data import BinanceMarketData
 
 
 class MarketDataEngine:
-    def __init__(self, raw_dir="data/raw"):
+    def __init__(self, raw_dir="data/raw", timeout=6):
         self.raw_dir = Path(raw_dir)
-        self.binance = BinanceMarketData()
+        self.binance = BinanceMarketData(timeout=timeout, total_timeout=timeout)
 
         self.timeframes = {
             "futures": ["1m", "5m", "15m", "1h"],
@@ -157,7 +157,8 @@ class MarketDataEngine:
             "spot": "spot"
         }
 
-        selected_domains = set(domains or market_domains.values())
+        selected_domains = (set(market_domains.values()) if domains is None
+                            else set(domains))
         unknown_domains = selected_domains.difference(market_domains.values())
         if unknown_domains:
             raise ValueError("Unknown market domain(s): " + ", ".join(sorted(unknown_domains)))

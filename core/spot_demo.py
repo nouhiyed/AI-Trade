@@ -73,7 +73,7 @@ class SpotDemoMixin:
         for item in universe:
             symbol = item["symbol"]
             try:
-                analysis = self.analyze_live(symbol)
+                analysis = self.analyze_live(symbol, domains=["spot"])
                 signal = analysis.get("signals", {}).get("spot", {})
                 opp = self._as_opportunity(item, signal, "spot")
                 if opp:

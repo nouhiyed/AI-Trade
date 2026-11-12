@@ -100,8 +100,9 @@ class Autopilot:
         """Run one cycle and always publish its latest outcome."""
         with self._lock:
             cfg = dict(self.config)
-            result = {"status": "RUNNING", "opened": [], "skipped": [],
-                      "scanned": 0, "actionable": 0}
+            result = {"status": "RUNNING", "phase": "starting",
+                      "opened": [], "skipped": [], "scanned": 0,
+                      "actionable": 0}
             self.last_run = int(self.clock())
             self.last_result = dict(result)
 
@@ -134,6 +135,9 @@ class Autopilot:
                 # domain processor must not hide results from the other domains.
                 for domain, scan_fn in sources:
                     try:
+                        result["phase"] = "scanning"
+                        result["current_domain"] = domain
+                        self.last_result = dict(result)
                         scan = scan_fn()
                         if not isinstance(scan, dict):
                             raise TypeError("Scanner returned an invalid response")
@@ -150,6 +154,8 @@ class Autopilot:
                                 "reason": scan.get("reason", "Scan failed"),
                             })
                             continue
+                        result["phase"] = "processing"
+                        self.last_result = dict(result)
                         slots = self._process(
                             domain, scan, cfg, open_symbols, slots, result)
                     except Exception as error:
@@ -158,6 +164,8 @@ class Autopilot:
                             "reason": "Domain processing error: " + str(error),
                         })
                 result["status"] = "COMPLETED"
+                result["phase"] = "completed"
+                result.pop("current_domain", None)
             except Exception as error:
                 result["status"] = "ERROR"
                 result["error"] = str(error)
@@ -165,8 +173,12 @@ class Autopilot:
                     "reason": "Autopilot cycle error: " + str(error),
                 })
             finally:
-                # Never leave the dashboard showing a previous cycle's result.
-                self.last_result = result
+                # Publish the terminal state even if one domain raises unexpectedly.
+                if result.get("status") == "RUNNING":
+                    result["status"] = "ERROR"
+                    result["phase"] = "error"
+                result.pop("current_domain", None)
+                self.last_result = dict(result)
             return result
 
     def _process(self, domain, scan, cfg, open_symbols, slots, result):
