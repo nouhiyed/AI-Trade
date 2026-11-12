@@ -353,7 +353,7 @@ def run_one(client, market_engine, planner, market, symbol, years, cache_dir):
 
 def main():
     parser = argparse.ArgumentParser(description="AI-Trader historical backtest")
-    parser.add_argument("--years", type=int, choices=(1, 2, 3), default=1)
+    parser.add_argument("--years", type=int, choices=(1, 2, 3), default=2)
     parser.add_argument("--symbols", nargs="+", default=list(SYMBOLS))
     parser.add_argument("--output", default="backtest_results")
     parser.add_argument("--cache", default="data/backtest_cache")
