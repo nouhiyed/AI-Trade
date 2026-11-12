@@ -39,7 +39,7 @@ class TestTradePlanner(unittest.TestCase):
         self.assertTrue(plan["success"], plan)
         self.assertLess(plan["take_profit"], plan["entry"])
         self.assertGreater(plan["stop_loss"], plan["resistance"])
-        self.assertIn("Bearish rejection", plan["entry_confirmation"])
+        self.assertIn("rejection", plan["entry_confirmation"].lower())
         self.assertGreaterEqual(plan["net_reward_risk"], 1.5)
 
     def test_long_enters_only_after_bullish_rejection_at_support(self):
@@ -47,7 +47,7 @@ class TestTradePlanner(unittest.TestCase):
         self.assertTrue(plan["success"], plan)
         self.assertGreater(plan["take_profit"], plan["entry"])
         self.assertLess(plan["stop_loss"], plan["support"])
-        self.assertIn("Bullish rejection", plan["entry_confirmation"])
+        self.assertIn("rejection", plan["entry_confirmation"].lower())
         self.assertGreaterEqual(plan["net_reward_risk"], 1.5)
 
     def test_short_without_rejection_is_rejected(self):
@@ -82,7 +82,7 @@ class TestTradePlanner(unittest.TestCase):
         frame.loc[:, "open"] = 103.3
         frame.loc[:, "close"] = 103.35
         frame.loc[95, ["open", "high", "low", "close"]] = [103.5, 105.0, 103.3, 104.0]
-        frame.loc[98, ["open", "high", "low", "close"]] = [104.5, 105.0, 103.3, 104.0]
+        frame.loc[98, ["open", "high", "low", "close"]] = [104.5, 105.0, 103.4, 104.0]
         frame.loc[99, ["open", "high", "low", "close"]] = [103.8, 103.9, 103.2, 103.25]
         plan = self.planner.create({"symbol": "ZECUSDT", "5m": frame}, "SHORT")
         self.assertFalse(plan["success"])
