@@ -40,7 +40,7 @@ class TestTradePlanner(unittest.TestCase):
         self.assertLess(plan["take_profit"], plan["entry"])
         self.assertGreater(plan["stop_loss"], plan["resistance"])
         self.assertIn("Bearish rejection", plan["entry_confirmation"])
-        self.assertGreater(plan["net_reward_risk"], 1.0)
+        self.assertGreaterEqual(plan["net_reward_risk"], 1.5)
 
     def test_long_enters_only_after_bullish_rejection_at_support(self):
         plan = self.planner.create({"symbol": "BTCUSDT", "5m": self.frame("LONG")}, "LONG")
@@ -48,6 +48,7 @@ class TestTradePlanner(unittest.TestCase):
         self.assertGreater(plan["take_profit"], plan["entry"])
         self.assertLess(plan["stop_loss"], plan["support"])
         self.assertIn("Bullish rejection", plan["entry_confirmation"])
+        self.assertGreaterEqual(plan["net_reward_risk"], 1.5)
 
     def test_short_without_rejection_is_rejected(self):
         frame = self.frame()
@@ -55,6 +56,13 @@ class TestTradePlanner(unittest.TestCase):
         plan = self.planner.create({"symbol": "ZECUSDT", "5m": frame}, "SHORT")
         self.assertFalse(plan["success"])
         self.assertTrue("follow-through" in plan["reason"].lower() or "rejection" in plan["reason"].lower())
+
+    def test_short_is_blocked_after_resistance_breakout_even_if_price_falls_back(self):
+        frame = self.frame()
+        frame.loc[97, ["open", "high", "low", "close"]] = [104.8, 105.6, 104.5, 105.4]
+        plan = self.planner.create({"symbol": "ZECUSDT", "5m": frame}, "SHORT")
+        self.assertFalse(plan["success"])
+        self.assertIn("breakout", plan["reason"].lower())
 
     def test_short_without_resistance_is_rejected_not_given_fake_atr_stop(self):
         frame = self.frame()
