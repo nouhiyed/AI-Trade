@@ -101,6 +101,15 @@ class _ProChartScreenState extends State<ProChartScreen> {
   }
 
   @override
+  void didUpdateWidget(covariant ProChartScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!listEquals(oldWidget.positions, widget.positions) && _pageReady) {
+      _pushLevels();
+      _pushTradeMarkers();
+    }
+  }
+
+  @override
   void dispose() {
     _timer?.cancel();
     super.dispose();
