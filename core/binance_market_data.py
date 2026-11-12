@@ -30,13 +30,6 @@ class BinanceMarketData:
             "https://fapi4.binance.com",
         ),
     }
-    ALPHA_BASE_URLS = (
-        "https://www.binance.com",
-        "https://bapi.binance.com",
-        "https://api.binance.com",
-        "https://api1.binance.com",
-    )
-
     CANDLE_COLUMNS = [
         "open_time", "open", "high", "low", "close", "volume",
         "close_time", "quote_volume", "trades",
@@ -144,92 +137,6 @@ class BinanceMarketData:
             timezone.utc
         ).isoformat()
 
-        return df
-
-    def _alpha_request(self, endpoint, params=None):
-        failures = []
-        for base_url in self.ALPHA_BASE_URLS:
-            try:
-                response = self.session.get(
-                    base_url + endpoint,
-                    params=params or {},
-                    timeout=min(self.timeout, 5),
-                )
-                response.raise_for_status()
-                result = response.json()
-                if not isinstance(result, dict) or result.get("code") != "000000":
-                    raise RuntimeError(
-                        "Binance Alpha API error: " +
-                        str(result.get("message", "Invalid response") if isinstance(result, dict) else result)
-                    )
-                return result.get("data")
-            except (requests.RequestException, ValueError, RuntimeError) as error:
-                failures.append(f"{base_url}: {type(error).__name__}: {error}")
-        raise RuntimeError(
-            "All official Binance Alpha API endpoints failed: "
-            + " | ".join(failures[-3:])
-        )
-
-    def fetch_alpha_symbols(self):
-        data = self._alpha_request(
-            "/bapi/defi/v1/public/alpha-trade/get-exchange-info"
-        )
-        if not isinstance(data, dict):
-            raise RuntimeError("Invalid Binance Alpha exchange info")
-        return sorted({
-            item["symbol"] for item in data.get("symbols", [])
-            if item.get("status") == "TRADING"
-            and item.get("quoteAsset") == "USDT"
-            and item.get("symbol")
-        })
-
-    def fetch_alpha_candles(
-        self, symbol, interval="5m", limit=200,
-        start_time=None, end_time=None
-    ):
-        if not 2 <= int(limit) <= 1000:
-            raise ValueError("limit must be between 2 and 1000")
-        raw = self._alpha_request(
-            "/bapi/defi/v1/public/alpha-trade/klines",
-            {
-                **{
-                    "symbol": str(symbol).upper(),
-                    "interval": interval,
-                    "limit": int(limit)
-                },
-                **({"startTime": int(start_time)} if start_time is not None else {}),
-                **({"endTime": int(end_time)} if end_time is not None else {}),
-            }
-        )
-        if not isinstance(raw, list) or not raw:
-            raise RuntimeError("Binance Alpha returned no candle data")
-        df = pd.DataFrame(raw, columns=self.CANDLE_COLUMNS)
-        numeric = [
-            "open", "high", "low", "close", "volume",
-            "quote_volume", "trades", "taker_buy_base",
-            "taker_buy_quote"
-        ]
-        for column in numeric:
-            df[column] = pd.to_numeric(df[column], errors="coerce")
-        df["open_time"] = pd.to_datetime(
-            pd.to_numeric(df["open_time"]), unit="ms", utc=True
-        )
-        df["close_time"] = pd.to_datetime(
-            pd.to_numeric(df["close_time"]), unit="ms", utc=True
-        )
-        df["is_closed"] = df["close_time"] < pd.Timestamp.now(tz="UTC")
-        df = df.dropna(
-            subset=["open", "high", "low", "close", "volume"]
-        ).reset_index(drop=True)
-        if len(df) < 2:
-            raise RuntimeError("Not enough Alpha candles")
-        df.attrs.update({
-            "market": "alpha",
-            "symbol": str(symbol).upper(),
-            "interval": interval,
-            "source": "binance_alpha_rest",
-            "received_at": datetime.now(timezone.utc).isoformat()
-        })
         return df
 
     def fetch_symbols(self, market):
