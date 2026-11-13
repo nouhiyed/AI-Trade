@@ -1,0 +1,123 @@
+name: AI-Trader Adaptive Trend Research Backtest
+
+on:
+  workflow_dispatch:
+    inputs:
+      years:
+        description: Historical period
+        required: true
+        type: choice
+        options: ["1", "2", "3"]
+        default: "2"
+  push:
+    branches:
+      - "research/adaptive-trend-v1"
+    paths:
+      - "core/adaptive_trend.py"
+      - "scripts/backtest_adaptive.py"
+      - "tests/test_adaptive_trend.py"
+      - ".github/workflows/adaptive-backtest.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-trader-adaptive-backtest
+  cancel-in-progress: false
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pytest pillow
+      - name: Compile and run all unit tests
+        run: |
+          python -m compileall -q agents api core scripts tests
+          python -m pytest -q tests
+
+  backtest:
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        symbol:
+          - BTCUSDT
+          - ETHUSDT
+          - BNBUSDT
+          - SOLUSDT
+          - XRPUSDT
+          - ADAUSDT
+          - DOGEUSDT
+          - LINKUSDT
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+      - name: Run existing baseline on the same symbol and date window
+        run: |
+          python scripts/backtest.py \
+            --years "${{ inputs.years || '2' }}" \
+            --symbols "${{ matrix.symbol }}" \
+            --output "baseline_results"
+      - name: Run Adaptive Trend v1 on the same cached market data
+        run: |
+          python scripts/backtest_adaptive.py \
+            --years "${{ inputs.years || '2' }}" \
+            --symbols "${{ matrix.symbol }}" \
+            --output "adaptive_backtest_results"
+      - name: Compare baseline and Adaptive Trend per market
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          symbol = "${{ matrix.symbol }}"
+          result = {"symbol": symbol, "comparison_basis": "same workflow run, same requested years, same Binance monthly archives"}
+          rows = []
+          for market in ("futures", "spot"):
+              old = json.loads(Path(f"baseline_results/{symbol}/{market}_summary.json").read_text())
+              new = json.loads(Path(f"adaptive_backtest_results/{symbol}/{market}_summary.json").read_text())
+              rows.append({
+                  "market": market,
+                  "baseline": {k: old.get(k) for k in ("start", "end", "trades", "net_pnl", "net_return_pct", "profit_factor", "max_drawdown_pct", "win_rate_pct")},
+                  "adaptive": {k: new.get(k) for k in ("start", "end", "trades", "net_pnl", "net_return_pct", "profit_factor", "max_drawdown_pct", "win_rate_pct")},
+                  "net_pnl_change": round(float(new.get("net_pnl", 0)) - float(old.get("net_pnl", 0)), 4),
+              })
+          result["markets"] = rows
+          result["warning"] = "Futures and Spot are independent per-market backtests, not one shared portfolio."
+          out = Path(f"adaptive_backtest_results/{symbol}/comparison.json")
+          out.write_text(json.dumps(result, indent=2), encoding="utf-8")
+          print(out.read_text())
+          PY
+      - name: Upload baseline, adaptive reports, and comparison
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Trader-Adaptive-Comparison-${{ matrix.symbol }}-${{ inputs.years || '2' }}-year
+          path: |
+            baseline_results/${{ matrix.symbol }}/
+            adaptive_backtest_results/${{ matrix.symbol }}/
+          if-no-files-found: warn
+          retention-days: 30
+
+# Trigger research comparison run automatically when this workflow definition changes.
+# Manual dispatch remains available for selecting a different historical window.
+# Trigger repair: 2026-11-13
