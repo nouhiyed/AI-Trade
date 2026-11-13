@@ -27,7 +27,7 @@ concurrency:
 
 jobs:
   backtest:
-    name: Backtest \${{ matrix.symbol }} (Futures + Spot)
+    name: Backtest ${{ matrix.symbol }} (Futures + Spot)
     runs-on: ubuntu-latest
     timeout-minutes: 360
     strategy:
@@ -66,24 +66,24 @@ jobs:
       - name: Run this coin in Futures and Spot and save checkpoints
         run: |
           python scripts/backtest.py \
-            --years "\${{ inputs.years || '2' }}" \
-            --symbols "\${{ matrix.symbol }}" \
-            --output "backtest_results/\${{ matrix.symbol }}"
+            --years "${{ inputs.years || '2' }}" \
+            --symbols "${{ matrix.symbol }}" \
+            --output "backtest_results/${{ matrix.symbol }}"
 
       - name: Render charts for this coin's completed trades
-        if: always() && hashFiles('backtest_results/\${{ matrix.symbol }}/trades.csv') != ''
+        if: always() && hashFiles('backtest_results/${{ matrix.symbol }}/trades.csv') != ''
         run: |
           python scripts/plot_backtest_trades.py \
-            --trades "backtest_results/\${{ matrix.symbol }}/trades.csv" \
+            --trades "backtest_results/${{ matrix.symbol }}/trades.csv" \
             --cache data/backtest_cache \
-            --output "backtest_results/\${{ matrix.symbol }}/trade_charts" \
-            --years "\${{ inputs.years || '2' }}"
+            --output "backtest_results/${{ matrix.symbol }}/trade_charts" \
+            --years "${{ inputs.years || '2' }}"
 
       - name: Upload this coin's independent report and charts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: AI-Trader-Backtest-\${{ matrix.symbol }}-\${{ inputs.years || '2' }}-year
-          path: backtest_results/\${{ matrix.symbol }}/
+          name: AI-Trader-Backtest-${{ matrix.symbol }}-${{ inputs.years || '2' }}-year
+          path: backtest_results/${{ matrix.symbol }}/
           if-no-files-found: warn
           retention-days: 30
