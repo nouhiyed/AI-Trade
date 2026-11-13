@@ -49,8 +49,6 @@ def classify_market_regime(market_data):
         if evidence:
             strength = 0.5 if adx is not None and adx < 18 else 1.0
             votes.append((score / evidence) * weight * strength)
-    total = sum(weight for _, weight in (("1h", 3), ("15m", 2), ("5m", 1))
-                if market_data.get(_))
     if not votes:
         regime, confidence = "RANGING", 0.0
     else:
