@@ -280,8 +280,9 @@ def run_one(client, market_engine, planner, market, symbol, years, cache_dir):
             position["mfe_pct"] = max(position.get("mfe_pct", 0.0), favorable)
             position["mae_pct"] = max(position.get("mae_pct", 0.0), adverse)
             stop_hit, stop_price = _bar_hit(bar, direction, position["stop"], True)
-            target = position["target2"] if position["tp1_done"] else position["target1"]
-            target_hit, target_price = _bar_hit(bar, direction, target, False)
+            target_hit, target_price = (False, None)
+            if not position["tp1_done"]:
+                target_hit, target_price = _bar_hit(bar, direction, position["target1"], False)
             # Conservative intrabar ordering: stop before any target.
             if stop_hit:
                 reason = "STOP_LOSS_AFTER_TP1" if position["tp1_done"] else "STOP_LOSS"
@@ -290,20 +291,14 @@ def run_one(client, market_engine, planner, market, symbol, years, cache_dir):
                 _finalize(position, trades)
                 position = None
             elif target_hit:
-                if not position["tp1_done"] and position["target2"] is not None:
-                    qty = min(position["initial_quantity"] * 0.70, position["remaining_quantity"])
-                    equity = _close_quantity(position, target_price, qty, "TAKE_PROFIT_1", market, equity)
-                    position["tp1_done"] = True
-                    buffer = position["round_trip_cost"]
-                    position["stop"] = (position["entry_fill"] * (1 + buffer) if direction == "LONG"
-                                        else position["entry_fill"] * (1 - buffer))
-                    position["last_exit_time"] = pd.Timestamp(bar["close_time"]).isoformat()
-                else:
-                    reason = "TAKE_PROFIT_2" if position["tp1_done"] else "TAKE_PROFIT"
-                    equity = _close_quantity(position, target_price, position["remaining_quantity"], reason, market, equity)
-                    position["last_exit_time"] = pd.Timestamp(bar["close_time"]).isoformat()
-                    _finalize(position, trades)
-                    position = None
+                qty = min(position["initial_quantity"] * 0.30, position["remaining_quantity"])
+                equity = _close_quantity(position, target_price, qty, "TAKE_PROFIT_1", market, equity)
+                position["tp1_done"] = True
+                buffer = position["round_trip_cost"]
+                position["stop"] = (position["entry_fill"] * (1 + buffer) if direction == "LONG"
+                                    else position["entry_fill"] * (1 - buffer))
+                position["best_price"] = float(bar["high"] if direction == "LONG" else bar["low"])
+                position["last_exit_time"] = pd.Timestamp(bar["close_time"]).isoformat()
 
         # After TP1, trail the remaining position using only candles closed
         # through the current 5m bar. The updated stop is active from the next bar.

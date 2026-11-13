@@ -94,7 +94,7 @@ jobs:
           from pathlib import Path
 
           symbol = "${{ matrix.symbol }}"
-          result = {"symbol": symbol, "comparison_basis": "same workflow run, same requested years, same Binance monthly archives"}
+          result = {"symbol": symbol, "comparison_basis": "same workflow run, same requested years, same Binance monthly archives, matched 0.25% risk, same dynamic cost and exit engines"}
           rows = []
           for market in ("futures", "spot"):
               old = json.loads(Path(f"baseline_results/{symbol}/{market}_summary.json").read_text())

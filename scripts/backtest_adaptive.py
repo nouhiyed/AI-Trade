@@ -20,6 +20,7 @@ from backtest import (
 )
 from core.adaptive_trend import AdaptiveTrendStrategy
 from core.market_data_engine import MarketDataEngine
+from core.trailing_stop import calculate_trailing_stop
 from core.backtest_costs import BacktestCostModel, load_funding_history, apply_funding
 import backtest as baseline_engine
 
@@ -97,14 +98,16 @@ def run_one(market, symbol, years, cache_dir):
                 position["last_exit_time"] = pd.Timestamp(bar["close_time"]).isoformat()
 
             if position is not None and position["tp1_done"]:
-                atr = float(bar.get("ATR", bar.get("atr", 0)) or 0)
-                if atr > 0:
-                    best = float(bar["high"] if direction == "LONG" else bar["low"])
-                    position["best_price"] = (max(position["best_price"], best) if direction == "LONG"
-                                              else min(position["best_price"], best))
-                    position["stop"] = strategy.update_trailing_stop(
-                        direction, position["stop"], position["best_price"], atr, multiplier=3.0
-                    )
+                trail_frame = base.iloc[max(0, i - 60):i + 1]
+                trail = calculate_trailing_stop(
+                    trail_frame, position["direction"], position["stop"],
+                    position.get("best_price", position["entry_fill"]),
+                    float(bar["close"]),
+                )
+                if trail is not None:
+                    position["stop"] = float(trail["stop"])
+                    position["best_price"] = float(trail["best_price"])
+                    position["trailing_atr"] = float(trail["atr"])
 
         mark_equity = equity
         if position is not None:
