@@ -83,6 +83,9 @@ def render_trade(trade: pd.Series, candles: pd.DataFrame, number: int, output: P
     ax.set_xticks(positions, labels, rotation=18, ha="right")
     pnl = float(trade["net_pnl"])
     fees = float(trade["fees"])
+    spread_cost = float(trade.get("spread_cost_estimated", 0.0) or 0.0)
+    slippage_cost = float(trade.get("slippage_cost_estimated", 0.0) or 0.0)
+    funding_pnl = float(trade.get("funding_pnl", 0.0) or 0.0)
     market = str(trade["market"]).upper()
     symbol = str(trade["symbol"])
     direction = str(trade["direction"]).upper()
@@ -90,7 +93,7 @@ def render_trade(trade: pd.Series, candles: pd.DataFrame, number: int, output: P
     strategy = str(trade.get("strategy", "unknown"))
     ax.set_title(
         f"TRADE #{number:02d}  |  {symbol} {market} {direction}  |  {trade['timeframe']}\n"
-        f"Strategy: {strategy}  |  Net PnL: {pnl:+.4f} USDT  |  Fees: {fees:.4f} USDT  |  Exit: {reason}",
+        f"Strategy: {strategy}  |  Net PnL: {pnl:+.4f} USDT  |  Fees: {fees:.4f}  |  Spread est.: {spread_cost:.4f}  |  Slippage est.: {slippage_cost:.4f}  |  Funding: {funding_pnl:+.4f}  |  Exit: {reason}",
         color="#f8fafc", fontsize=13, fontweight="bold", pad=16,
     )
     ax.set_ylabel("Price (USDT)", color="#cbd5e1")
