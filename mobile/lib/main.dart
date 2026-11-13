@@ -1268,9 +1268,6 @@ class _TradeShellState extends State<TradeShell>
               height: 43,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(15),
-                gradient: const LinearGradient(
-                  colors: [cyan, blue, violet],
-                ),
                 boxShadow: [
                   BoxShadow(
                     color: cyan.withOpacity(.25),
@@ -1278,7 +1275,17 @@ class _TradeShellState extends State<TradeShell>
                   )
                 ],
               ),
-              child: const Icon(Icons.auto_awesome, color: Color(0xFF07111D)),
+              clipBehavior: Clip.antiAlias,
+              child: Image.asset(
+                'assets/images/app_logo.jpg',
+                width: 43,
+                height: 43,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => const Icon(
+                  Icons.auto_awesome,
+                  color: cyan,
+                ),
+              ),
             ),
             const SizedBox(width: 9),
             Column(
