@@ -82,6 +82,29 @@ jobs:
           cp android_templates/MainActivity.kt android/app/src/main/kotlin/com/example/ai_trade/MainActivity.kt
           cp android_templates/TradingKeepAliveService.kt android/app/src/main/kotlin/com/example/ai_trade/TradingKeepAliveService.kt
 
+      - name: Install Soulaymen AI Traiding launcher branding
+        working-directory: mobile
+        run: |
+          mkdir -p android/app/src/main/res/drawable
+          mkdir -p android/app/src/main/res/mipmap-anydpi-v26
+          mkdir -p android/app/src/main/res/values
+          cp android_templates/res/drawable/ic_launcher_foreground.xml android/app/src/main/res/drawable/
+          cp android_templates/res/mipmap-anydpi-v26/ic_launcher.xml android/app/src/main/res/mipmap-anydpi-v26/
+          cp android_templates/res/values/ic_launcher_background.xml android/app/src/main/res/values/
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          import re
+          p = Path("android/app/src/main/AndroidManifest.xml")
+          s = p.read_text()
+          s, count = re.subn(r'android:label="[^"]*"', 'android:label="Soulaymen ai traiding"', s, count=1)
+          if count != 1:
+              raise SystemExit("ERROR: Android app label was not found")
+          if 'android:icon="@mipmap/ic_launcher"' not in s:
+              s = re.sub(r'<application\\b', '<application android:icon="@mipmap/ic_launcher"', s, count=1)
+          p.write_text(s)
+          print("Soulaymen ai traiding app label and adaptive icon configured")
+          PYTHON
+
       - name: Configure Gradle distribution download
         working-directory: mobile
         run: |
