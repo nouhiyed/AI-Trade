@@ -68,9 +68,9 @@ class AdaptiveTrendTests(unittest.TestCase):
                     "close": 100.6, "volume": 120.0, "ATR": 1.0}
         fifteen = pd.DataFrame(rows)
         five = pd.DataFrame([
-            {"open": 100.5, "high": 101.0, "low": 100.2, "close": 100.7},
-            {"open": 100.7, "high": 101.5, "low": 100.6, "close": 101.2},
-            {"open": 101.2, "high": 102.0, "low": 101.0, "close": 101.8},
+            {"open": 100.5, "high": 101.0, "low": 100.2, "close": 100.7, "quote_volume": 100000000.0},
+            {"open": 100.7, "high": 101.5, "low": 100.6, "close": 101.2, "quote_volume": 100000000.0},
+            {"open": 101.2, "high": 102.0, "low": 101.0, "close": 101.8, "quote_volume": 100000000.0},
         ])
         return {"symbol": "BTCUSDT", "1h": hourly, "15m": fifteen, "5m": five}
 
