@@ -119,13 +119,16 @@ class HistoricalTradeChartPainter extends CustomPainter {
     // Place markers on the actual entry/exit candles using their timestamps.
     int nearestIndex(int? timestamp) {
       if (timestamp == null || candles.isEmpty) return -1;
+      final targetTime = timestamp >= 1000000000000
+          ? (timestamp / 1000).round()
+          : timestamp;
       var bestIndex = -1;
       var bestDistance = 1 << 62;
       for (var i = 0; i < candles.length; i++) {
         final raw = candles[i]['time'];
         final time = raw is num ? raw.toInt() : int.tryParse('$raw');
         if (time == null) continue;
-        final distance = (time - timestamp).abs();
+        final distance = (time - targetTime).abs();
         if (distance < bestDistance) {
           bestDistance = distance;
           bestIndex = i;
