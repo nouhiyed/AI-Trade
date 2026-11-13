@@ -24,6 +24,7 @@ from agents.spot.agent import SpotAgent
 from core.binance_market_data import BinanceMarketData
 from core.market_data_engine import MarketDataEngine
 from core.trade_planner import TradePlanner
+from core.trailing_stop import calculate_trailing_stop
 
 SYMBOLS = ("BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT", "DOGEUSDT", "LINKUSDT")
 TIMEFRAMES = {
@@ -261,6 +262,20 @@ def run_one(client, market_engine, planner, market, symbol, years, cache_dir):
                     position["last_exit_time"] = pd.Timestamp(bar["close_time"]).isoformat()
                     _finalize(position, trades)
                     position = None
+
+        # After TP1, trail the remaining position using only candles closed
+        # through the current 5m bar. The updated stop is active from the next bar.
+        if position is not None and position["tp1_done"]:
+            trail_frame = base.iloc[max(0, i - 60):i + 1]
+            trail = calculate_trailing_stop(
+                trail_frame, position["direction"], position["stop"],
+                position.get("best_price", position["entry_fill"]),
+                float(bar["close"]),
+            )
+            if trail is not None:
+                position["stop"] = float(trail["stop"])
+                position["best_price"] = float(trail["best_price"])
+                position["trailing_atr"] = float(trail["atr"])
 
         mark_equity = equity
         if position is not None:
