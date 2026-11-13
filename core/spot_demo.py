@@ -8,6 +8,7 @@ import time
 from decimal import Decimal, ROUND_DOWN
 
 from core.learning import setup_key as make_setup_key
+from core.trailing_stop import calculate_trailing_stop
 
 SPOT_LIKE = ("spot",)
 MAX_ENTRY_DEVIATION = Decimal("0.01")
@@ -299,11 +300,23 @@ class SpotDemoMixin:
                     symbol = str(snapshot["symbol"]).upper()
                     stop = Decimal(str(snapshot["stop_loss"]))
                     target = Decimal(str(snapshot["take_profit"]))
+                    trailing_active = bool(snapshot.get("trailing_stop_active"))
 
                     # Quote and candle catch-up run without the global coordinator lock.
                     price = self._spot_like_price(domain, symbol, "SELL")
+                    trail_update = None
+                    if trailing_active:
+                        trail_frame = self.market_feed.fetch_candles(
+                            "spot", symbol, "5m", limit=40, closed_only=True)
+                        trail_update = calculate_trailing_stop(
+                            trail_frame, "LONG", stop,
+                            snapshot.get("trailing_best_price"), price)
+                        if trail_update:
+                            stop = Decimal(str(trail_update["stop"]))
                     try:
-                        missed = self._catch_up(snapshot, "LONG", stop, target)
+                        missed = self._catch_up(
+                            snapshot, "LONG", stop,
+                            None if trailing_active else target)
                     except Exception as catch_error:
                         missed = None
                         with self._demo_lock:
@@ -314,10 +327,10 @@ class SpotDemoMixin:
                     reason, exit_price = (missed if missed else (None, price))
                     if reason is None:
                         if price <= stop:
-                            reason = "STOP_LOSS"
-                        elif price >= target:
+                            reason = "TRAILING_STOP" if trailing_active else "STOP_LOSS"
+                        elif not trailing_active and price >= target:
                             reason = "TAKE_PROFIT"
-                        else:
+                        elif not trailing_active:
                             entry = Decimal(str(snapshot.get("entry_price") or 0))
                             quantity = Decimal(str(snapshot.get("quantity") or 0))
                             entry_fee = Decimal(str(snapshot.get("entry_fee") or 0))
@@ -327,7 +340,22 @@ class SpotDemoMixin:
                             net_profit = (price - entry) * quantity - entry_fee - exit_cost
                             target_net = entry * quantity * Decimal("0.03")
                             if quantity > 0 and net_profit >= target_net:
-                                reason = "NET_PROFIT_3_PERCENT"
+                                # Arm the trailing stop instead of cashing out at a
+                                # fixed 3% threshold. The remaining position can run.
+                                trailing_active = True
+                                entry_cost_buffer = Decimal("2") * (
+                                    self.demo_execution.fee_rate
+                                    + self.demo_execution.slippage_rate
+                                )
+                                stop = max(
+                                    stop,
+                                    entry * (Decimal("1") + entry_cost_buffer)
+                                )
+                                trail_update = {
+                                    "stop": stop,
+                                    "best_price": price,
+                                    "method": "ARMED_AT_NET_3_PERCENT",
+                                }
 
                     with self._demo_lock:
                         current = self.demo_positions.get(position_id)
@@ -336,6 +364,23 @@ class SpotDemoMixin:
                         ):
                             continue
                         current["last_checked_ms"] = int(time.time() * 1000)
+                        if trailing_active:
+                            current["trailing_stop_active"] = True
+                            current["trailing_best_price"] = str(
+                                trail_update["best_price"] if trail_update
+                                else snapshot.get("trailing_best_price") or price)
+                            current["stop_loss"] = str(
+                                trail_update["stop"] if trail_update else stop)
+                            current["trailing_activated_ms"] = (
+                                current.get("trailing_activated_ms")
+                                or int(time.time() * 1000))
+                            current["trailing_stop_method"] = (
+                                trail_update.get("method", "ATR_1.5x_PLUS_5_CANDLE_STRUCTURE")
+                                if trail_update else "ATR_1.5x_PLUS_5_CANDLE_STRUCTURE")
+                            if trail_update and trail_update.get("atr") is not None:
+                                current["trailing_atr"] = str(trail_update["atr"])
+                                current["trailing_structure_level"] = str(
+                                    trail_update["structure_level"])
                         if reason:
                             result = self._close_spot_like(
                                 position_id, current, reason, exit_price
