@@ -350,10 +350,21 @@ def run_one(client, market_engine, planner, market, symbol, years, cache_dir):
                 continue
             direction = "LONG"
 
+        dynamic_cost = cost_model.components(agent_data[BASE_TIMEFRAME].iloc[-1])["total_adverse_rate"]
         plan = planner.create(agent_data, direction, min_reward_risk=1.5,
-                              preferred_timeframe=BASE_TIMEFRAME, market=market)
+                              preferred_timeframe=BASE_TIMEFRAME, market=market,
+                              slippage_rate=dynamic_cost)
         if plan.get("success") is not True:
             continue
+
+        # Compare entry engines under the same 2R target rule; stop placement
+        # remains native to each strategy and trailing management is shared.
+        planned_entry = float(plan["entry"])
+        planned_stop = float(plan["stop_loss"])
+        comparison_risk = abs(planned_entry - planned_stop)
+        plan["take_profit"] = (planned_entry + 2.0 * comparison_risk if direction == "LONG"
+                               else planned_entry - 2.0 * comparison_risk)
+        plan["take_profit_2"] = None
 
         next_bar = base.iloc[i + 1]
         raw_entry, planned_entry = float(next_bar["open"]), float(plan["entry"])
