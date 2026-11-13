@@ -762,8 +762,7 @@ class TradingCoordinator(SpotDemoMixin):
                         stop = Decimal(str(trail_update["stop"]))
                 try:
                     missed = self._catch_up(
-                        snapshot, direction, stop,
-                        None if snapshot.get("trailing_stop_active") else target)
+                        snapshot, direction, stop, target)
                 except Exception as catch_error:
                     missed = None
                     with self._demo_lock:
@@ -779,12 +778,12 @@ class TradingCoordinator(SpotDemoMixin):
                 elif direction == "LONG":
                     if exit_price <= stop:
                         reason = "TRAILING_STOP" if snapshot.get("trailing_stop_active") else "STOP_LOSS"
-                    elif not snapshot.get("trailing_stop_active") and exit_price >= target:
+                    elif exit_price >= target:
                         reason = "TAKE_PROFIT"
                 elif direction == "SHORT":
                     if exit_price >= stop:
                         reason = "TRAILING_STOP" if snapshot.get("trailing_stop_active") else "STOP_LOSS"
-                    elif not snapshot.get("trailing_stop_active") and exit_price <= target:
+                    elif exit_price <= target:
                         reason = "TAKE_PROFIT"
 
                 # Serialize only the short state/ledger update. If a manual close
