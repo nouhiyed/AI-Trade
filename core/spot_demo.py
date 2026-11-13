@@ -306,13 +306,19 @@ class SpotDemoMixin:
                     price = self._spot_like_price(domain, symbol, "SELL")
                     trail_update = None
                     if trailing_active:
-                        trail_frame = self.market_feed.fetch_candles(
-                            "spot", symbol, "5m", limit=40, closed_only=True)
-                        trail_update = calculate_trailing_stop(
-                            trail_frame, "LONG", stop,
-                            snapshot.get("trailing_best_price"), price)
-                        if trail_update:
-                            stop = Decimal(str(trail_update["stop"]))
+                        try:
+                            trail_frame = self.market_feed.fetch_candles(
+                                "spot", symbol, "5m", limit=40, closed_only=True)
+                            trail_update = calculate_trailing_stop(
+                                trail_frame, "LONG", stop,
+                                snapshot.get("trailing_best_price"), price)
+                            if trail_update:
+                                stop = Decimal(str(trail_update["stop"]))
+                        except Exception as trail_error:
+                            with self._demo_lock:
+                                current = self.demo_positions.get(position_id)
+                                if current:
+                                    current["trailing_update_error"] = str(trail_error)
                     try:
                         missed = self._catch_up(
                             snapshot, "LONG", stop,
