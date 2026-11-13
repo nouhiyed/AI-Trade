@@ -99,7 +99,9 @@ class AdaptiveTrendStrategy:
                 touched = lo <= level + tolerance if direction == "LONG" else hi >= level - tolerance
                 held = rc >= level if direction == "LONG" else rc <= level
                 aligned = rc > ro if direction == "LONG" else rc < ro
-                if touched and held and aligned and retest_i == end:
+                intervening = frame[close_col].iloc[breakout_i + 1:retest_i]
+                invalidated = (intervening < level).any() if direction == "LONG" else (intervening > level).any()
+                if touched and held and aligned and not invalidated and retest_i == end:
                     return {
                         "level": level, "atr": atr, "retest_low": lo,
                         "retest_high": hi, "breakout_index": breakout_i,
