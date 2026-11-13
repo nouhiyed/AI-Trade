@@ -26,7 +26,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ai-trader-adaptive-backtest
+  group: ai-trader-adaptive-backtest-v2-regime
   cancel-in-progress: false
 
 jobs:
