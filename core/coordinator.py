@@ -23,6 +23,7 @@ from core.learning import LearningEngine, setup_key as make_setup_key
 from core.notifier import Notifier
 from core.chart_image import render_trade_chart
 from core.spot_demo import SpotDemoMixin
+from core.trailing_stop import calculate_trailing_stop
 
 
 class TradingCoordinator(SpotDemoMixin):
@@ -555,13 +556,13 @@ class TradingCoordinator(SpotDemoMixin):
             low, high = float(row.low), float(row.high)
             if direction == "LONG":
                 if low <= float(stop):
-                    return "STOP_LOSS", Decimal(str(stop))
-                if high >= float(target):
+                    return "TRAILING_STOP" if record.get("trailing_stop_active") else "STOP_LOSS", Decimal(str(stop))
+                if target is not None and high >= float(target):
                     return "TAKE_PROFIT", Decimal(str(target))
             else:
                 if high >= float(stop):
-                    return "STOP_LOSS", Decimal(str(stop))
-                if low <= float(target):
+                    return "TRAILING_STOP" if record.get("trailing_stop_active") else "STOP_LOSS", Decimal(str(stop))
+                if target is not None and low <= float(target):
                     return "TAKE_PROFIT", Decimal(str(target))
         return None
 
@@ -750,8 +751,19 @@ class TradingCoordinator(SpotDemoMixin):
                 if not exit_price.is_finite() or exit_price <= 0:
                     raise ValueError("Invalid DEMO exit quote")
 
+                trail_update = None
+                if snapshot.get("trailing_stop_active"):
+                    trail_frame = self.market_feed.fetch_candles(
+                        "futures", symbol, "5m", limit=40, closed_only=True)
+                    trail_update = calculate_trailing_stop(
+                        trail_frame, direction, stop,
+                        snapshot.get("trailing_best_price"), exit_price)
+                    if trail_update:
+                        stop = Decimal(str(trail_update["stop"]))
                 try:
-                    missed = self._catch_up(snapshot, direction, stop, target)
+                    missed = self._catch_up(
+                        snapshot, direction, stop,
+                        None if snapshot.get("trailing_stop_active") else target)
                 except Exception as catch_error:
                     missed = None
                     with self._demo_lock:
@@ -766,13 +778,13 @@ class TradingCoordinator(SpotDemoMixin):
                     exit_price = missed[1]
                 elif direction == "LONG":
                     if exit_price <= stop:
-                        reason = "STOP_LOSS"
-                    elif exit_price >= target:
+                        reason = "TRAILING_STOP" if snapshot.get("trailing_stop_active") else "STOP_LOSS"
+                    elif not snapshot.get("trailing_stop_active") and exit_price >= target:
                         reason = "TAKE_PROFIT"
                 elif direction == "SHORT":
                     if exit_price >= stop:
-                        reason = "STOP_LOSS"
-                    elif exit_price <= target:
+                        reason = "TRAILING_STOP" if snapshot.get("trailing_stop_active") else "STOP_LOSS"
+                    elif not snapshot.get("trailing_stop_active") and exit_price <= target:
                         reason = "TAKE_PROFIT"
 
                 # Serialize only the short state/ledger update. If a manual close
@@ -794,6 +806,12 @@ class TradingCoordinator(SpotDemoMixin):
                             symbol, "FUTURES", exit_price, source="BINANCE"
                         )
                         current["last_checked_ms"] = int(time.time() * 1000)
+                        if trail_update:
+                            current["stop_loss"] = str(trail_update["stop"])
+                            current["trailing_best_price"] = str(trail_update["best_price"])
+                            current["trailing_atr"] = str(trail_update["atr"])
+                            current["trailing_structure_level"] = str(trail_update["structure_level"])
+                            current["trailing_stop_method"] = trail_update["method"]
 
                         # Net scalping objective: 3% of original position notional,
                         # after entry fees, estimated exit fees and slippage.
@@ -866,6 +884,10 @@ class TradingCoordinator(SpotDemoMixin):
                                 if direction == "SHORT"
                                 else entry_price * (Decimal("1") + cost_buffer)
                             )
+                            current["trailing_stop_active"] = True
+                            current["trailing_best_price"] = str(exit_price)
+                            current["trailing_activated_ms"] = int(time.time() * 1000)
+                            current["trailing_stop_method"] = "ATR_1.5x_PLUS_5_CANDLE_STRUCTURE"
                             current["take_profit"] = str(current["take_profit_2"])
                             current["tp1_closed_quantity"] = str(result["closed_quantity"])
                         elif reason == "TAKE_PROFIT" and current.get("tp1_done"):
