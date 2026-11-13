@@ -100,7 +100,7 @@ jobs:
           if count != 1:
               raise SystemExit("ERROR: Android app label was not found")
           if 'android:icon="@mipmap/ic_launcher"' not in s:
-              s = re.sub(r'<application\\b', '<application android:icon="@mipmap/ic_launcher"', s, count=1)
+              s = re.sub(r'<application\b', '<application android:icon="@mipmap/ic_launcher"', s, count=1)
           p.write_text(s)
           print("Soulaymen ai traiding app label and adaptive icon configured")
           PYTHON
