@@ -68,7 +68,7 @@ jobs:
           python scripts/backtest.py \
             --years "${{ inputs.years || '2' }}" \
             --symbols "${{ matrix.symbol }}" \
-            --output "backtest_results/${{ matrix.symbol }}"
+            --output "backtest_results"
 
       - name: Render charts for this coin's completed trades
         if: always() && hashFiles('backtest_results/${{ matrix.symbol }}/trades.csv') != ''
