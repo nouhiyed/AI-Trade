@@ -20,6 +20,8 @@ from backtest import (
 )
 from core.adaptive_trend import AdaptiveTrendStrategy
 from core.market_data_engine import MarketDataEngine
+from core.backtest_costs import BacktestCostModel, load_funding_history, apply_funding
+import backtest as baseline_engine
 
 TIMEFRAMES = ("5m", "15m", "1h")
 RISK_FRACTION = 0.0025
@@ -37,6 +39,12 @@ def run_one(market, symbol, years, cache_dir):
         print(f"Prepared {market} {symbol} {tf}: {len(raw)} candles", flush=True)
 
     base = prepared["5m"]
+    cost_model = BacktestCostModel(market)
+    funding_events = (load_funding_history(symbol, int(start_dt.timestamp() * 1000),
+                       int(end_dt.timestamp() * 1000), cache_dir.parent / "funding_cache")
+                      if market == "futures" else [])
+    funding_times = [int(x["funding_time"]) for x in funding_events]
+    funding_cursor = 0
     base_times = _times_ms(base)
     frame_times = {tf: _times_ms(frame) for tf, frame in prepared.items()}
     trades, position = [], None
@@ -46,11 +54,28 @@ def run_one(market, symbol, years, cache_dir):
 
     for i in range(210, len(base) - 1):
         bar, asof = base.iloc[i], int(base_times[i])
+        baseline_engine._CURRENT_EXECUTION_COMPONENTS = cost_model.components(bar)
+        SLIPPAGE_RATE[market] = baseline_engine._CURRENT_EXECUTION_COMPONENTS["total_adverse_rate"]
         if first_time is None:
             first_time = pd.Timestamp(bar["close_time"]).isoformat()
 
         if position is not None:
+            while funding_cursor < len(funding_events) and funding_times[funding_cursor] <= asof:
+                event = funding_events[funding_cursor]
+                if funding_times[funding_cursor] > position.get("entry_time_ms", 0):
+                    cashflow = apply_funding(position, event["funding_rate"], float(bar["close"]))
+                    position["funding_pnl"] += cashflow
+                    position["funding_settlements"] += 1
+                    position["net_pnl"] += cashflow
+                    equity += cashflow
+                funding_cursor += 1
             direction = position["direction"]
+            entry_px = float(position["entry_fill"])
+            high_px, low_px = float(bar["high"]), float(bar["low"])
+            favorable = ((high_px - entry_px) / entry_px if direction == "LONG" else (entry_px - low_px) / entry_px)
+            adverse = ((entry_px - low_px) / entry_px if direction == "LONG" else (high_px - entry_px) / entry_px)
+            position["mfe_pct"] = max(position.get("mfe_pct", 0.0), favorable)
+            position["mae_pct"] = max(position.get("mae_pct", 0.0), adverse)
             stop_hit, stop_price = _bar_hit(bar, direction, position["stop"], True)
             target_hit, target_price = (False, None)
             if not position["tp1_done"]:
@@ -114,6 +139,8 @@ def run_one(market, symbol, years, cache_dir):
         if abs(raw_entry - float(plan["entry"])) > max(0.5 * float(plan["atr"]), float(plan["entry"]) * 0.001):
             continue
         direction = plan["direction"]
+        baseline_engine._CURRENT_EXECUTION_COMPONENTS = cost_model.components(next_bar)
+        SLIPPAGE_RATE[market] = baseline_engine._CURRENT_EXECUTION_COMPONENTS["total_adverse_rate"]
         entry_fill = _fill_entry(raw_entry, direction, SLIPPAGE_RATE[market])
         stop, target = float(plan["stop_loss"]), float(plan["take_profit"])
         if (direction == "LONG" and not stop < entry_fill < target) or (
@@ -129,9 +156,14 @@ def run_one(market, symbol, years, cache_dir):
             "symbol": symbol, "market": market, "direction": direction, "timeframe": "5m",
             "entry_time": pd.Timestamp(next_bar["open_time"]).isoformat(),
             "entry_fill": entry_fill, "initial_quantity": qty, "remaining_quantity": qty,
+            "entry_time_ms": int(pd.Timestamp(next_bar["open_time"]).timestamp() * 1000),
+            "funding_pnl": 0.0, "funding_settlements": 0,
+            "spread_cost": raw_entry * qty * baseline_engine._CURRENT_EXECUTION_COMPONENTS["half_spread_rate"],
+            "slippage_cost": raw_entry * qty * baseline_engine._CURRENT_EXECUTION_COMPONENTS["slippage_rate"],
+            "mae_pct": 0.0, "mfe_pct": 0.0,
             "initial_stop": stop, "stop": stop, "initial_target": target, "target1": target,
             "target2": None, "tp1_done": False, "best_price": entry_fill,
-            "strategy": "adaptive_donchian_breakout_retest_v1",
+            "strategy": "adaptive_donchian_breakout_retest_v2",
             "net_pnl": -entry_fee, "fees": entry_fee,
             "round_trip_cost": 2 * (FEE_RATE[market] + SLIPPAGE_RATE[market]),
             "last_exit_reason": "OPEN", "last_exit_time": pd.Timestamp(next_bar["open_time"]).isoformat(),
@@ -155,7 +187,8 @@ def run_one(market, symbol, years, cache_dir):
     metrics["limitations"] = [
         "Research-only simulation; no live or DEMO orders are sent.",
         "Uses closed 1h/15m/5m candles and enters at next 5m open.",
-        "Taker fees and fixed per-side slippage are modeled; futures funding is not included.",
+        "Historical Binance futures funding is included; 5m close is the mark-price proxy.",
+        "Spread and slippage are dynamic OHLCV volatility/liquidity proxies, not observed historical quotes.",
         "No historical order book, queue position, latency, or partial fill model.",
         "Stop is assumed hit before target when both occur in one 5m candle.",
         "Each symbol is tested independently with its own starting capital; this is not a shared portfolio.",

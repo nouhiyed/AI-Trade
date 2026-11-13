@@ -2,6 +2,7 @@
 from math import isfinite
 
 from core.market_regime import MarketRegimeEngine
+from core.backtest_costs import BacktestCostModel
 
 
 class AdaptiveTrendStrategy:
@@ -177,7 +178,8 @@ class AdaptiveTrendStrategy:
         risk = abs(entry - stop)
         target1 = entry + self.TARGET_R * risk if direction == "LONG" else entry - self.TARGET_R * risk
         fee = self.FEES[market]
-        round_trip_cost = 2.0 * (fee + self.SLIPPAGE_RATE)
+        execution_costs = BacktestCostModel(market).components(market_data.get("5m").iloc[-1])
+        round_trip_cost = 2.0 * (fee + execution_costs["total_adverse_rate"])
         gross_reward_pct, gross_risk_pct = abs(target1 - entry) / entry, risk / entry
         net_reward_pct = gross_reward_pct - round_trip_cost
         net_risk_pct = gross_risk_pct + round_trip_cost
@@ -195,7 +197,8 @@ class AdaptiveTrendStrategy:
             "net_reward_risk": round(net_rr, 3), "market_regime": regime,
             "regime_strength": strength, "regime_reason": regime_reason,
             "regime_details": regime_data, "entry_confirmation": confirmation,
-            "breakout": retest, "strategy": "adaptive_donchian_breakout_retest_v2",
+            "breakout": retest, "execution_cost_estimate": execution_costs,
+            "strategy": "adaptive_donchian_breakout_retest_v2",
         }
 
     @staticmethod

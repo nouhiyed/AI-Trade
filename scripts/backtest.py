@@ -25,6 +25,7 @@ from core.binance_market_data import BinanceMarketData
 from core.market_data_engine import MarketDataEngine
 from core.trade_planner import TradePlanner
 from core.trailing_stop import calculate_trailing_stop
+from core.backtest_costs import BacktestCostModel, load_funding_history, apply_funding
 
 SYMBOLS = ("BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT", "DOGEUSDT", "LINKUSDT")
 TIMEFRAMES = {
@@ -38,6 +39,8 @@ BASE_TIMEFRAME = "5m"
 RISK_FRACTION = 0.005
 STARTING_CAPITAL = 10000.0
 MAX_NOTIONAL_MULTIPLE = 1.0
+RISK_FRACTION = 0.0025  # matched risk for fair comparison
+_CURRENT_EXECUTION_COMPONENTS = {"half_spread_rate": 0.0, "slippage_rate": 0.0}
 
 
 def _month_starts(start_dt, end_dt):
@@ -155,6 +158,9 @@ def _bar_hit(bar, direction, level, stop):
 def _close_quantity(position, raw_price, quantity, reason, market, equity):
     direction = position["direction"]
     exit_fill = _fill_exit(raw_price, direction, SLIPPAGE_RATE[market])
+    components = _CURRENT_EXECUTION_COMPONENTS
+    position["spread_cost"] = position.get("spread_cost", 0.0) + raw_price * quantity * components["half_spread_rate"]
+    position["slippage_cost"] = position.get("slippage_cost", 0.0) + raw_price * quantity * components["slippage_rate"]
     gross = ((exit_fill - position["entry_fill"]) * quantity if direction == "LONG"
              else (position["entry_fill"] - exit_fill) * quantity)
     fee = exit_fill * quantity * FEE_RATE[market]
@@ -174,7 +180,15 @@ def _finalize(position, trades):
         "entry_price": position["entry_fill"], "last_exit_price": position.get("exit_fill"),
         "stop_loss": position["initial_stop"], "take_profit": position["initial_target"],
         "strategy": position["strategy"], "net_pnl": position["net_pnl"],
-        "fees": position["fees"], "exit_reason": position["last_exit_reason"],
+        "fees": position["fees"],
+        "spread_cost_estimated": position.get("spread_cost", 0.0),
+        "slippage_cost_estimated": position.get("slippage_cost", 0.0),
+        "funding_pnl": position.get("funding_pnl", 0.0),
+        "funding_settlements": position.get("funding_settlements", 0),
+        "mae_pct": round(position.get("mae_pct", 0.0) * 100, 4),
+        "mfe_pct": round(position.get("mfe_pct", 0.0) * 100, 4),
+        "holding_minutes": round((pd.Timestamp(position["last_exit_time"]) - pd.Timestamp(position["entry_time"])).total_seconds() / 60.0, 2),
+        "exit_reason": position["last_exit_reason"],
     })
 
 
@@ -193,16 +207,21 @@ def _metrics(trades, equity, max_drawdown, market, symbol, start, end):
         "average_trade_pnl": round(sum(pnls) / len(pnls), 4) if pnls else 0.0,
         "gross_profit": round(gross_profit, 4), "gross_loss": round(gross_loss, 4),
         "total_fees": round(sum(float(t["fees"]) for t in trades), 4),
+        "total_funding_pnl": round(sum(float(t.get("funding_pnl", 0.0)) for t in trades), 4),
+        "total_estimated_spread_cost": round(sum(float(t.get("spread_cost_estimated", 0.0)) for t in trades), 4),
+        "total_estimated_slippage_cost": round(sum(float(t.get("slippage_cost_estimated", 0.0)) for t in trades), 4),
         "max_drawdown_pct": round(max_drawdown * 100, 4),
         "cost_assumptions": {
             "taker_fee_per_side": FEE_RATE[market],
-            "slippage_per_side": SLIPPAGE_RATE[market],
-            "round_trip_estimate_pct": round(2 * (FEE_RATE[market] + SLIPPAGE_RATE[market]) * 100, 4),
+            "execution_cost_model": "dynamic OHLCV volatility/liquidity proxy; half-spread plus slippage, capped",
+            "funding_source": "Binance USD-M historical fundingRate endpoint for Futures",
+            "funding_mark_price": "5m close proxy at settlement timestamp",
+            "historical_spread_is_observed": False,
         },
         "limitations": [
             "Historical order-book imbalance is unavailable; agents run without the live order-book bonus.",
-            "Futures funding payments are not included.",
-            "Market orders are modeled as taker fills with fixed slippage.",
+            "Futures funding is charged at historical Binance settlement timestamps; 5m close is the mark-price proxy.",
+            "Spread and slippage are dynamic OHLCV volatility/liquidity proxies, not observed historical quotes.",
             "Sizing is capped at 1x notional to isolate strategy performance from leverage.",
             "Signals use closed 5m candles and enter at the next 5m open.",
             "If stop and target are both touched in one candle, stop is assumed first.",
@@ -223,6 +242,12 @@ def run_one(client, market_engine, planner, market, symbol, years, cache_dir):
         prepared[tf] = market_engine._prepare_frame(raw, symbol, market, tf)
 
     base = prepared[BASE_TIMEFRAME]
+    cost_model = BacktestCostModel(market)
+    funding_events = (load_funding_history(symbol, int(start_dt.timestamp() * 1000),
+                       int(end_dt.timestamp() * 1000), cache_dir.parent / "funding_cache")
+                      if market == "futures" else [])
+    funding_times = [int(x["funding_time"]) for x in funding_events]
+    funding_cursor = 0
     base_times = _times_ms(base)
     frame_times = {tf: _times_ms(frame) for tf, frame in prepared.items()}
     agent = FuturesAgent() if market == "futures" else SpotAgent()
@@ -232,11 +257,29 @@ def run_one(client, market_engine, planner, market, symbol, years, cache_dir):
 
     for i in range(210, len(base)):
         bar, asof = base.iloc[i], int(base_times[i])
+        global _CURRENT_EXECUTION_COMPONENTS
+        _CURRENT_EXECUTION_COMPONENTS = cost_model.components(bar)
+        SLIPPAGE_RATE[market] = _CURRENT_EXECUTION_COMPONENTS["total_adverse_rate"]
         if first_time is None:
             first_time = pd.Timestamp(bar["close_time"]).isoformat()
 
         if position is not None:
+            while funding_cursor < len(funding_events) and funding_times[funding_cursor] <= asof:
+                event = funding_events[funding_cursor]
+                if funding_times[funding_cursor] > position.get("entry_time_ms", 0):
+                    cashflow = apply_funding(position, event["funding_rate"], float(bar["close"]))
+                    position["funding_pnl"] += cashflow
+                    position["funding_settlements"] += 1
+                    position["net_pnl"] += cashflow
+                    equity += cashflow
+                funding_cursor += 1
             direction = position["direction"]
+            entry_px = float(position["entry_fill"])
+            high_px, low_px = float(bar["high"]), float(bar["low"])
+            favorable = ((high_px - entry_px) / entry_px if direction == "LONG" else (entry_px - low_px) / entry_px)
+            adverse = ((entry_px - low_px) / entry_px if direction == "LONG" else (high_px - entry_px) / entry_px)
+            position["mfe_pct"] = max(position.get("mfe_pct", 0.0), favorable)
+            position["mae_pct"] = max(position.get("mae_pct", 0.0), adverse)
             stop_hit, stop_price = _bar_hit(bar, direction, position["stop"], True)
             target = position["target2"] if position["tp1_done"] else position["target1"]
             target_hit, target_price = _bar_hit(bar, direction, target, False)
@@ -323,6 +366,8 @@ def run_one(client, market_engine, planner, market, symbol, years, cache_dir):
         atr = float(plan.get("atr") or 0)
         if atr <= 0 or abs(raw_entry - planned_entry) > max(0.10 * atr, planned_entry * 0.0001):
             continue
+        _CURRENT_EXECUTION_COMPONENTS = cost_model.components(next_bar)
+        SLIPPAGE_RATE[market] = _CURRENT_EXECUTION_COMPONENTS["total_adverse_rate"]
         entry_fill = _fill_entry(raw_entry, direction, SLIPPAGE_RATE[market])
         stop, target1 = float(plan["stop_loss"]), float(plan["take_profit"])
         target2 = float(plan["take_profit_2"]) if plan.get("take_profit_2") is not None else None
@@ -343,6 +388,11 @@ def run_one(client, market_engine, planner, market, symbol, years, cache_dir):
             "timeframe": BASE_TIMEFRAME,
             "entry_time": pd.Timestamp(next_bar["open_time"]).isoformat(),
             "entry_fill": entry_fill, "initial_quantity": qty,
+            "entry_time_ms": int(pd.Timestamp(next_bar["open_time"]).timestamp() * 1000),
+            "funding_pnl": 0.0, "funding_settlements": 0,
+            "spread_cost": raw_entry * qty * _CURRENT_EXECUTION_COMPONENTS["half_spread_rate"],
+            "slippage_cost": raw_entry * qty * _CURRENT_EXECUTION_COMPONENTS["slippage_rate"],
+            "mae_pct": 0.0, "mfe_pct": 0.0,
             "remaining_quantity": qty, "initial_stop": stop, "stop": stop,
             "initial_target": target1, "target1": target1, "target2": target2,
             "tp1_done": False, "strategy": str(plan.get("entry_strategy") or "unknown"),

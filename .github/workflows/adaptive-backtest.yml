@@ -11,11 +11,15 @@ on:
         default: "2"
   push:
     branches:
-      - "research/adaptive-trend-v1"
+      - "research/adaptive-trend-v2-regime"
     paths:
       - "core/adaptive_trend.py"
+      - "core/market_regime.py"
+      - "core/backtest_costs.py"
+      - "scripts/backtest.py"
       - "scripts/backtest_adaptive.py"
       - "tests/test_adaptive_trend.py"
+      - "tests/test_backtest_costs.py"
       - ".github/workflows/adaptive-backtest.yml"
 
 permissions:
@@ -77,7 +81,7 @@ jobs:
             --years "${{ inputs.years || '2' }}" \
             --symbols "${{ matrix.symbol }}" \
             --output "baseline_results"
-      - name: Run Adaptive Trend v1 on the same cached market data
+      - name: Run Adaptive Trend v2 on the same cached market data
         run: |
           python scripts/backtest_adaptive.py \
             --years "${{ inputs.years || '2' }}" \
