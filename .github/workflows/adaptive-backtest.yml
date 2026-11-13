@@ -1,0 +1,86 @@
+name: AI-Trader Adaptive Trend Research Backtest
+
+on:
+  workflow_dispatch:
+    inputs:
+      years:
+        description: Historical period
+        required: true
+        type: choice
+        options: ["1", "2", "3"]
+        default: "2"
+  push:
+    branches:
+      - "research/adaptive-trend-v1"
+    paths:
+      - "core/adaptive_trend.py"
+      - "scripts/backtest_adaptive.py"
+      - "tests/test_adaptive_trend.py"
+      - ".github/workflows/adaptive-backtest.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-trader-adaptive-backtest
+  cancel-in-progress: false
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+      - name: Compile and run all unit tests
+        run: |
+          python -m compileall -q agents api core scripts tests
+          python -m unittest discover -s tests -t . -v
+
+  backtest:
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        symbol:
+          - BTCUSDT
+          - ETHUSDT
+          - BNBUSDT
+          - SOLUSDT
+          - XRPUSDT
+          - ADAUSDT
+          - DOGEUSDT
+          - LINKUSDT
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+      - name: Run Adaptive Trend Futures and Spot backtest
+        run: |
+          python scripts/backtest_adaptive.py \
+            --years "${{ inputs.years || '2' }}" \
+            --symbols "${{ matrix.symbol }}" \
+            --output "adaptive_backtest_results"
+      - name: Upload independent symbol report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Trader-Adaptive-${{ matrix.symbol }}-${{ inputs.years || '2' }}-year
+          path: adaptive_backtest_results/${{ matrix.symbol }}/
+          if-no-files-found: warn
+          retention-days: 30
