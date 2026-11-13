@@ -3,6 +3,7 @@ import json
 import tempfile
 import unittest
 import zipfile
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 import requests
@@ -33,9 +34,9 @@ class BacktestCostTests(unittest.TestCase):
 
     def test_rest_451_falls_back_to_official_vision_archive(self):
         csv_bytes = (
-            "calc_time,funding_interval_hours,last_funding_rate\\n"
-            "1730419200000,8,0.00010000\\n"
-            "1730448000000,8,-0.00020000\\n"
+            "calc_time,funding_interval_hours,last_funding_rate\n"
+            "1730419200000,8,0.00010000\n"
+            "1730448000000,8,-0.00020000\n"
         ).encode()
         archive_buffer = io.BytesIO()
         with zipfile.ZipFile(archive_buffer, "w", zipfile.ZIP_DEFLATED) as archive:
@@ -56,7 +57,7 @@ class BacktestCostTests(unittest.TestCase):
             )
             self.assertEqual(len(events), 2)
             self.assertAlmostEqual(events[0]["funding_rate"], 0.0001)
-            cache = json.loads(next(__import__("pathlib").Path(tmp).glob("*.json")).read_text())
+            cache = json.loads(next(Path(tmp).glob("*.json")).read_text())
             self.assertEqual(cache["source"], "BINANCE_VISION_MONTHLY_ARCHIVE")
             self.assertTrue(cache["complete"])
 
