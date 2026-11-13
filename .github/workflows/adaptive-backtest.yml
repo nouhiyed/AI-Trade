@@ -117,4 +117,6 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-# Trigger the full research comparison run for the current strategy revision.
+# Trigger research comparison run automatically when this workflow definition changes.
+# Manual dispatch remains available for selecting a different historical window.
+# Trigger repair: 2026-11-13
