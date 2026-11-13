@@ -10,6 +10,7 @@ class HistoricalTradeChartPainter extends CustomPainter {
   final List<Map<String, dynamic>> candles;
   final String symbol, direction, timeframe;
   final double? entry, exit, stopLoss, takeProfit;
+  final int? entryTime, exitTime;
 
   HistoricalTradeChartPainter({
     required this.candles,
@@ -20,6 +21,8 @@ class HistoricalTradeChartPainter extends CustomPainter {
     required this.exit,
     required this.stopLoss,
     required this.takeProfit,
+    required this.entryTime,
+    required this.exitTime,
   });
 
   static const Color up = Color(0xFF26A69A);
@@ -112,6 +115,61 @@ class HistoricalTradeChartPainter extends CustomPainter {
     level('ENTRY', entry, entryColor);
     level('EXIT', exit, exitColor);
     level('SL', stopLoss, down);
+
+    // Place markers on the actual entry/exit candles using their timestamps.
+    int nearestIndex(int? timestamp) {
+      if (timestamp == null || candles.isEmpty) return -1;
+      var bestIndex = -1;
+      var bestDistance = 1 << 62;
+      for (var i = 0; i < candles.length; i++) {
+        final raw = candles[i]['time'];
+        final time = raw is num ? raw.toInt() : int.tryParse('$raw');
+        if (time == null) continue;
+        final distance = (time - timestamp).abs();
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          bestIndex = i;
+        }
+      }
+      return bestIndex;
+    }
+
+    final entryIndex = nearestIndex(entryTime);
+    final exitIndex = nearestIndex(exitTime);
+    Offset? markerPoint(int index, double? price) {
+      if (index < 0 || price == null) return null;
+      return Offset(left + step * (index + .5), y(price));
+    }
+
+    final entryPoint = markerPoint(entryIndex, entry);
+    final exitPoint = markerPoint(exitIndex, exit);
+    if (entryPoint != null && exitPoint != null) {
+      final connector = Paint()
+        ..color = const Color(0xFFB18CFF)
+        ..strokeWidth = 2
+        ..style = PaintingStyle.stroke;
+      final path = Path()..moveTo(entryPoint.dx, entryPoint.dy)..lineTo(exitPoint.dx, exitPoint.dy);
+      canvas.drawPath(
+        path,
+        connector..strokeCap = StrokeCap.round,
+      );
+    }
+
+    void marker(Offset? point, Color color, bool upward, String label) {
+      if (point == null) return;
+      final direction = upward ? -1.0 : 1.0;
+      final triangle = Path()
+        ..moveTo(point.dx, point.dy + direction * 13)
+        ..lineTo(point.dx - 7, point.dy - direction * 1)
+        ..lineTo(point.dx + 7, point.dy - direction * 1)
+        ..close();
+      canvas.drawPath(triangle, Paint()..color = color);
+      canvas.drawCircle(point, 3, Paint()..color = Colors.white);
+      _text(canvas, label, Offset(point.dx + 7, point.dy + (upward ? -20 : 7)), color, size: 9);
+    }
+
+    marker(entryPoint, entryColor, direction != 'SHORT', 'ENTRY');
+    marker(exitPoint, exitColor, direction == 'SHORT', 'EXIT');
   }
 
   @override
@@ -302,6 +360,8 @@ class _ClosedTradeDetailScreenState extends State<ClosedTradeDetailScreen> {
                                 exit: _price(_chart['exit'] ?? trade['exit_price'] ?? trade['close_price']),
                                 stopLoss: _price(_chart['stop_loss'] ?? trade['stop_loss']),
                                   takeProfit: _price(_chart['take_profit'] ?? trade['take_profit']),
+                                entryTime: int.tryParse('${_chart['opened_at'] ?? ''}'),
+                                exitTime: int.tryParse('${_chart['closed_at'] ?? ''}'),
                                 ),
                               ),
                             ),
@@ -317,8 +377,8 @@ class _ClosedTradeDetailScreenState extends State<ClosedTradeDetailScreen> {
             ),
             const SizedBox(height: 10),
             Text(
-              t('الخط الأزرق = الدخول، البرتقالي = الخروج، الأحمر = وقف الخسارة، والأخضر = جني الأرباح.',
-                'Blue = entry, orange = exit, red = stop loss, green = take profit.'),
+              t('السهم الأزرق يحدد شمعة الدخول، والبرتقالي شمعة الخروج، والخط البنفسجي يربطهما. الأحمر = وقف الخسارة، والأخضر = جني الأرباح.',
+                'Blue marker = entry candle, orange marker = exit candle, purple line connects them. Red = stop loss, green = take profit.'),
               style: TextStyle(color: widget.muted, fontSize: 11, height: 1.5),
             ),
             if (_chart['timeframe_recorded'] == false)
