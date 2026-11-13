@@ -735,10 +735,14 @@ class TradingCoordinator(SpotDemoMixin):
                 direction = str(record["direction"]).upper()
                 stop = Decimal(str(record["stop_loss"]))
                 tp1_done = bool(record.get("tp1_done"))
-                target = Decimal(str(
-                    record.get("take_profit_2") if tp1_done and record.get("take_profit_2")
-                    else record["take_profit"]
-                ))
+                target = (
+                    None if record.get("trailing_stop_active")
+                    and record.get("trailing_no_fixed_target")
+                    else Decimal(str(
+                        record.get("take_profit_2") if tp1_done and record.get("take_profit_2")
+                        else record["take_profit"]
+                    ))
+                )
                 engine_position_id = record["engine_position_id"]
                 snapshot = dict(record)
 
@@ -753,13 +757,19 @@ class TradingCoordinator(SpotDemoMixin):
 
                 trail_update = None
                 if snapshot.get("trailing_stop_active"):
-                    trail_frame = self.market_feed.fetch_candles(
-                        "futures", symbol, "5m", limit=40, closed_only=True)
-                    trail_update = calculate_trailing_stop(
-                        trail_frame, direction, stop,
-                        snapshot.get("trailing_best_price"), exit_price)
-                    if trail_update:
-                        stop = Decimal(str(trail_update["stop"]))
+                    try:
+                        trail_frame = self.market_feed.fetch_candles(
+                            "futures", symbol, "5m", limit=40, closed_only=True)
+                        trail_update = calculate_trailing_stop(
+                            trail_frame, direction, stop,
+                            snapshot.get("trailing_best_price"), exit_price)
+                        if trail_update:
+                            stop = Decimal(str(trail_update["stop"]))
+                    except Exception as trail_error:
+                        with self._demo_lock:
+                            current = self.demo_positions.get(position_id)
+                            if current:
+                                current["trailing_update_error"] = str(trail_error)
                 try:
                     missed = self._catch_up(
                         snapshot, direction, stop, target)
@@ -778,12 +788,12 @@ class TradingCoordinator(SpotDemoMixin):
                 elif direction == "LONG":
                     if exit_price <= stop:
                         reason = "TRAILING_STOP" if snapshot.get("trailing_stop_active") else "STOP_LOSS"
-                    elif exit_price >= target:
+                    elif target is not None and exit_price >= target:
                         reason = "TAKE_PROFIT"
                 elif direction == "SHORT":
                     if exit_price >= stop:
                         reason = "TRAILING_STOP" if snapshot.get("trailing_stop_active") else "STOP_LOSS"
-                    elif exit_price <= target:
+                    elif target is not None and exit_price <= target:
                         reason = "TAKE_PROFIT"
 
                 # Serialize only the short state/ledger update. If a manual close
@@ -827,16 +837,17 @@ class TradingCoordinator(SpotDemoMixin):
                             net_open = realized_net + gross_open - estimated_exit_cost
                             target_net = entry_price * initial_qty * Decimal("0.03")
                             if initial_qty > 0 and net_open >= target_net:
-                                reason = ("NET_PROFIT_PARTIAL"
-                                          if current.get("take_profit_2") is not None
-                                          else "NET_PROFIT_TARGET")
+                                reason = "NET_PROFIT_PARTIAL"
 
                         if not reason:
                             self._save_demo_state()
                             continue
 
                         partial_tp1 = (
-                            reason in ("TAKE_PROFIT", "NET_PROFIT_PARTIAL")
+                            reason == "NET_PROFIT_PARTIAL"
+                            and not current.get("tp1_done")
+                        ) or (
+                            reason == "TAKE_PROFIT"
                             and not current.get("tp1_done")
                             and current.get("take_profit_2") is not None
                         )
@@ -854,7 +865,10 @@ class TradingCoordinator(SpotDemoMixin):
                             if close_quantity <= 0 or close_quantity >= remaining:
                                 partial_tp1 = False
                             else:
-                                close_reason = "TAKE_PROFIT_1"
+                                close_reason = (
+                                    "NET_PROFIT_PARTIAL" if reason == "NET_PROFIT_PARTIAL"
+                                    else "TAKE_PROFIT_1"
+                                )
 
                         result = self.demo_execution.close_futures_position(
                             self.demo_account_id,
@@ -887,12 +901,13 @@ class TradingCoordinator(SpotDemoMixin):
                             current["trailing_best_price"] = str(exit_price)
                             current["trailing_activated_ms"] = int(time.time() * 1000)
                             current["trailing_stop_method"] = "ATR_1.5x_PLUS_5_CANDLE_STRUCTURE"
-                            current["take_profit"] = str(current["take_profit_2"])
+                            if current.get("take_profit_2") is not None:
+                                current["take_profit"] = str(current["take_profit_2"])
+                            else:
+                                current["trailing_no_fixed_target"] = True
                             current["tp1_closed_quantity"] = str(result["closed_quantity"])
                         elif reason == "TAKE_PROFIT" and current.get("tp1_done"):
                             close_reason = "TAKE_PROFIT_2"
-                        elif reason == "NET_PROFIT_TARGET":
-                            close_reason = "NET_PROFIT_3_PERCENT"
                         current["close_reason"] = close_reason
                         current["close_price"] = str(result["execution_price"])
                         current["realized_pnl"] = str(result["realized_pnl"])
