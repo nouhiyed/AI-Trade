@@ -96,6 +96,22 @@ class TestSpot(Base):
         ev = self.c.monitor_demo_positions()["events"]
         self.assertEqual(ev[0]["reason"], "STOP_LOSS")
 
+    def test_spot_arms_trailing_at_net_three_percent_then_closes_on_retrace(self):
+        r = self.open()
+        position = self.c.demo_positions[r["position_id"]]
+        self.feed.prices["ETHUSDT"] = 103.90
+        first = self.c.monitor_demo_positions()["events"]
+        self.assertEqual(first, [])
+        self.assertTrue(position.get("trailing_stop_active"))
+        self.assertEqual(position["status"], "DEMO_OPEN")
+        protected_stop = float(position["stop_loss"])
+        self.assertGreater(protected_stop, float(position["entry_price"]))
+
+        self.feed.prices["ETHUSDT"] = 100.00
+        second = self.c.monitor_demo_positions()["events"]
+        self.assertEqual(second[0]["reason"], "TRAILING_STOP")
+        self.assertEqual(position["status"], "DEMO_CLOSED")
+
     def test_rejections(self):
         self.feed.prices["ETHUSDT"] = 100.0
         self.c.last_signals["spot"] = {"symbol": "ETHUSDT", "direction": "SELL"}
