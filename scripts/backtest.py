@@ -36,7 +36,6 @@ INTERVAL_MS = {"1m": 60000, "5m": 300000, "15m": 900000, "1h": 3600000, "4h": 14
 FEE_RATE = {"spot": 0.001, "futures": 0.0005}
 SLIPPAGE_RATE = {"spot": 0.0005, "futures": 0.0005}
 BASE_TIMEFRAME = "5m"
-RISK_FRACTION = 0.005
 STARTING_CAPITAL = 10000.0
 MAX_NOTIONAL_MULTIPLE = 1.0
 RISK_FRACTION = 0.0025  # matched risk for fair comparison

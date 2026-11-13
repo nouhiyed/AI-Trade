@@ -1,4 +1,4 @@
-"""Historical backtest for Adaptive Trend v1; research only, no order execution."""
+"""Historical backtest for Adaptive Trend v2; research only, no order execution."""
 from __future__ import annotations
 
 import argparse
@@ -181,7 +181,7 @@ def run_one(market, symbol, years, cache_dir):
         first_time or pd.Timestamp(base["close_time"].iloc[0]).isoformat(),
         pd.Timestamp(base["close_time"].iloc[-1]).isoformat(),
     )
-    metrics["strategy"] = "adaptive_donchian_breakout_retest_v1"
+    metrics["strategy"] = "adaptive_donchian_breakout_retest_v2"
     metrics["risk_fraction"] = RISK_FRACTION
     metrics["exit_policy"] = "30% at 2R; remaining 70% protected by break-even then 3x ATR Chandelier stop"
     metrics["limitations"] = [
@@ -197,7 +197,7 @@ def run_one(market, symbol, years, cache_dir):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Adaptive Trend v1 research backtest")
+    parser = argparse.ArgumentParser(description="Adaptive Trend v2 research backtest")
     parser.add_argument("--years", type=int, choices=(1, 2, 3), default=2)
     parser.add_argument("--symbols", nargs="+", default=list(SYMBOLS))
     parser.add_argument("--output", default="adaptive_backtest_results")
@@ -209,7 +209,7 @@ def main():
     output, cache = Path(args.output), Path(args.cache)
     output.mkdir(parents=True, exist_ok=True)
     summaries, all_trades = [], []
-    engine_name = "adaptive_donchian_breakout_retest_v1"
+    engine_name = "adaptive_donchian_breakout_retest_v2"
     for symbol in args.symbols:
         for market in ("futures", "spot"):
             print(f"===== ADAPTIVE {symbol} {market.upper()} =====", flush=True)
