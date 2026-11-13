@@ -1,4 +1,4 @@
-"""Causal historical backtest using the production Futures/Spot agents and TradePlanner."""
+"""Causal per-coin historical backtest; each coin produces independent Futures and Spot reports."""
 from __future__ import annotations
 import argparse
 import io
