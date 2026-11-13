@@ -116,3 +116,5 @@ jobs:
             adaptive_backtest_results/${{ matrix.symbol }}/
           if-no-files-found: warn
           retention-days: 30
+
+# Trigger the full research comparison run for the current strategy revision.
