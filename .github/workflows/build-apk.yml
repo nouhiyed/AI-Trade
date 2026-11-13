@@ -100,7 +100,6 @@ jobs:
           if not source.is_file():
               raise SystemExit(f"ERROR: required app logo is missing: {source}")
           image = Image.open(source).convert("RGBA")
-          image = Image.Resampling.LANCZOS and image
           # Adaptive-icon foreground stays inside Android's safe central area.
           foreground = Image.new("RGBA", (432, 432), (0, 0, 0, 0))
           logo = image.copy()
@@ -114,7 +113,7 @@ jobs:
               image.resize((size, size), Image.Resampling.LANCZOS).save(folder / "ic_launcher.png")
           Path("android/app/src/main/res/drawable/ic_launcher_foreground.xml").write_text(
               '<bitmap xmlns:android="http://schemas.android.com/apk/res/android" '
-              'android:src="@drawable/ic_launcher_logo" android:gravity="center" />\\n'
+              'android:src="@drawable/ic_launcher_logo" android:gravity="center" />\n'
           )
           print("Generated launcher icons from Soulaymen AI Trading logo")
           PYTHON
@@ -129,7 +128,7 @@ jobs:
           if 'android:icon="@mipmap/ic_launcher"' not in s:
               s = re.sub(r'<application\b', '<application android:icon="@mipmap/ic_launcher"', s, count=1)
           p.write_text(s)
-          print("Soulaymen ai traiding app label and adaptive icon configured")
+          print("Soulaymen AI Trading app label and adaptive icon configured")
           PYTHON
 
       - name: Configure Gradle distribution download
