@@ -351,8 +351,9 @@ def run_one(client, market_engine, planner, market, symbol, years, cache_dir):
     return _metrics(trades, equity, max_drawdown, market, symbol, start_label, end_label), trades
 
 
+
 def main():
-    parser = argparse.ArgumentParser(description="AI-Trader historical backtest")
+    parser = argparse.ArgumentParser(description="AI-Trader per-coin historical backtest")
     parser.add_argument("--years", type=int, choices=(1, 2, 3), default=2)
     parser.add_argument("--symbols", nargs="+", default=list(SYMBOLS))
     parser.add_argument("--output", default="backtest_results")
@@ -365,30 +366,74 @@ def main():
     output = Path(args.output)
     output.mkdir(parents=True, exist_ok=True)
     market_engine, planner = MarketDataEngine(), TradePlanner()
-    summaries, all_trades = [], []
-    for market in ("futures", "spot"):
-        for symbol in args.symbols:
-            print(f"\n===== {market.upper()} {symbol} =====", flush=True)
-            metrics, trades = run_one(None, market_engine, planner, market, symbol, args.years, Path(args.cache))
-            summaries.append(metrics)
+    all_summaries, all_trades = [], []
+
+    # Process one coin at a time, completing both markets before moving on.
+    for coin_number, symbol in enumerate(args.symbols, 1):
+        coin_dir = output / symbol
+        coin_dir.mkdir(parents=True, exist_ok=True)
+        coin_summaries, coin_trades = [], []
+        print(f"\n========== COIN {coin_number}/{len(args.symbols)}: {symbol} ==========", flush=True)
+
+        for market in ("futures", "spot"):
+            print(f"\n===== {symbol} {market.upper()} =====", flush=True)
+            metrics, trades = run_one(
+                None, market_engine, planner, market, symbol, args.years, Path(args.cache)
+            )
+            coin_summaries.append(metrics)
+            coin_trades.extend(trades)
+            all_summaries.append(metrics)
             all_trades.extend(trades)
+
+            # Durable checkpoint after each market.
+            (coin_dir / f"{market}_summary.json").write_text(
+                json.dumps(metrics, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            pd.DataFrame(trades).to_csv(coin_dir / f"{market}_trades.csv", index=False)
+            (coin_dir / "progress.json").write_text(
+                json.dumps({
+                    "symbol": symbol,
+                    "years_requested": args.years,
+                    "completed_markets": [x["market"] for x in coin_summaries],
+                    "updated_at_utc": datetime.now(timezone.utc).isoformat(),
+                }, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            print(f"CHECKPOINT SAVED: {symbol} {market.upper()} ({len(trades)} trades)", flush=True)
             print(json.dumps(metrics, ensure_ascii=False, indent=2), flush=True)
+
+        coin_report = {
+            "engine": "production_agents_plus_production_trade_planner",
+            "symbol": symbol,
+            "years_requested": args.years,
+            "markets": coin_summaries,
+            "trades": len(coin_trades),
+            "net_pnl_combined": round(sum(float(x["net_pnl"]) for x in coin_summaries), 4),
+            "limitations": [
+                "No historical order-book imbalance.",
+                "Futures funding costs are not included.",
+                "Taker fees and fixed slippage are modeled on both sides.",
+                "1x notional sizing is used; leverage effects are excluded.",
+                "No look-ahead: indicators are causal, decisions use closed candles, entries use next-bar open.",
+            ],
+        }
+        (coin_dir / "report.json").write_text(
+            json.dumps(coin_report, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        pd.DataFrame(coin_trades).to_csv(coin_dir / "trades.csv", index=False)
+        print(f"COIN REPORT COMPLETE: {symbol}", flush=True)
 
     report = {
         "engine": "production_agents_plus_production_trade_planner",
-        "years_requested": args.years, "symbols": args.symbols,
-        "results": summaries,
-        "limitations": [
-            "No historical order-book imbalance.",
-            "Futures funding costs are not included.",
-            "Taker fees and fixed slippage are modeled on both sides.",
-            "1x notional sizing is used; leverage effects are excluded.",
-            "No look-ahead: indicators are causal, decisions use closed candles, entries use next-bar open.",
-        ],
+        "years_requested": args.years,
+        "symbols": args.symbols,
+        "results": all_summaries,
+        "completed_coins": args.symbols,
     }
-    (output / "summary.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    (output / "summary.json").write_text(
+        json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     pd.DataFrame(all_trades).to_csv(output / "trades.csv", index=False)
-    print(f"\nSaved: {output / 'summary.json'} and {output / 'trades.csv'}", flush=True)
+    print(f"\nALL COINS COMPLETE: {output / 'summary.json'}", flush=True)
 
 
 if __name__ == "__main__":
