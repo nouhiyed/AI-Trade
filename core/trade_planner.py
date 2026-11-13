@@ -1,6 +1,8 @@
 """Scalping trade plans based on confirmed rejection at market structure."""
 from math import isfinite
 
+from core.market_regime import classify_market_regime, trendline_retest
+
 
 class TradePlanner:
     TIMEFRAME_PRIORITY = ("5m", "1m", "15m", "1h")
@@ -202,6 +204,15 @@ class TradePlanner:
             return {"success": False, "reason": "Missing candle Close or ATR data"}
 
         tf, frame, entry, atr = selected
+        regime = classify_market_regime(agent_data)
+        # Route trades with the higher-timeframe regime. Counter-trend entries
+        # are allowed only when a fresh opposite CHoCH/sweep is present.
+        if market == "spot" and regime["regime"] == "BEARISH":
+            return {"success": False, "reason": "Bearish market regime: Spot BUY blocked until a confirmed bullish reversal", "market_regime": regime}
+        if direction == "LONG" and regime["regime"] == "BEARISH" and not regime.get("bullish_reversal"):
+            return {"success": False, "reason": "Bearish regime: Futures LONG blocked without confirmed bullish CHoCH/sweep", "market_regime": regime}
+        if direction == "SHORT" and regime["regime"] == "BULLISH" and not regime.get("bearish_reversal"):
+            return {"success": False, "reason": "Bullish regime: Futures SHORT blocked without confirmed bearish CHoCH/sweep", "market_regime": regime}
         supports = self._levels(frame, "support", entry)
         resistances = self._levels(frame, "resistance", entry)
         fallback_support = self._value(frame, ("support", "support_20", "support_level", "swing_low"))
@@ -218,9 +229,14 @@ class TradePlanner:
         confirmation_level = resistances[0] if direction == "SHORT" else supports[0]
         confirmed, confirmation_reason = self._confirmed_rejection(
             frame, direction, confirmation_level, atr)
+        trendline = trendline_retest(frame, direction, atr)
+        if not confirmed and trendline.get("confirmed"):
+            confirmed = True
+            confirmation_reason = trendline["reason"]
         if not confirmed:
             return {"success": False, "reason": confirmation_reason,
-                    "required_level": confirmation_level, "timeframe": tf}
+                    "required_level": confirmation_level, "timeframe": tf,
+                    "market_regime": regime}
 
         buffer = max(self.TARGET_BUFFER_ATR * atr, entry * 0.0002)
         min_stop = self.MIN_STOP_ATR * atr
@@ -277,7 +293,11 @@ class TradePlanner:
             "resistance": resistances[0] if resistances else None,
             "next_resistance": resistances[1] if len(resistances) > 1 else None,
             "entry_confirmation": confirmation_reason,
-            "entry_strategy": self._entry_style(frame, direction),
+            "entry_strategy": ("trendline_breakout_retest" if trendline.get("confirmed")
+                               else self._entry_style(frame, direction)),
+            "market_regime": regime["regime"],
+            "market_regime_confidence": regime["confidence"],
+            "trendline": trendline,
             "risk_distance": risk, "reward_risk": round(reward / risk, 3),
             "net_reward_risk": round(net_rr, 3),
             "estimated_round_trip_cost_pct": round(round_trip_cost_pct * 100, 4),

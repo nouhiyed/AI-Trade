@@ -11,9 +11,21 @@ on:
   pull_request:
     paths:
       - 'mobile/**'
+      - 'agents/**'
+      - 'core/**'
+      - 'api/**'
+      - 'tests/**'
+      - 'requirements.txt'
+      - '.github/workflows/build-apk.yml'
   push:
     paths:
       - 'mobile/**'
+      - 'agents/**'
+      - 'core/**'
+      - 'api/**'
+      - 'tests/**'
+      - 'requirements.txt'
+      - '.github/workflows/build-apk.yml'
 
 permissions:
   contents: read

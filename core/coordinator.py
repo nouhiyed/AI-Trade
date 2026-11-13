@@ -794,12 +794,32 @@ class TradingCoordinator(SpotDemoMixin):
                             symbol, "FUTURES", exit_price, source="BINANCE"
                         )
                         current["last_checked_ms"] = int(time.time() * 1000)
+
+                        # Net scalping objective: 3% of original position notional,
+                        # after entry fees, estimated exit fees and slippage.
+                        if not reason and not current.get("net_profit_partial_done"):
+                            entry_price = Decimal(str(current.get("entry_price") or 0))
+                            initial_qty = Decimal(str(current.get("quantity") or 0))
+                            remaining_qty = Decimal(str(current.get("remaining_quantity") or current.get("quantity") or 0))
+                            realized_net = Decimal(str(current.get("net_pnl") or 0))
+                            fee_rate = self.demo_execution.futures_fee_rate
+                            slip_rate = self.demo_execution.futures_slippage_rate
+                            gross_open = ((exit_price - entry_price) if direction == "LONG"
+                                          else (entry_price - exit_price)) * remaining_qty
+                            estimated_exit_cost = exit_price * remaining_qty * (fee_rate + slip_rate)
+                            net_open = realized_net + gross_open - estimated_exit_cost
+                            target_net = entry_price * initial_qty * Decimal("0.03")
+                            if initial_qty > 0 and net_open >= target_net:
+                                reason = ("NET_PROFIT_PARTIAL"
+                                          if current.get("take_profit_2") is not None
+                                          else "NET_PROFIT_TARGET")
+
                         if not reason:
                             self._save_demo_state()
                             continue
 
                         partial_tp1 = (
-                            reason == "TAKE_PROFIT"
+                            reason in ("TAKE_PROFIT", "NET_PROFIT_PARTIAL")
                             and not current.get("tp1_done")
                             and current.get("take_profit_2") is not None
                         )
@@ -809,7 +829,10 @@ class TradingCoordinator(SpotDemoMixin):
                             remaining = Decimal(str(
                                 current.get("remaining_quantity") or current.get("quantity")
                             ))
-                            pct = Decimal(str(current.get("tp1_close_pct", 70)))
+                            pct = Decimal(str(
+                                50 if reason == "NET_PROFIT_PARTIAL"
+                                else current.get("tp1_close_pct", 70)
+                            ))
                             close_quantity = remaining * pct / Decimal("100")
                             if close_quantity <= 0 or close_quantity >= remaining:
                                 partial_tp1 = False
@@ -829,6 +852,8 @@ class TradingCoordinator(SpotDemoMixin):
                         )
                         if partial_tp1 and result["status"] != "CLOSED":
                             current["tp1_done"] = True
+                            if reason == "NET_PROFIT_PARTIAL":
+                                current["net_profit_partial_done"] = True
                             entry_price = Decimal(str(current["entry_price"]))
                             # Move the stop beyond entry only far enough to
                             # cover this market's estimated round-trip fees/slippage.
@@ -845,6 +870,8 @@ class TradingCoordinator(SpotDemoMixin):
                             current["tp1_closed_quantity"] = str(result["closed_quantity"])
                         elif reason == "TAKE_PROFIT" and current.get("tp1_done"):
                             close_reason = "TAKE_PROFIT_2"
+                        elif reason == "NET_PROFIT_TARGET":
+                            close_reason = "NET_PROFIT_3_PERCENT"
                         current["close_reason"] = close_reason
                         current["close_price"] = str(result["execution_price"])
                         current["realized_pnl"] = str(result["realized_pnl"])

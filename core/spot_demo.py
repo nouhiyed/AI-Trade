@@ -317,6 +317,17 @@ class SpotDemoMixin:
                             reason = "STOP_LOSS"
                         elif price >= target:
                             reason = "TAKE_PROFIT"
+                        else:
+                            entry = Decimal(str(snapshot.get("entry_price") or 0))
+                            quantity = Decimal(str(snapshot.get("quantity") or 0))
+                            entry_fee = Decimal(str(snapshot.get("entry_fee") or 0))
+                            exit_cost = price * quantity * (
+                                self.demo_execution.fee_rate + self.demo_execution.slippage_rate
+                            )
+                            net_profit = (price - entry) * quantity - entry_fee - exit_cost
+                            target_net = entry * quantity * Decimal("0.03")
+                            if quantity > 0 and net_profit >= target_net:
+                                reason = "NET_PROFIT_3_PERCENT"
 
                     with self._demo_lock:
                         current = self.demo_positions.get(position_id)
