@@ -23,6 +23,8 @@ class AdaptiveTrendTests(unittest.TestCase):
                          "close": 99.7, "volume": 100.0, "ATR": 1.0})
         rows[77] = {"open": 100.0, "high": 103.0, "low": 99.8,
                     "close": 102.0, "volume": 180.0, "ATR": 1.0}
+        rows[78] = {"open": 100.1, "high": 100.8, "low": 100.0,
+                    "close": 100.4, "volume": 110.0, "ATR": 1.0}
         rows[79] = {"open": 100.2, "high": 101.0, "low": 99.9,
                     "close": 100.6, "volume": 120.0, "ATR": 1.0}
         fifteen = pd.DataFrame(rows)
