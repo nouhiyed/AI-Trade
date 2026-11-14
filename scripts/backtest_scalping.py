@@ -17,6 +17,7 @@ from core.market_data_engine import MarketDataEngine
 from core.backtest_costs import BacktestCostModel, load_funding_history, apply_funding
 from core.scalping_strategies import FuturesScalpingStrategy, SpotScalpingStrategy
 from core.scalping_v2 import FuturesScalpingStrategyV2, SpotScalpingStrategyV2
+from core.scalping_v3 import FuturesScalpingStrategyV3, SpotScalpingStrategyV3
 
 RISK_FRACTION = 0.0025
 MAX_GAP_ATR = 0.40
@@ -41,12 +42,30 @@ def run_one(market, symbol, years, cache_dir, strategy_version='v1'):
                 (raw["low"] - prev_close).abs(),
             ], axis=1).max(axis=1)
             raw["ATR"] = true_range.rolling(14, min_periods=14).mean()
-            prepared[tf] = raw
+            if strategy_version == "v3":
+                close = raw["close"].astype(float)
+                delta = close.diff()
+                gain = delta.clip(lower=0).ewm(alpha=1/14, adjust=False, min_periods=14).mean()
+                loss = (-delta.clip(upper=0)).ewm(alpha=1/14, adjust=False, min_periods=14).mean()
+                rs = gain / loss.replace(0, float("nan"))
+                raw["RSI"] = (100 - 100/(1+rs)).fillna(50.0)
+                raw["EMA_9"] = close.ewm(span=9, adjust=False, min_periods=9).mean()
+                raw["EMA_20"] = close.ewm(span=20, adjust=False, min_periods=20).mean()
+                macd = close.ewm(span=12, adjust=False).mean() - close.ewm(span=26, adjust=False).mean()
+                raw["MACD_hist"] = macd - macd.ewm(span=9, adjust=False).mean()
+                mid = close.rolling(20, min_periods=20).mean()
+                std = close.rolling(20, min_periods=20).std(ddof=0)
+                raw["BB_lower"], raw["BB_upper"] = mid-2*std, mid+2*std
+                prepared[tf] = raw
+            else:
+                prepared[tf] = raw
         else:
             prepared[tf] = market_engine._prepare_frame(raw, symbol, market, tf)
         print(f"Prepared {market} {symbol} {tf}: {len(raw)} candles", flush=True)
     base = prepared["1m"]
-    if strategy_version == "v2":
+    if strategy_version == "v3":
+        strategy = FuturesScalpingStrategyV3() if market == "futures" else SpotScalpingStrategyV3()
+    elif strategy_version == "v2":
         strategy = FuturesScalpingStrategyV2() if market == "futures" else SpotScalpingStrategyV2()
     else:
         strategy = FuturesScalpingStrategy() if market == "futures" else SpotScalpingStrategy()
@@ -113,11 +132,18 @@ def run_one(market, symbol, years, cache_dir, strategy_version='v1'):
         n5 = int(times["5m"].searchsorted(asof, side="right"))
         if n5 < 30:
             continue
-        signal_time = int(times["5m"][n5-1])
+        data, ready = {"symbol": symbol}, True
+        if strategy_version == "v3":
+            n1 = int(times["1m"].searchsorted(asof, side="right"))
+            if n1 < 35:
+                continue
+            signal_time = int(times["1m"][n1-1])
+            data["1m"] = prepared["1m"].iloc[max(0,n1-240):n1].copy()
+        else:
+            signal_time = int(times["5m"][n5-1])
         if signal_time == last_signal:
             continue
         last_signal = signal_time
-        data, ready = {"symbol": symbol}, True
         for tf in tfs[1:]:
             count = int(times[tf].searchsorted(asof, side="right"))
             if count < 30:
@@ -214,7 +240,10 @@ def run_one(market, symbol, years, cache_dir, strategy_version='v1'):
         "average_holding_minutes":round(sum(holding)/len(holding), 2) if holding else 0.0,
         "signal_diagnostics":dict(diagnostics),
         "setup_counts":dict(setup_counts),
-        "signal_timeframe":"5m","execution_timeframe":"1m","risk_fraction":RISK_FRACTION,
+        "signal_timeframe":"1m" if strategy_version=="v3" else "5m",
+        "execution_timeframe":"1m","risk_fraction":RISK_FRACTION,
+        "target_trade_rate_per_hour":{"futures":4,"spot":2},
+        "trade_rate_scope":"aggregate across the eight-symbol research basket; target, not forced entries",
         "max_holding_minutes":strategy.MAX_HOLD_MINUTES,
         "exit_policy":"Fill-anchored SL/TP; cost-adjusted break-even stop after +0.9R; hard time exit.",
         "limitations":[
@@ -234,7 +263,7 @@ def main():
     parser.add_argument("--symbols",nargs="+",default=list(SYMBOLS))
     parser.add_argument("--output",default="scalping_results")
     parser.add_argument("--cache",default="data/backtest_cache")
-    parser.add_argument("--strategy-version",choices=("v1","v2"),default="v2")
+    parser.add_argument("--strategy-version",choices=("v1","v2","v3"),default="v3")
     args=parser.parse_args()
     invalid=sorted(set(args.symbols).difference(SYMBOLS))
     if invalid: parser.error("Unsupported symbols: "+", ".join(invalid))
