@@ -16,12 +16,13 @@ from backtest import (SYMBOLS, STARTING_CAPITAL, MAX_NOTIONAL_MULTIPLE, FEE_RATE
 from core.market_data_engine import MarketDataEngine
 from core.backtest_costs import BacktestCostModel, load_funding_history, apply_funding
 from core.scalping_strategies import FuturesScalpingStrategy, SpotScalpingStrategy
+from core.scalping_v2 import FuturesScalpingStrategyV2, SpotScalpingStrategyV2
 
 RISK_FRACTION = 0.0025
-MAX_GAP_ATR = 0.80
+MAX_GAP_ATR = 0.40
 
 
-def run_one(market, symbol, years, cache_dir):
+def run_one(market, symbol, years, cache_dir, strategy_version='v1'):
     now = datetime.now(timezone.utc)
     end_dt = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     month_index = end_dt.year * 12 + end_dt.month - 1 - years * 12
@@ -45,7 +46,10 @@ def run_one(market, symbol, years, cache_dir):
             prepared[tf] = market_engine._prepare_frame(raw, symbol, market, tf)
         print(f"Prepared {market} {symbol} {tf}: {len(raw)} candles", flush=True)
     base = prepared["1m"]
-    strategy = FuturesScalpingStrategy() if market == "futures" else SpotScalpingStrategy()
+    if strategy_version == "v2":
+        strategy = FuturesScalpingStrategyV2() if market == "futures" else SpotScalpingStrategyV2()
+    else:
+        strategy = FuturesScalpingStrategy() if market == "futures" else SpotScalpingStrategy()
     costs = BacktestCostModel(market)
     funding = (load_funding_history(symbol, int(start_dt.timestamp()*1000),
         int(end_dt.timestamp()*1000), cache_dir.parent/"funding_cache") if market == "futures" else [])
@@ -135,15 +139,31 @@ def run_one(market, symbol, years, cache_dir):
         diagnostics["plans_passed"] += 1
         next_bar = base.iloc[i+1]
         raw_entry, atr = float(next_bar["open"]), float(plan["atr"])
-        if abs(raw_entry-float(plan["entry"])) > max(MAX_GAP_ATR*atr, float(plan["entry"])*.0025):
+        if abs(raw_entry-float(plan["entry"])) > max(MAX_GAP_ATR*atr, float(plan["entry"])*.0012):
             diagnostics["rejected_gap"] += 1
             continue
         engine._CURRENT_EXECUTION_COMPONENTS = costs.components(next_bar)
         SLIPPAGE_RATE[market] = engine._CURRENT_EXECUTION_COMPONENTS["total_adverse_rate"]
         direction = plan["direction"]
         fill = _fill_entry(raw_entry, direction, SLIPPAGE_RATE[market])
-        stop, target = float(plan["stop_loss"]), float(plan["take_profit"])
+
+        # Re-anchor every level to the executable fill. The old engine kept
+        # stop/target at the prior 5m close, silently changing the planned R.
+        distance = max(float(plan.get("stop_atr_multiple", 1.15))*atr, fill*.0008)
+        target_r = float(plan.get("reward_risk", 1.0))
+        stop = fill-distance if direction == "LONG" else fill+distance
+        target = fill+target_r*distance if direction == "LONG" else fill-target_r*distance
+        fee_rate = float(FEE_RATE[market])
+        adverse_rate = float(engine._CURRENT_EXECUTION_COMPONENTS["total_adverse_rate"])
+        round_trip_rate = 2.0*(fee_rate+adverse_rate)
+        net_reward_rate = target_r*distance/fill-round_trip_rate
+        net_risk_rate = distance/fill+round_trip_rate
+        net_rr = net_reward_rate/net_risk_rate if net_risk_rate > 0 else 0.0
+        if net_reward_rate < 0.00030 or net_rr < (0.30 if strategy_version == "v2" else 0.15):
+            diagnostics["rejected_cost_after_fill"] += 1
+            continue
         if (direction=="LONG" and not stop<fill<target) or (direction=="SHORT" and not target<fill<stop):
+            diagnostics["rejected_invalid_levels"] += 1
             continue
         distance = abs(fill-stop)
         qty = min(equity*RISK_FRACTION/distance, equity*MAX_NOTIONAL_MULTIPLE/fill)
@@ -165,8 +185,11 @@ def run_one(market, symbol, years, cache_dir):
             "mae_pct":0.0,"mfe_pct":0.0,"initial_stop":stop,"stop":stop,
             "initial_target":target,"target1":target,"target2":None,"tp1_done":False,
             "best_price":fill,"strategy":plan["strategy"],"setup":plan["setup"],
-            "market_regime":plan["market_regime"],"net_pnl":-fee,"fees":fee,
-            "round_trip_cost":2*(FEE_RATE[market]+SLIPPAGE_RATE[market]),
+            "market_regime":plan["market_regime"],"signal_entry_price":float(plan["entry"]),
+            "planned_reward_risk":target_r,"actual_reward_risk":target_r,
+            "net_reward_risk_after_costs":round(net_rr, 5),
+            "net_pnl":-fee,"fees":fee,
+            "round_trip_cost":round_trip_rate,
             "risk_pct":distance/fill,"be_activated":False,
             "last_exit_reason":"OPEN","last_exit_time":entry_time.isoformat(),
         }
@@ -184,14 +207,15 @@ def run_one(market, symbol, years, cache_dir):
     elapsed_days = max(1.0, (pd.Timestamp(base["close_time"].iloc[-1]) - pd.Timestamp(first_time or base["close_time"].iloc[0])).total_seconds()/86400.0)
     holding = [float(t.get("holding_minutes", 0.0)) for t in trades]
     metrics.update({
-        "strategy":"futures_momentum_range_scalper_v1" if market=="futures" else "spot_long_scalper_v1",
+        "strategy":("futures_scalper_v2" if market=="futures" else "spot_scalper_v2") if strategy_version=="v2" else ("futures_momentum_range_scalper_v1" if market=="futures" else "spot_long_scalper_v1"),
+        "strategy_version":strategy_version,
         "trades_per_30_days":round(len(trades)*30.4375/elapsed_days, 3),
         "average_holding_minutes":round(sum(holding)/len(holding), 2) if holding else 0.0,
         "signal_diagnostics":dict(diagnostics),
         "setup_counts":dict(setup_counts),
         "signal_timeframe":"5m","execution_timeframe":"1m","risk_fraction":RISK_FRACTION,
         "max_holding_minutes":strategy.MAX_HOLD_MINUTES,
-        "exit_policy":"Full target/stop exit; cost-adjusted break-even stop after +0.9R; hard time exit.",
+        "exit_policy":"Fill-anchored SL/TP; cost-adjusted break-even stop after +0.9R; hard time exit.",
         "limitations":[
             "Research simulation only; no exchange orders are sent.",
             "Closed 5m/15m/1h (and Spot 4h) signals; next 1m open fills.",
@@ -209,6 +233,7 @@ def main():
     parser.add_argument("--symbols",nargs="+",default=list(SYMBOLS))
     parser.add_argument("--output",default="scalping_results")
     parser.add_argument("--cache",default="data/backtest_cache")
+    parser.add_argument("--strategy-version",choices=("v1","v2"),default="v2")
     args=parser.parse_args()
     invalid=sorted(set(args.symbols).difference(SYMBOLS))
     if invalid: parser.error("Unsupported symbols: "+", ".join(invalid))
@@ -218,13 +243,13 @@ def main():
     for symbol in args.symbols:
         for market in ("futures","spot"):
             print(f"===== SCALPING {symbol} {market.upper()} =====",flush=True)
-            metrics,trades=run_one(market,symbol,args.years,cache)
+            metrics,trades=run_one(market,symbol,args.years,cache,args.strategy_version)
             summaries.append(metrics); all_trades.extend(trades)
             folder=output/symbol; folder.mkdir(parents=True,exist_ok=True)
             (folder/f"{market}_summary.json").write_text(json.dumps(metrics,indent=2),encoding="utf-8")
             pd.DataFrame(trades).to_csv(folder/f"{market}_trades.csv",index=False)
             print(json.dumps(metrics,indent=2),flush=True)
-    report={"engine":"separate_futures_and_spot_scalpers_v1","years_requested":args.years,
+    report={"engine":"separate_futures_and_spot_scalpers","strategy_version":args.strategy_version,"years_requested":args.years,
             "symbols":args.symbols,"results":summaries}
     (output/"summary.json").write_text(json.dumps(report,indent=2),encoding="utf-8")
     pd.DataFrame(all_trades).to_csv(output/"trades.csv",index=False)
