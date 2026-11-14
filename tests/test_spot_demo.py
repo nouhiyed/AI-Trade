@@ -33,7 +33,8 @@ class Feed:
 
 def signal(symbol, entry, stop, target, safety=None):
     out = {"symbol": symbol, "direction": "BUY", "confidence": 80,
-           "trade_plan": {"success": True, "direction": "LONG", "entry": entry,
+           "strategy_version": "v3",
+           "trade_plan": {"success": True, "strategy_version": "v3", "direction": "LONG", "entry": entry,
                           "stop_loss": stop, "take_profit": target, "atr": 1.0, "reward_risk": 2.0}}
     if safety is not None:
         out["token_safety"] = {"status": safety}
@@ -96,20 +97,18 @@ class TestSpot(Base):
         ev = self.c.monitor_demo_positions()["events"]
         self.assertEqual(ev[0]["reason"], "STOP_LOSS")
 
-    def test_spot_arms_trailing_at_net_three_percent_then_closes_on_retrace(self):
+    def test_spot_does_not_enable_retired_profit_trailing(self):
         r = self.open()
         position = self.c.demo_positions[r["position_id"]]
         self.feed.prices["ETHUSDT"] = 103.90
         first = self.c.monitor_demo_positions()["events"]
         self.assertEqual(first, [])
-        self.assertTrue(position.get("trailing_stop_active"))
+        self.assertFalse(position.get("trailing_stop_active", False))
         self.assertEqual(position["status"], "DEMO_OPEN")
-        protected_stop = float(position["stop_loss"])
-        self.assertGreater(protected_stop, float(position["entry_price"]))
 
-        self.feed.prices["ETHUSDT"] = 100.00
+        self.feed.prices["ETHUSDT"] = 104.50
         second = self.c.monitor_demo_positions()["events"]
-        self.assertEqual(second[0]["reason"], "TRAILING_STOP")
+        self.assertEqual(second[0]["reason"], "TAKE_PROFIT")
         self.assertEqual(position["status"], "DEMO_CLOSED")
 
     def test_rejections(self):
