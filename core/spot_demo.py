@@ -338,33 +338,6 @@ class SpotDemoMixin:
                             reason = "TRAILING_STOP" if trailing_active else "STOP_LOSS"
                         elif not trailing_active and price >= target:
                             reason = "TAKE_PROFIT"
-                        elif not trailing_active:
-                            entry = Decimal(str(snapshot.get("entry_price") or 0))
-                            quantity = Decimal(str(snapshot.get("quantity") or 0))
-                            entry_fee = Decimal(str(snapshot.get("entry_fee") or 0))
-                            exit_cost = price * quantity * (
-                                self.demo_execution.fee_rate + self.demo_execution.slippage_rate
-                            )
-                            net_profit = (price - entry) * quantity - entry_fee - exit_cost
-                            target_net = entry * quantity * Decimal("0.03")
-                            if quantity > 0 and net_profit >= target_net:
-                                # Arm the trailing stop instead of cashing out at a
-                                # fixed 3% threshold. The remaining position can run.
-                                trailing_active = True
-                                entry_cost_buffer = Decimal("2") * (
-                                    self.demo_execution.fee_rate
-                                    + self.demo_execution.slippage_rate
-                                )
-                                stop = max(
-                                    stop,
-                                    entry * (Decimal("1") + entry_cost_buffer)
-                                )
-                                trail_update = {
-                                    "stop": stop,
-                                    "best_price": price,
-                                    "method": "ARMED_AT_NET_3_PERCENT",
-                                }
-
                     with self._demo_lock:
                         current = self.demo_positions.get(position_id)
                         if not current or current.get("status") not in (
