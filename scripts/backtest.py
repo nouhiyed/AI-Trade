@@ -146,6 +146,33 @@ def _times_ms(frame):
     )
 
 
+def _funding_history(client, symbol, start_dt, end_dt):
+    """Fetch every historical USD-M funding event for the tested interval."""
+    start_ms = int(start_dt.timestamp() * 1000)
+    end_ms = int(end_dt.timestamp() * 1000)
+    cursor = start_ms
+    events = []
+    while cursor < end_ms:
+        page = client._request("futures", "/fapi/v1/fundingRate", {
+            "symbol": symbol, "startTime": cursor, "endTime": end_ms, "limit": 1000,
+        })
+        if not isinstance(page, list) or not page:
+            break
+        events.extend(page)
+        last = int(page[-1].get("fundingTime", 0))
+        next_cursor = last + 1
+        if next_cursor <= cursor:
+            break
+        cursor = next_cursor
+        if len(page) < 1000:
+            break
+    return sorted(
+        (int(item["fundingTime"]), float(item["fundingRate"]))
+        for item in events
+        if start_ms <= int(item.get("fundingTime", 0)) <= end_ms
+    )
+
+
 def _fill_entry(raw, direction, slip):
     return raw * (1.0 + slip if direction == "LONG" else 1.0 - slip)
 
@@ -231,6 +258,7 @@ def _metrics(trades, equity, max_drawdown, market, symbol, start, end):
             sum(float(item.get("net_r", 0)) for item in trades) / len(trades), 4
         ) if trades else 0.0,
         "total_fees": round(sum(float(item["fees"]) for item in trades), 4),
+        "funding_net_cashflow": round(sum(float(item.get("funding_net_cashflow", 0)) for item in trades), 4),
         "max_drawdown_pct": round(max_drawdown * 100, 4),
         "cost_assumptions": {
             "taker_fee_per_side": FEE_RATE[market],
@@ -240,7 +268,7 @@ def _metrics(trades, equity, max_drawdown, market, symbol, start, end):
             ),
         },
         "limitations": [
-            "Historical funding payments are not yet modeled for Futures.",
+            "Futures funding events are applied at published rates; the nearest 1m close approximates funding mark price.",
             "Market orders use fixed adverse taker slippage.",
             "Sizing is capped at 1x notional; leverage effects are excluded.",
             "Entries occur at the next 1m open after a closed 1m signal candle.",
@@ -249,13 +277,15 @@ def _metrics(trades, equity, max_drawdown, market, symbol, start, end):
     }
 
 
-def run_one(market_engine, market, symbol, years, cache_dir):
+def run_one(client, market, symbol, years, cache_dir):
     now = datetime.now(timezone.utc)
     end_dt = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     month_index = end_dt.year * 12 + end_dt.month - 1 - years * 12
     start_dt = datetime(
         month_index // 12, month_index % 12 + 1, 1, tzinfo=timezone.utc
     )
+    funding_events = _funding_history(client, symbol, start_dt, end_dt) if market == "futures" else []
+    funding_index = 0
     prepared = {}
     for timeframe in TIMEFRAMES[market]:
         print(f"Downloading {market} {symbol} {timeframe}...", flush=True)
@@ -281,6 +311,16 @@ def run_one(market_engine, market, symbol, years, cache_dir):
         bar_open = pd.Timestamp(bar["open_time"])
         if first_time is None:
             first_time = bar_close.isoformat()
+
+        while funding_index < len(funding_events) and funding_events[funding_index][0] <= asof:
+            funding_time_ms, funding_rate = funding_events[funding_index]
+            if position is not None and funding_time_ms > position["opened_at_ms"]:
+                direction_sign = 1.0 if position["direction"] == "LONG" else -1.0
+                cashflow = -direction_sign * position["quantity"] * float(bar["close"]) * funding_rate
+                position["funding_net_cashflow"] += cashflow
+                position["net_pnl"] += cashflow
+                equity += cashflow
+            funding_index += 1
 
         if position is not None:
             direction = position["direction"]
@@ -402,6 +442,7 @@ def run_one(market_engine, market, symbol, years, cache_dir):
             "max_hold_minutes": max_hold,
             "net_pnl": -entry_fee,
             "fees": entry_fee,
+            "funding_net_cashflow": 0.0,
             "exit_time": None,
             "exit_fill": None,
             "exit_reason": "OPEN",
@@ -436,7 +477,7 @@ def main():
 
     output = Path(args.output)
     output.mkdir(parents=True, exist_ok=True)
-    client, market_engine = BinanceMarketData(), MarketDataEngine()
+    client = BinanceMarketData()
     all_summaries, all_trades, failures = [], [], []
     universes = {
         market: (args.symbols if args.symbols else client.fetch_symbols(market))
@@ -450,7 +491,7 @@ def main():
             print(f"\n[{number}/{len(symbols)}] {market.upper()} {symbol}", flush=True)
             try:
                 metrics, trades = run_one(
-                    market_engine, market, symbol, args.years, Path(args.cache)
+                    client, market, symbol, args.years, Path(args.cache)
                 )
                 all_summaries.append(metrics)
                 all_trades.extend(trades)
