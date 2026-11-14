@@ -210,4 +210,43 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
+  aggregate-v3-rate:
+    needs: backtest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: AI-Trader-Adaptive-Comparison-*-2-year
+          path: research_artifacts
+          merge-multiple: true
+      - name: Aggregate v3 trade frequency across the eight-symbol basket
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from datetime import datetime
+          root = Path("research_artifacts")
+          result = {}
+          for market, target in (("futures", 4), ("spot", 2)):
+              files = sorted(root.glob(f"scalping_v3/*/{market}_summary.json"))
+              rows = [json.loads(p.read_text()) for p in files]
+              if not rows:
+                  raise SystemExit(f"No v3 {market} summaries found")
+              starts = [datetime.fromisoformat(x["start"].replace("Z", "+00:00")) for x in rows]
+              ends = [datetime.fromisoformat(x["end"].replace("Z", "+00:00")) for x in rows]
+              hours = (max(ends)-min(starts)).total_seconds()/3600
+              trades = sum(int(x.get("trades", 0)) for x in rows)
+              rate = trades/hours if hours > 0 else 0
+              result[market] = {"symbols_tested": len(rows), "trades": trades,
+                                "period_hours": round(hours, 2), "trades_per_hour": round(rate, 3),
+                                "minimum_target_per_hour": target, "target_met": rate >= target}
+          Path("v3_aggregate_trade_rate.json").write_text(json.dumps(result, indent=2))
+          print(json.dumps(result, indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scalping-v3-aggregate-trade-rate
+          path: v3_aggregate_trade_rate.json
+          retention-days: 30
+
 # The research branch runs all unit tests, legacy comparisons, and the new scalping tests.
