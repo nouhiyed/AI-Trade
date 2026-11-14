@@ -99,9 +99,7 @@ class ApiService {
   static Future<bool> health() async {
     final result = await _request(
       'GET', '/health', requestTimeout: const Duration(seconds: 5));
-    return result['ok'] == true &&
-        result['mode'] == 'DEMO' &&
-        result['api_version'] == '2026.11.14.2';
+    return result['ok'] == true && result['mode'] == 'DEMO';
   }
 
   static Future<Map<String, dynamic>> status() =>
