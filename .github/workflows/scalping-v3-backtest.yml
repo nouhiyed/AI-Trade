@@ -1,0 +1,89 @@
+name: AI-Trader Scalping V3 Historical Backtest
+
+on:
+  workflow_dispatch:
+    inputs:
+      years:
+        description: Historical Binance data period
+        required: true
+        type: choice
+        options: ["1", "2", "3"]
+        default: "2"
+  push:
+    branches:
+      - "research/scalping-v3-frequency"
+    paths:
+      - ".github/workflows/scalping-v3-backtest.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-trader-scalping-v3-backtest
+  cancel-in-progress: false
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pytest pillow matplotlib
+      - name: Compile and run backend tests
+        run: |
+          python -m compileall -q agents api core scripts tests
+          python -m pytest -q tests
+
+  backtest:
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        symbol:
+          - BTCUSDT
+          - ETHUSDT
+          - BNBUSDT
+          - SOLUSDT
+          - XRPUSDT
+          - ADAUSDT
+          - DOGEUSDT
+          - LINKUSDT
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+      - name: Run V3 historical scalping backtest (Futures + Spot)
+        run: |
+          python scripts/backtest_scalping.py \
+            --years "${{ inputs.years || '2' }}" \
+            --symbols "${{ matrix.symbol }}" \
+            --strategy-version v3 \
+            --output "scalping_v3" \
+            --cache "data/backtest_cache"
+      - name: Upload V3 results for this symbol
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scalping-v3-${{ matrix.symbol }}
+          path: |
+            scalping_v3/${{ matrix.symbol }}/
+          if-no-files-found: warn
+          retention-days: 30
