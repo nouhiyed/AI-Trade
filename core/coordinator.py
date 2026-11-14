@@ -1007,8 +1007,8 @@ class TradingCoordinator(SpotDemoMixin):
             return {"approved": False, "reason": "Direction does not match latest signal"}
 
         plan = signal.get("trade_plan")
-        if not isinstance(plan, dict) or plan.get("success") is not True:
-            return {"approved": False, "reason": "No approved Futures trade plan"}
+        if signal.get("strategy_version") != "v3" or not isinstance(plan, dict) or plan.get("success") is not True or plan.get("strategy_version") != "v3":
+            return {"approved": False, "reason": "Only an approved V3 Futures trade plan is permitted"}
         if str(plan.get("direction", "")).upper() != direction:
             return {"approved": False, "reason": "Trade plan direction mismatch"}
 
