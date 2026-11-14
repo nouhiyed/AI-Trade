@@ -9,10 +9,9 @@ _STATE_FILE = Path(__file__).resolve().parents[1] / "config" / "scan_rotation.js
 
 def next_scan_batch(domain, universe, batch_size=20):
     """Return the next batch and persist its cursor; no eligible symbol is dropped."""
-    items = sorted(
-        universe,
-        key=lambda item: str(item.get("symbol", "")).upper(),
-    )
+    # Keep the caller's ranking (Spot quote volume / Futures scanner priority).
+    # The cursor, not alphabetical re-sorting, provides stable round-robin coverage.
+    items = list(universe)
     if not items:
         return [], {
             "universe_total": 0,
@@ -23,7 +22,8 @@ def next_scan_batch(domain, universe, batch_size=20):
         }
 
     symbols = [str(item.get("symbol", "")).upper() for item in items]
-    count = min(max(1, int(batch_size)), len(items))
+    if len(set(symbols)) != len(symbols):
+        raise ValueError("Scan universe contains duplicate symbols")
 
     with _LOCK:
         try:
@@ -50,8 +50,11 @@ def next_scan_batch(domain, universe, batch_size=20):
                 0,
             )
 
-        batch = [items[(start + offset) % len(items)] for offset in range(count)]
-        wrapped = start + count >= len(items)
+        # Do not wrap inside a batch. The final batch in a cycle is allowed
+        # to be smaller, so every symbol is scanned exactly once per cycle.
+        count = min(max(1, int(batch_size)), len(items) - start)
+        batch = items[start:start + count]
+        wrapped = start + count == len(items)
         if wrapped:
             cycle += 1
 

@@ -13,6 +13,12 @@ class Feed:
     def __init__(self):
         self.prices = {}
         self.candles = []
+        self.symbols = []
+
+    def fetch_symbols(self, market):
+        if market != "spot":
+            raise ValueError("Test feed only exposes Spot symbols")
+        return list(self.symbols)
 
     def fetch_book_ticker(self, market, symbol):
         p = self.prices.get(symbol, 100.0)
@@ -76,15 +82,15 @@ class TestSpot(Base):
         self.assertAlmostEqual(self.c.risk.balance, self.wallet(), places=6)
         row = self.c.journal.closed_trades()[0]
         self.assertEqual(row["domain"], "spot")
-        self.assertLess(row["net_pnl"], 0)            # fees + slippage on a flat price
+        self.assertLess(row["net_pnl"], 0)
         self.assertEqual(self.c.demo_positions[r["position_id"]]["status"], "DEMO_CLOSED")
 
     def test_stop_loss_and_take_profit_by_live_price(self):
-        a = self.open("ETHUSDT")
+        self.open("ETHUSDT")
         self.feed.prices["ETHUSDT"] = 97.5
         ev = self.c.monitor_demo_positions()["events"]
         self.assertEqual(ev[0]["reason"], "STOP_LOSS")
-        b = self.open("SOLUSDT")
+        self.open("SOLUSDT")
         self.feed.prices["SOLUSDT"] = 104.5
         ev = self.c.monitor_demo_positions()["events"]
         self.assertEqual(ev[0]["reason"], "TAKE_PROFIT")
@@ -93,7 +99,7 @@ class TestSpot(Base):
     def test_catch_up_after_outage(self):
         r = self.open()
         self.c.demo_positions[r["position_id"]]["last_checked_ms"] = int((time.time() - 600) * 1000)
-        self.feed.candles = [(5, 100.2, 97.0)]        # dipped under the 98 stop
+        self.feed.candles = [(5, 100.2, 97.0)]
         ev = self.c.monitor_demo_positions()["events"]
         self.assertEqual(ev[0]["reason"], "STOP_LOSS")
 
@@ -116,12 +122,11 @@ class TestSpot(Base):
         self.c.last_signals["spot"] = {"symbol": "ETHUSDT", "direction": "SELL"}
         self.assertFalse(self.c.request_demo_spot_trade("ETHUSDT", "spot")["approved"])
         self.c.last_signals["spot"] = signal("ETHUSDT", 100, 98, 104)
-        self.feed.prices["ETHUSDT"] = 103.0           # moved >1% away from plan entry
+        self.feed.prices["ETHUSDT"] = 103.0
         self.assertIn("moved", self.c.request_demo_spot_trade("ETHUSDT", "spot")["reason"])
         self.feed.prices["ETHUSDT"] = 100.0
         self.assertTrue(self.c.request_demo_spot_trade("ETHUSDT", "spot")["approved"])
         self.assertFalse(self.c.request_demo_spot_trade("ETHUSDT", "spot")["approved"])
-
 
     def test_spot_scan_covers_full_universe_without_volume_floor_or_30_cap(self):
         tickers = [
@@ -129,22 +134,28 @@ class TestSpot(Base):
              "lastPrice": "1.0"}
             for i in range(45)
         ]
+        self.feed.symbols = [item["symbol"] for item in tickers]
         self.feed._request = lambda market, path, params: tickers
         analyzed = []
+
         def analyze(symbol, domains):
             analyzed.append(symbol)
             return {"signals": {"spot": {
                 "symbol": symbol, "direction": "WAIT",
                 "reason": "No entry signal",
             }}}
+
         self.c.analyze_live = analyze
+        results = [self.c.scan_spot() for _ in range(3)]
 
-        result = self.c.scan_spot()
-
-        self.assertEqual(result["scanned"], 45)
+        self.assertTrue(all(result["success"] for result in results), results)
+        self.assertEqual([result["scanned"] for result in results], [20, 20, 5])
+        self.assertEqual(sum(result["scanned"] for result in results), 45)
         self.assertEqual(len(analyzed), 45)
+        self.assertEqual(len(set(analyzed)), 45)
         self.assertEqual(analyzed[0], "COIN044USDT")
-        self.assertEqual(result["actionable"], 0)
+        self.assertTrue(results[-1]["scan"]["cycle_complete"])
+        self.assertTrue(all(result["actionable"] == 0 for result in results))
 
 
 class TestAutopilotMarkets(Base):
@@ -166,12 +177,14 @@ class TestAutopilotMarkets(Base):
         self.c.demo_positions["already-open"] = {
             "symbol": "BTCUSDT", "status": "DEMO_OPEN"}
         calls = []
+
         def scan(name):
             def run(**kwargs):
                 calls.append(name)
                 return {"success": True, "scanned": 1, "actionable": 0,
                         "opportunities": [], "rejections": {}}
             return run
+
         self.c.scan_futures = scan("futures")
         self.c.scan_spot = scan("spot")
         ap = Autopilot(self.c, config_path="config/ap-full.json")
@@ -188,6 +201,7 @@ class TestAutopilotMarkets(Base):
             return {"symbol": symbol, "direction": "LONG", "confidence": 80,
                     "trade_plan": plan_signal["trade_plan"], "signal": plan_signal,
                     "domain": domain}
+
         fut = {"symbol": "BTCUSDT", "direction": "LONG", "confidence": 80,
                "strategy_version": "v3",
                "trade_plan": {"success": True, "strategy_version": "v3", "direction": "LONG", "entry": 100,
