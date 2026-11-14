@@ -158,8 +158,8 @@ class SpotDemoMixin:
         if str(signal.get("direction", "")).upper() != "BUY":
             return {"approved": False, "reason": "Latest signal is not BUY"}
         plan = signal.get("trade_plan")
-        if not isinstance(plan, dict) or plan.get("success") is not True:
-            return {"approved": False, "reason": "No approved trade plan"}
+        if signal.get("strategy_version") != "v3" or not isinstance(plan, dict) or plan.get("success") is not True or plan.get("strategy_version") != "v3":
+            return {"approved": False, "reason": "Only an approved V3 Spot trade plan is permitted"}
 
         trade_id = None
         try:
