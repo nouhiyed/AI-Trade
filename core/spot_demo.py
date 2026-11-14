@@ -3,7 +3,6 @@
 Money moves only inside the internal DEMO ledger; prices are real Binance
 Spot order-book data (ask to buy, bid to sell).
 """
-import os
 import time
 from decimal import Decimal, ROUND_DOWN
 
