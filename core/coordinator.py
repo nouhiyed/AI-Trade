@@ -1347,9 +1347,14 @@ class TradingCoordinator(SpotDemoMixin):
         # Chart prices are reference annotations only. The execution levels must
         # come exclusively from the approved V3 plan used by autopilot.
         agent_plan = signal.get("trade_plan") or {}
-        if not isinstance(agent_plan, dict) or agent_plan.get("success") is not True:
+        if (
+            signal.get("strategy_version") != "v3"
+            or not isinstance(agent_plan, dict)
+            or agent_plan.get("strategy_version") != "v3"
+            or agent_plan.get("success") is not True
+        ):
             reason = (agent_plan.get("reason") if isinstance(agent_plan, dict) else None) or (
-                "No confirmed support/resistance rejection; agent must wait")
+                "No approved V3 trade plan; agent must wait")
             return {**base, "success": True, "decision_status": "REJECTED",
                     "decision_reason": str(reason), "reason": str(reason),
                     "signal": signal, "trade_plan": agent_plan}
