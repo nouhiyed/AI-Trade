@@ -29,7 +29,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ai-trader-adaptive-backtest-v2-regime-funding-archive-fallback
+  group: ai-trader-separate-scalping-research-v1
   cancel-in-progress: false
 
 jobs:
