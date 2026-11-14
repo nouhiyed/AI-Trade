@@ -794,6 +794,12 @@ class TradingCoordinator(SpotDemoMixin):
                     elif target is not None and exit_price <= target:
                         reason = "TAKE_PROFIT"
 
+                max_hold = int(snapshot.get("max_hold_minutes") or 0)
+                opened_ms = int(snapshot.get("opened_at_ms") or 0)
+                if not reason and max_hold > 0 and opened_ms > 0:
+                    if int(time.time() * 1000) - opened_ms >= max_hold * 60_000:
+                        reason = "TIME_EXIT"
+
                 # Serialize only the short state/ledger update. If a manual close
                 # started while Binance was responding, its DEMO_CLOSING status
                 # wins and this stale monitor result is discarded.
@@ -1096,6 +1102,7 @@ class TradingCoordinator(SpotDemoMixin):
                 "entry_confirmation": str(plan.get("entry_confirmation") or ""),
                 "entry_strategy": str(plan.get("entry_strategy") or ""),
                 "net_reward_risk": float(plan.get("net_reward_risk", 0)),
+                "max_hold_minutes": int(plan.get("max_hold_minutes", 0) or 0),
                 "tp1_close_pct": float(plan.get("tp1_close_pct", 100)),
                 "tp1_done": False,
                 "remaining_quantity": str(execution["quantity"]),
