@@ -77,6 +77,7 @@ class _V3Base:
             "estimated_net_reward_rate": net_reward,
             "strategy": market + "_scalper_v3", "strategy_version": "v3",
             "stop_atr_multiple": cls.STOP_ATR, "timeframe": "1m",
+            "max_hold_minutes": int(getattr(cls, "MAX_HOLD_MINUTES", 0)),
         }
 
     @classmethod
