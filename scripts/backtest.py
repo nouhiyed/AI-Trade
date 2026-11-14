@@ -1,42 +1,47 @@
-"""Causal per-coin historical backtest; each coin produces independent Futures and Spot reports."""
+"""Causal historical backtest for the sole V3 strategy.
+
+Uses closed 1m triggers, closed higher-timeframe context, next-1m-open entries,
+V3 stop/target levels, adverse taker fees/slippage, and V3 time exits.
+"""
 from __future__ import annotations
+
 import argparse
 import io
 import json
 import math
 import sys
-import time
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
 import requests
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import numpy as np
-import pandas as pd
-
 from agents.futures.agent import FuturesAgent
 from agents.spot.agent import SpotAgent
 from core.binance_market_data import BinanceMarketData
 from core.market_data_engine import MarketDataEngine
-from core.trade_planner import TradePlanner
-from core.trailing_stop import calculate_trailing_stop
+from core.technical import analyze as analyze_technical
 
-SYMBOLS = ("BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT", "DOGEUSDT", "LINKUSDT")
 TIMEFRAMES = {
-    "futures": ("1m", "5m", "15m", "1h"),
-    "spot": ("5m", "15m", "1h", "4h"),
+    "futures": ("1m", "5m", "15m"),
+    "spot": ("1m", "5m", "15m", "1h", "4h"),
 }
-INTERVAL_MS = {"1m": 60000, "5m": 300000, "15m": 900000, "1h": 3600000, "4h": 14400000}
+INTERVAL_MS = {
+    "1m": 60_000, "5m": 300_000, "15m": 900_000,
+    "1h": 3_600_000, "4h": 14_400_000,
+}
+BASE_TIMEFRAME = "1m"
 FEE_RATE = {"spot": 0.001, "futures": 0.0005}
 SLIPPAGE_RATE = {"spot": 0.0005, "futures": 0.0005}
-BASE_TIMEFRAME = "5m"
+MIN_NET_RR = 1.5
 RISK_FRACTION = 0.005
-STARTING_CAPITAL = 10000.0
+STARTING_CAPITAL = 10_000.0
 MAX_NOTIONAL_MULTIPLE = 1.0
 
 
@@ -51,25 +56,25 @@ def _month_starts(start_dt, end_dt):
 
 def _read_binance_archive(payload, symbol, timeframe):
     with zipfile.ZipFile(io.BytesIO(payload)) as archive:
-        csv_names = [name for name in archive.namelist() if name.lower().endswith(".csv")]
-        if not csv_names:
+        names = [name for name in archive.namelist() if name.lower().endswith(".csv")]
+        if not names:
             raise RuntimeError(f"Binance archive has no CSV: {symbol} {timeframe}")
         frame = pd.read_csv(
-            io.BytesIO(archive.read(csv_names[0])),
+            io.BytesIO(archive.read(names[0])),
             header=None, names=BinanceMarketData.CANDLE_COLUMNS,
         )
     numeric = [
         "open_time", "close_time", "open", "high", "low", "close",
-        "volume", "quote_volume", "trades", "taker_buy_base",
-        "taker_buy_quote",
+        "volume", "quote_volume", "trades", "taker_buy_base", "taker_buy_quote",
     ]
     for column in numeric:
         frame[column] = pd.to_numeric(frame[column], errors="coerce")
-    frame = frame.dropna(subset=["open_time", "close_time", "open", "high", "low", "close", "volume"])
-    # Binance Vision archives use microsecond timestamps for newer data sets.
+    frame = frame.dropna(subset=[
+        "open_time", "close_time", "open", "high", "low", "close", "volume",
+    ])
     if not frame.empty and float(frame["open_time"].median()) > 1e14:
-        frame["open_time"] = frame["open_time"] / 1000.0
-        frame["close_time"] = frame["close_time"] / 1000.0
+        frame["open_time"] /= 1000.0
+        frame["close_time"] /= 1000.0
     frame["open_time"] = pd.to_datetime(frame["open_time"], unit="ms", utc=True)
     frame["close_time"] = pd.to_datetime(frame["close_time"], unit="ms", utc=True)
     frame["is_closed"] = True
@@ -80,8 +85,7 @@ def _read_binance_archive(payload, symbol, timeframe):
 def download_history(market, symbol, timeframe, start_dt, end_dt, cache_dir, years):
     cache_dir.mkdir(parents=True, exist_ok=True)
     path = cache_dir / f"{market}_{symbol}_{timeframe}_{years}y.csv"
-    start_ms = int(start_dt.timestamp() * 1000)
-    end_ms = int(end_dt.timestamp() * 1000)
+    start_ms, end_ms = int(start_dt.timestamp() * 1000), int(end_dt.timestamp() * 1000)
     step = INTERVAL_MS[timeframe]
     if path.exists():
         cached = pd.read_csv(path, parse_dates=["open_time", "close_time"])
@@ -89,42 +93,57 @@ def download_history(market, symbol, timeframe, start_dt, end_dt, cache_dir, yea
             cached_start = pd.Timestamp(cached["open_time"].iloc[0]).timestamp() * 1000
             cached_end = pd.Timestamp(cached["close_time"].iloc[-1]).timestamp() * 1000
             if cached_start <= start_ms + step and cached_end >= end_ms - 2 * step:
-                return cached[
+                mask = (
                     (pd.to_datetime(cached["open_time"], utc=True) >= start_dt)
                     & (pd.to_datetime(cached["open_time"], utc=True) < end_dt)
-                ].reset_index(drop=True)
+                )
+                return cached[mask].reset_index(drop=True)
 
     market_path = "spot" if market == "spot" else "futures/um"
     pages = []
     for month_start in _month_starts(start_dt, end_dt):
         month = month_start.strftime("%Y-%m")
         filename = f"{symbol}-{timeframe}-{month}.zip"
-        url = f"https://data.binance.vision/data/{market_path}/monthly/klines/{symbol}/{timeframe}/{filename}"
-        response = requests.get(url, timeout=60, headers={"User-Agent": "AI-Trader-Backtest/1.0"})
+        url = (
+            f"https://data.binance.vision/data/{market_path}/monthly/klines/"
+            f"{symbol}/{timeframe}/{filename}"
+        )
+        response = requests.get(
+            url, timeout=60, headers={"User-Agent": "AI-Trader-V3-Backtest/1.0"}
+        )
         if response.status_code == 404:
-            raise RuntimeError(f"Missing Binance historical archive: {market} {symbol} {timeframe} {month}")
+            # Newly listed pairs have no archive before their listing date.
+            continue
         response.raise_for_status()
         pages.append(_read_binance_archive(response.content, symbol, timeframe))
         print(f"Downloaded {market} {symbol} {timeframe} {month}", flush=True)
 
     if not pages:
-        raise RuntimeError(f"No Binance archive data: {market} {symbol} {timeframe}")
-    frame = (pd.concat(pages, ignore_index=True)
-             .drop_duplicates(subset=["open_time"])
-             .sort_values("open_time").reset_index(drop=True))
-    frame = frame[
+        raise RuntimeError(f"No Binance historical archives: {market} {symbol} {timeframe}")
+    frame = (
+        pd.concat(pages, ignore_index=True)
+        .drop_duplicates(subset=["open_time"])
+        .sort_values("open_time")
+        .reset_index(drop=True)
+    )
+    mask = (
         (pd.to_datetime(frame["open_time"], utc=True) >= start_dt)
         & (pd.to_datetime(frame["open_time"], utc=True) < end_dt)
-    ].reset_index(drop=True)
+    )
+    frame = frame[mask].reset_index(drop=True)
     if len(frame) < 210:
-        raise RuntimeError(f"Insufficient Binance archive candles: {market} {symbol} {timeframe} ({len(frame)})")
+        raise RuntimeError(
+            f"Insufficient Binance history: {market} {symbol} {timeframe} ({len(frame)} candles)"
+        )
     frame.to_csv(path, index=False)
     return frame
 
 
 def _times_ms(frame):
-    return (pd.to_datetime(frame["close_time"], utc=True)
-            .astype("int64").to_numpy() // 1000000)
+    return (
+        pd.to_datetime(frame["close_time"], utc=True)
+        .astype("int64").to_numpy() // 1_000_000
+    )
 
 
 def _fill_entry(raw, direction, slip):
@@ -152,157 +171,178 @@ def _bar_hit(bar, direction, level, stop):
     return True, level
 
 
-def _close_quantity(position, raw_price, quantity, reason, market, equity):
+def _net_rr(entry, stop, target, market):
+    risk = abs(entry - stop) / entry
+    reward = abs(target - entry) / entry
+    round_trip = 2 * (FEE_RATE[market] + SLIPPAGE_RATE[market])
+    net_risk, net_reward = risk + round_trip, reward - round_trip
+    return net_reward / net_risk if net_risk > 0 else 0.0
+
+
+def _close_position(position, raw_price, reason, market, equity, exit_time):
     direction = position["direction"]
-    exit_fill = _fill_exit(raw_price, direction, SLIPPAGE_RATE[market])
-    gross = ((exit_fill - position["entry_fill"]) * quantity if direction == "LONG"
-             else (position["entry_fill"] - exit_fill) * quantity)
-    fee = exit_fill * quantity * FEE_RATE[market]
-    position["net_pnl"] += gross - fee
+    fill = _fill_exit(raw_price, direction, SLIPPAGE_RATE[market])
+    quantity = position["quantity"]
+    gross = (
+        (fill - position["entry_fill"]) * quantity
+        if direction == "LONG"
+        else (position["entry_fill"] - fill) * quantity
+    )
+    fee = fill * quantity * FEE_RATE[market]
+    net = gross - fee
+    position["net_pnl"] += net
     position["fees"] += fee
-    position["remaining_quantity"] -= quantity
-    position["exit_fill"] = exit_fill
-    position["last_exit_reason"] = reason
-    return equity + gross - fee
-
-
-def _finalize(position, trades):
-    trades.append({
-        "symbol": position["symbol"], "market": position["market"],
-        "direction": position["direction"], "timeframe": position["timeframe"],
-        "entry_time": position["entry_time"], "exit_time": position["last_exit_time"],
-        "entry_price": position["entry_fill"], "last_exit_price": position.get("exit_fill"),
-        "stop_loss": position["initial_stop"], "take_profit": position["initial_target"],
-        "strategy": position["strategy"], "net_pnl": position["net_pnl"],
-        "fees": position["fees"], "exit_reason": position["last_exit_reason"],
-    })
+    position["exit_fill"] = fill
+    position["exit_reason"] = reason
+    position["exit_time"] = exit_time
+    position["net_r"] = (
+        position["net_pnl"] / position["initial_risk_cash"]
+        if position["initial_risk_cash"] > 0 else 0.0
+    )
+    equity += net
+    return equity
 
 
 def _metrics(trades, equity, max_drawdown, market, symbol, start, end):
-    pnls = [float(t["net_pnl"]) for t in trades]
-    wins, losses = [p for p in pnls if p > 0], [p for p in pnls if p < 0]
+    pnls = [float(item["net_pnl"]) for item in trades]
+    wins = [value for value in pnls if value > 0]
+    losses = [value for value in pnls if value < 0]
     gross_profit, gross_loss = sum(wins), abs(sum(losses))
     return {
-        "symbol": symbol, "market": market, "decision_timeframe": BASE_TIMEFRAME,
-        "start": start, "end": end, "starting_capital": STARTING_CAPITAL,
-        "ending_equity": round(equity, 4), "net_pnl": round(equity - STARTING_CAPITAL, 4),
+        "symbol": symbol,
+        "market": market,
+        "strategy_version": "v3",
+        "decision_timeframe": "1m closed trigger",
+        "start": start,
+        "end": end,
+        "starting_capital": STARTING_CAPITAL,
+        "ending_equity": round(equity, 4),
+        "net_pnl": round(equity - STARTING_CAPITAL, 4),
         "net_return_pct": round((equity / STARTING_CAPITAL - 1) * 100, 4),
-        "trades": len(trades), "wins": len(wins), "losses": len(losses),
+        "trades": len(trades),
+        "wins": len(wins),
+        "losses": len(losses),
         "win_rate_pct": round(len(wins) / len(trades) * 100, 2) if trades else 0.0,
-        "profit_factor": round(gross_profit / gross_loss, 4) if gross_loss else (None if not gross_profit else "Infinity"),
-        "average_trade_pnl": round(sum(pnls) / len(pnls), 4) if pnls else 0.0,
-        "gross_profit": round(gross_profit, 4), "gross_loss": round(gross_loss, 4),
-        "total_fees": round(sum(float(t["fees"]) for t in trades), 4),
+        "profit_factor": (
+            round(gross_profit / gross_loss, 4)
+            if gross_loss else (None if not gross_profit else "Infinity")
+        ),
+        "average_net_r": round(
+            sum(float(item.get("net_r", 0)) for item in trades) / len(trades), 4
+        ) if trades else 0.0,
+        "total_fees": round(sum(float(item["fees"]) for item in trades), 4),
         "max_drawdown_pct": round(max_drawdown * 100, 4),
         "cost_assumptions": {
             "taker_fee_per_side": FEE_RATE[market],
             "slippage_per_side": SLIPPAGE_RATE[market],
-            "round_trip_estimate_pct": round(2 * (FEE_RATE[market] + SLIPPAGE_RATE[market]) * 100, 4),
+            "round_trip_estimate_pct": round(
+                2 * (FEE_RATE[market] + SLIPPAGE_RATE[market]) * 100, 4
+            ),
         },
         "limitations": [
-            "Historical order-book imbalance is unavailable; agents run without the live order-book bonus.",
-            "Futures funding payments are not included.",
-            "Market orders are modeled as taker fills with fixed slippage.",
-            "Sizing is capped at 1x notional to isolate strategy performance from leverage.",
-            "Signals use closed 5m candles and enter at the next 5m open.",
-            "If stop and target are both touched in one candle, stop is assumed first.",
+            "Historical funding payments are not yet modeled for Futures.",
+            "Market orders use fixed adverse taker slippage.",
+            "Sizing is capped at 1x notional; leverage effects are excluded.",
+            "Entries occur at the next 1m open after a closed 1m signal candle.",
+            "If stop and target are both touched in one 1m candle, stop is assumed first.",
         ],
     }
 
 
-def run_one(client, market_engine, planner, market, symbol, years, cache_dir):
+def run_one(market_engine, market, symbol, years, cache_dir):
     now = datetime.now(timezone.utc)
     end_dt = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     month_index = end_dt.year * 12 + end_dt.month - 1 - years * 12
-    start_dt = datetime(month_index // 12, month_index % 12 + 1, 1, tzinfo=timezone.utc)
+    start_dt = datetime(
+        month_index // 12, month_index % 12 + 1, 1, tzinfo=timezone.utc
+    )
     prepared = {}
-    for tf in TIMEFRAMES[market]:
-        print(f"Downloading {market} {symbol} {tf}...", flush=True)
-        raw = download_history(market, symbol, tf, start_dt, end_dt, cache_dir, years)
-        print(f"Preparing {market} {symbol} {tf}: {len(raw)} candles", flush=True)
-        prepared[tf] = market_engine._prepare_frame(raw, symbol, market, tf)
+    for timeframe in TIMEFRAMES[market]:
+        print(f"Downloading {market} {symbol} {timeframe}...", flush=True)
+        raw = download_history(
+            market, symbol, timeframe, start_dt, end_dt, cache_dir, years
+        )
+        print(f"Preparing {market} {symbol} {timeframe}: {len(raw)} candles", flush=True)
+        prepared[timeframe] = analyze_technical(raw)
 
     base = prepared[BASE_TIMEFRAME]
     base_times = _times_ms(base)
     frame_times = {tf: _times_ms(frame) for tf, frame in prepared.items()}
     agent = FuturesAgent() if market == "futures" else SpotAgent()
     trades, position = [], None
-    equity, peak, max_drawdown = STARTING_CAPITAL, STARTING_CAPITAL, 0.0
+    equity = peak = STARTING_CAPITAL
+    max_drawdown = 0.0
     first_time = None
 
     for i in range(210, len(base)):
-        bar, asof = base.iloc[i], int(base_times[i])
+        bar = base.iloc[i]
+        asof = int(base_times[i])
+        bar_close = pd.Timestamp(bar["close_time"])
+        bar_open = pd.Timestamp(bar["open_time"])
         if first_time is None:
-            first_time = pd.Timestamp(bar["close_time"]).isoformat()
+            first_time = bar_close.isoformat()
 
         if position is not None:
             direction = position["direction"]
             stop_hit, stop_price = _bar_hit(bar, direction, position["stop"], True)
-            target = position["target2"] if position["tp1_done"] else position["target1"]
-            target_hit, target_price = _bar_hit(bar, direction, target, False)
-            # Conservative intrabar ordering: stop before any target.
+            target_hit, target_price = _bar_hit(bar, direction, position["target"], False)
             if stop_hit:
-                reason = "STOP_LOSS_AFTER_TP1" if position["tp1_done"] else "STOP_LOSS"
-                equity = _close_quantity(position, stop_price, position["remaining_quantity"], reason, market, equity)
-                position["last_exit_time"] = pd.Timestamp(bar["close_time"]).isoformat()
-                _finalize(position, trades)
+                equity = _close_position(
+                    position, stop_price, "STOP_LOSS", market, equity, bar_close.isoformat()
+                )
+                trades.append(position)
                 position = None
             elif target_hit:
-                if not position["tp1_done"] and position["target2"] is not None:
-                    qty = min(position["initial_quantity"] * 0.70, position["remaining_quantity"])
-                    equity = _close_quantity(position, target_price, qty, "TAKE_PROFIT_1", market, equity)
-                    position["tp1_done"] = True
-                    buffer = position["round_trip_cost"]
-                    position["stop"] = (position["entry_fill"] * (1 + buffer) if direction == "LONG"
-                                        else position["entry_fill"] * (1 - buffer))
-                    position["last_exit_time"] = pd.Timestamp(bar["close_time"]).isoformat()
-                else:
-                    reason = "TAKE_PROFIT_2" if position["tp1_done"] else "TAKE_PROFIT"
-                    equity = _close_quantity(position, target_price, position["remaining_quantity"], reason, market, equity)
-                    position["last_exit_time"] = pd.Timestamp(bar["close_time"]).isoformat()
-                    _finalize(position, trades)
-                    position = None
-
-        # After TP1, trail the remaining position using only candles closed
-        # through the current 5m bar. The updated stop is active from the next bar.
-        if position is not None and position["tp1_done"]:
-            trail_frame = base.iloc[max(0, i - 60):i + 1]
-            trail = calculate_trailing_stop(
-                trail_frame, position["direction"], position["stop"],
-                position.get("best_price", position["entry_fill"]),
-                float(bar["close"]),
-            )
-            if trail is not None:
-                position["stop"] = float(trail["stop"])
-                position["best_price"] = float(trail["best_price"])
-                position["trailing_atr"] = float(trail["atr"])
+                equity = _close_position(
+                    position, target_price, "TAKE_PROFIT", market, equity, bar_close.isoformat()
+                )
+                trades.append(position)
+                position = None
+            elif (
+                bar_close.value // 1_000_000 - position["opened_at_ms"]
+                >= position["max_hold_minutes"] * 60_000
+            ):
+                equity = _close_position(
+                    position, float(bar["close"]), "TIME_EXIT",
+                    market, equity, bar_close.isoformat(),
+                )
+                trades.append(position)
+                position = None
 
         mark_equity = equity
         if position is not None:
             close = float(bar["close"])
-            unrealized = ((close - position["entry_fill"]) * position["remaining_quantity"]
-                          if position["direction"] == "LONG"
-                          else (position["entry_fill"] - close) * position["remaining_quantity"])
+            unrealized = (
+                (close - position["entry_fill"]) * position["quantity"]
+                if position["direction"] == "LONG"
+                else (position["entry_fill"] - close) * position["quantity"]
+            )
             mark_equity += unrealized
         peak = max(peak, mark_equity)
         if peak > 0:
             max_drawdown = max(max_drawdown, (peak - mark_equity) / peak)
+
         if position is not None or i + 1 >= len(base):
             continue
 
         agent_data = {"symbol": symbol, "orderbook": {"available": False}}
         ready = True
-        for tf in TIMEFRAMES[market]:
-            count = int(np.searchsorted(frame_times[tf], asof, side="right"))
+        for timeframe in TIMEFRAMES[market]:
+            count = int(np.searchsorted(frame_times[timeframe], asof, side="right"))
             if count < 210:
                 ready = False
                 break
-            agent_data[tf] = prepared[tf].iloc[max(0, count - 220):count].copy()
+            agent_data[timeframe] = prepared[timeframe].iloc[max(0, count - 220):count].copy()
         if not ready:
             continue
 
         signal = agent.analyze(agent_data)
         agent.signals.clear()
+        if signal.get("strategy_version") != "v3":
+            continue
+        plan = signal.get("trade_plan") or {}
+        if plan.get("success") is not True or plan.get("strategy_version") != "v3":
+            continue
         raw_direction = str(signal.get("direction", "WAIT")).upper()
         if market == "futures":
             if raw_direction not in ("LONG", "SHORT"):
@@ -313,50 +353,69 @@ def run_one(client, market_engine, planner, market, symbol, years, cache_dir):
                 continue
             direction = "LONG"
 
-        plan = planner.create(agent_data, direction, min_reward_risk=1.5,
-                              preferred_timeframe=BASE_TIMEFRAME, market=market)
-        if plan.get("success") is not True:
+        next_bar = base.iloc[i + 1]
+        raw_entry = float(next_bar["open"])
+        planned_entry = float(plan["entry"])
+        atr = float(plan.get("atr") or 0)
+        if atr <= 0 or abs(raw_entry - planned_entry) > max(
+            0.10 * atr, planned_entry * 0.0002
+        ):
             continue
 
-        next_bar = base.iloc[i + 1]
-        raw_entry, planned_entry = float(next_bar["open"]), float(plan["entry"])
-        atr = float(plan.get("atr") or 0)
-        if atr <= 0 or abs(raw_entry - planned_entry) > max(0.10 * atr, planned_entry * 0.0001):
-            continue
         entry_fill = _fill_entry(raw_entry, direction, SLIPPAGE_RATE[market])
-        stop, target1 = float(plan["stop_loss"]), float(plan["take_profit"])
-        target2 = float(plan["take_profit_2"]) if plan.get("take_profit_2") is not None else None
-        if (direction == "LONG" and not stop < entry_fill < target1) or (direction == "SHORT" and not target1 < entry_fill < stop):
+        stop, target = float(plan["stop_loss"]), float(plan["take_profit"])
+        if (
+            direction == "LONG" and not stop < entry_fill < target
+        ) or (
+            direction == "SHORT" and not target < entry_fill < stop
+        ):
+            continue
+        if _net_rr(entry_fill, stop, target, market) < MIN_NET_RR:
             continue
 
         risk_per_unit = abs(entry_fill - stop)
         if risk_per_unit <= 0:
             continue
-        qty = min(equity * RISK_FRACTION / risk_per_unit,
-                  equity * MAX_NOTIONAL_MULTIPLE / entry_fill)
-        if not math.isfinite(qty) or qty <= 0:
+        quantity = min(
+            equity * RISK_FRACTION / risk_per_unit,
+            equity * MAX_NOTIONAL_MULTIPLE / entry_fill,
+        )
+        if not math.isfinite(quantity) or quantity <= 0:
             continue
-        entry_fee = entry_fill * qty * FEE_RATE[market]
+        entry_fee = entry_fill * quantity * FEE_RATE[market]
         equity -= entry_fee
+        max_hold = int(plan.get("max_hold_minutes") or (12 if market == "futures" else 15))
         position = {
-            "symbol": symbol, "market": market, "direction": direction,
-            "timeframe": BASE_TIMEFRAME,
+            "symbol": symbol,
+            "market": market,
+            "strategy_version": "v3",
+            "direction": direction,
+            "timeframe": "1m",
             "entry_time": pd.Timestamp(next_bar["open_time"]).isoformat(),
-            "entry_fill": entry_fill, "initial_quantity": qty,
-            "remaining_quantity": qty, "initial_stop": stop, "stop": stop,
-            "initial_target": target1, "target1": target1, "target2": target2,
-            "tp1_done": False, "strategy": str(plan.get("entry_strategy") or "unknown"),
-            "net_pnl": -entry_fee, "fees": entry_fee,
-            "round_trip_cost": 2 * (FEE_RATE[market] + SLIPPAGE_RATE[market]),
-            "last_exit_reason": "OPEN",
-            "last_exit_time": pd.Timestamp(next_bar["open_time"]).isoformat(),
+            "opened_at_ms": int(pd.Timestamp(next_bar["open_time"]).value // 1_000_000),
+            "entry_price": raw_entry,
+            "entry_fill": entry_fill,
+            "stop_loss": stop,
+            "take_profit": target,
+            "quantity": quantity,
+            "initial_risk_cash": risk_per_unit * quantity,
+            "max_hold_minutes": max_hold,
+            "net_pnl": -entry_fee,
+            "fees": entry_fee,
+            "exit_time": None,
+            "exit_fill": None,
+            "exit_reason": "OPEN",
+            "net_r": 0.0,
+            "net_reward_risk_at_entry": _net_rr(entry_fill, stop, target, market),
         }
 
     if position is not None:
         final_bar = base.iloc[-1]
-        equity = _close_quantity(position, float(final_bar["close"]), position["remaining_quantity"], "END_OF_DATA", market, equity)
-        position["last_exit_time"] = pd.Timestamp(final_bar["close_time"]).isoformat()
-        _finalize(position, trades)
+        equity = _close_position(
+            position, float(final_bar["close"]), "END_OF_DATA",
+            market, equity, pd.Timestamp(final_bar["close_time"]).isoformat(),
+        )
+        trades.append(position)
         peak = max(peak, equity)
         if peak > 0:
             max_drawdown = max(max_drawdown, (peak - equity) / peak)
@@ -366,89 +425,69 @@ def run_one(client, market_engine, planner, market, symbol, years, cache_dir):
     return _metrics(trades, equity, max_drawdown, market, symbol, start_label, end_label), trades
 
 
-
 def main():
-    parser = argparse.ArgumentParser(description="AI-Trader per-coin historical backtest")
+    parser = argparse.ArgumentParser(description="All-pair historical backtest for AI-Trader V3")
     parser.add_argument("--years", type=int, choices=(1, 2, 3), default=2)
-    parser.add_argument("--symbols", nargs="+", default=list(SYMBOLS))
+    parser.add_argument("--symbols", nargs="+", default=None,
+                        help="Optional explicit symbol list; default scans every eligible pair")
     parser.add_argument("--output", default="backtest_results")
     parser.add_argument("--cache", default="data/backtest_cache")
     args = parser.parse_args()
-    invalid = sorted(set(args.symbols).difference(SYMBOLS))
-    if invalid:
-        parser.error("Unsupported symbols: " + ", ".join(invalid))
 
     output = Path(args.output)
     output.mkdir(parents=True, exist_ok=True)
-    market_engine, planner = MarketDataEngine(), TradePlanner()
-    all_summaries, all_trades = [], []
+    client, market_engine = BinanceMarketData(), MarketDataEngine()
+    all_summaries, all_trades, failures = [], [], []
+    universes = {
+        market: (args.symbols if args.symbols else client.fetch_symbols(market))
+        for market in ("futures", "spot")
+    }
 
-    # Process one coin at a time, completing both markets before moving on.
-    for coin_number, symbol in enumerate(args.symbols, 1):
-        coin_dir = output / symbol
-        coin_dir.mkdir(parents=True, exist_ok=True)
-        coin_summaries, coin_trades = [], []
-        print(f"\n========== COIN {coin_number}/{len(args.symbols)}: {symbol} ==========", flush=True)
+    for market in ("futures", "spot"):
+        symbols = universes[market]
+        print(f"\n========== {market.upper()}: {len(symbols)} eligible pairs ==========", flush=True)
+        for number, symbol in enumerate(symbols, 1):
+            print(f"\n[{number}/{len(symbols)}] {market.upper()} {symbol}", flush=True)
+            try:
+                metrics, trades = run_one(
+                    market_engine, market, symbol, args.years, Path(args.cache)
+                )
+                all_summaries.append(metrics)
+                all_trades.extend(trades)
+                pair_dir = output / market / symbol
+                pair_dir.mkdir(parents=True, exist_ok=True)
+                (pair_dir / "summary.json").write_text(
+                    json.dumps(metrics, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
+                pd.DataFrame(trades).to_csv(pair_dir / "trades.csv", index=False)
+                print(json.dumps(metrics, ensure_ascii=False), flush=True)
+            except Exception as error:
+                failure = {"market": market, "symbol": symbol, "error": str(error)}
+                failures.append(failure)
+                print("PAIR FAILED: " + json.dumps(failure, ensure_ascii=False), flush=True)
 
-        for market in ("futures", "spot"):
-            print(f"\n===== {symbol} {market.upper()} =====", flush=True)
-            metrics, trades = run_one(
-                None, market_engine, planner, market, symbol, args.years, Path(args.cache)
-            )
-            coin_summaries.append(metrics)
-            coin_trades.extend(trades)
-            all_summaries.append(metrics)
-            all_trades.extend(trades)
-
-            # Durable checkpoint after each market.
-            (coin_dir / f"{market}_summary.json").write_text(
-                json.dumps(metrics, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
-            pd.DataFrame(trades).to_csv(coin_dir / f"{market}_trades.csv", index=False)
-            (coin_dir / "progress.json").write_text(
-                json.dumps({
-                    "symbol": symbol,
-                    "years_requested": args.years,
-                    "completed_markets": [x["market"] for x in coin_summaries],
-                    "updated_at_utc": datetime.now(timezone.utc).isoformat(),
-                }, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
-            print(f"CHECKPOINT SAVED: {symbol} {market.upper()} ({len(trades)} trades)", flush=True)
-            print(json.dumps(metrics, ensure_ascii=False, indent=2), flush=True)
-
-        coin_report = {
-            "engine": "production_agents_plus_production_trade_planner",
-            "symbol": symbol,
-            "years_requested": args.years,
-            "markets": coin_summaries,
-            "trades": len(coin_trades),
-            "net_pnl_combined": round(sum(float(x["net_pnl"]) for x in coin_summaries), 4),
-            "limitations": [
-                "No historical order-book imbalance.",
-                "Futures funding costs are not included.",
-                "Taker fees and fixed slippage are modeled on both sides.",
-                "1x notional sizing is used; leverage effects are excluded.",
-                "No look-ahead: indicators are causal, decisions use closed candles, entries use next-bar open.",
-            ],
-        }
-        (coin_dir / "report.json").write_text(
-            json.dumps(coin_report, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-        pd.DataFrame(coin_trades).to_csv(coin_dir / "trades.csv", index=False)
-        print(f"COIN REPORT COMPLETE: {symbol}", flush=True)
+            (output / "progress.json").write_text(json.dumps({
+                "years_requested": args.years,
+                "completed_pairs": len(all_summaries),
+                "failed_pairs": len(failures),
+                "symbols_by_market": {key: len(value) for key, value in universes.items()},
+                "updated_at_utc": datetime.now(timezone.utc).isoformat(),
+            }, ensure_ascii=False, indent=2), encoding="utf-8")
 
     report = {
-        "engine": "production_agents_plus_production_trade_planner",
+        "engine": "production_agents_v3_only",
+        "strategy_version": "v3",
         "years_requested": args.years,
-        "symbols": args.symbols,
+        "symbols_by_market": {key: list(value) for key, value in universes.items()},
+        "completed_pairs": len(all_summaries),
+        "failed_pairs": failures,
         "results": all_summaries,
-        "completed_coins": args.symbols,
     }
     (output / "summary.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     pd.DataFrame(all_trades).to_csv(output / "trades.csv", index=False)
-    print(f"\nALL COINS COMPLETE: {output / 'summary.json'}", flush=True)
+    print(f"ALL V3 BACKTESTS FINISHED: {output / 'summary.json'}", flush=True)
 
 
 if __name__ == "__main__":
