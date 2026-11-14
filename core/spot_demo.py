@@ -100,7 +100,9 @@ class SpotDemoMixin:
         if str(signal.get("direction", "")).upper() != "BUY":
             return None
         plan = signal.get("trade_plan")
-        if not isinstance(plan, dict) or plan.get("success") is not True:
+        if signal.get("strategy_version") != "v3" or not isinstance(plan, dict) or plan.get("strategy_version") != "v3":
+            return None
+        if plan.get("success") is not True:
             return None
         return {**item, "direction": "LONG", "confidence":
                 float(signal.get("confidence", 0) or 0),
