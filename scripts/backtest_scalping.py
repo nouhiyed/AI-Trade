@@ -89,7 +89,8 @@ def run_one(market, symbol, years, cache_dir, strategy_version='v1'):
             elif target_hit:
                 equity = _close_quantity(position, target_px, position["remaining_quantity"], "TAKE_PROFIT", market, equity)
             else:
-                if not position["be_activated"] and favorable >= .9*position["risk_pct"]:
+                be_trigger = 0.75 if strategy_version == "v2" else 0.90
+                if not position["be_activated"] and favorable >= be_trigger*position["risk_pct"]:
                     pad = .5*position["round_trip_cost"]
                     position["stop"] = entry*(1+pad if direction == "LONG" else 1-pad)
                     position["be_activated"] = True
