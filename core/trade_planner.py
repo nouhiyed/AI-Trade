@@ -5,7 +5,7 @@ from core.market_regime import classify_market_regime, trendline_retest
 
 
 class TradePlanner:
-    TIMEFRAME_PRIORITY = ("5m", "1m", "15m", "1h")
+    TIMEFRAME_PRIORITY = ("5m", "1m", "15m", "1h", "4h")
     MIN_STOP_ATR = 0.75
     SPOT_TAKER_FEE_RATE = 0.001
     FUTURES_TAKER_FEE_RATE = 0.0005
@@ -170,6 +170,49 @@ class TradePlanner:
     def create(self, agent_data, direction, min_reward_risk=1.5,
                preferred_timeframe=None, fee_rate=None, slippage_rate=None,
                market="spot"):
+        """Try each available closed-candle timeframe until a valid plan is found."""
+        preferred = str(preferred_timeframe or "").strip().lower()
+        if preferred and preferred in agent_data:
+            candidates = [preferred]
+        else:
+            candidates = [tf for tf in self.TIMEFRAME_PRIORITY if tf in agent_data]
+
+        attempts = []
+        for timeframe in candidates:
+            attempt = self._create_single_timeframe(
+                agent_data, direction,
+                min_reward_risk=min_reward_risk,
+                preferred_timeframe=timeframe,
+                fee_rate=fee_rate,
+                slippage_rate=slippage_rate,
+                market=market,
+            )
+            if attempt.get("success") is True:
+                return attempt
+            attempts.append({
+                "timeframe": timeframe,
+                "reason": attempt.get("reason", "Plan rejected"),
+            })
+
+        if not attempts:
+            return {"success": False, "reason": "Missing candle Close or ATR data",
+                    "timeframe_rejections": []}
+
+        best_attempt = next(
+            (item for item in attempts
+             if item.get("reason") != "Missing candle Close or ATR data"),
+            attempts[0],
+        )
+        return {
+            "success": False,
+            "reason": best_attempt.get("reason", "Plan rejected"),
+            "timeframe": best_attempt.get("timeframe"),
+            "timeframe_rejections": attempts,
+        }
+
+    def _create_single_timeframe(self, agent_data, direction, min_reward_risk=1.5,
+                                 preferred_timeframe=None, fee_rate=None,
+                                 slippage_rate=None, market="spot"):
         direction = str(direction).strip().upper()
         if direction not in ("LONG", "SHORT"):
             return {"success": False, "reason": "Invalid direction"}
@@ -190,8 +233,8 @@ class TradePlanner:
                     "reason": "Minimum net reward/risk cannot be lower than 1.5 after costs"}
 
         preferred = str(preferred_timeframe or "").strip().lower()
-        order = ((preferred,) if preferred and preferred in agent_data else ()) + tuple(
-            tf for tf in self.TIMEFRAME_PRIORITY if tf != preferred)
+        order = ((preferred,) if preferred and preferred in agent_data
+                 else self.TIMEFRAME_PRIORITY)
         selected = None
         for tf in order:
             frame = agent_data.get(tf)
