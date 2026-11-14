@@ -22,7 +22,7 @@ def analyze(df):
     volume = df["volume"]
 
     # Trend
-    for period in [9, 21, 50, 200]:
+    for period in [9, 20, 21, 50, 200]:
         df[f"EMA_{period}"] = EMAIndicator(close, period).ema_indicator()
         df[f"SMA_{period}"] = SMAIndicator(close, period).sma_indicator()
 
