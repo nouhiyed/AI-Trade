@@ -189,7 +189,8 @@ class TestAutopilotMarkets(Base):
                     "trade_plan": plan_signal["trade_plan"], "signal": plan_signal,
                     "domain": domain}
         fut = {"symbol": "BTCUSDT", "direction": "LONG", "confidence": 80,
-               "trade_plan": {"success": True, "direction": "LONG", "entry": 100,
+               "strategy_version": "v3",
+               "trade_plan": {"success": True, "strategy_version": "v3", "direction": "LONG", "entry": 100,
                               "stop_loss": 99, "take_profit": 103, "atr": 1.0, "reward_risk": 3.0}}
         self.c.scan_futures = lambda limit=12, **k: {
             "success": True, "scanned": 1, "actionable": 1,
