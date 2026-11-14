@@ -62,6 +62,12 @@ class _V3Base:
         target_r = max(float(base_target_r), required_target_r)
         stop = entry - distance if direction == "LONG" else entry + distance
         target = entry + target_r * distance if direction == "LONG" else entry - target_r * distance
+        if not isfinite(stop) or not isfinite(target) or stop <= 0 or target <= 0:
+            return {"success": False, "reason": "V3 calculated non-positive stop or target"}
+        if direction == "LONG" and not stop < entry < target:
+            return {"success": False, "reason": "V3 LONG stop/target geometry is invalid"}
+        if direction == "SHORT" and not target < entry < stop:
+            return {"success": False, "reason": "V3 SHORT stop/target geometry is invalid"}
         net_reward = target_r * risk_rate - round_trip
         net_risk = risk_rate + round_trip
         net_rr = net_reward / net_risk if net_risk > 0 else 0.0
