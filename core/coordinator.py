@@ -1497,8 +1497,8 @@ class TradingCoordinator(SpotDemoMixin):
                     continue
 
                 trade_plan = signal.get("trade_plan")
-                if not isinstance(trade_plan, dict):
-                    reject("Trade plan was not generated", symbol)
+                if signal.get("strategy_version") != "v3" or not isinstance(trade_plan, dict) or trade_plan.get("strategy_version") != "v3":
+                    reject("Only V3 signals and plans are eligible", symbol)
                     continue
                 if trade_plan.get("success") is not True:
                     reject(trade_plan.get("reason") or "Trade plan rejected", symbol)
