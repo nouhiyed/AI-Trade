@@ -148,7 +148,10 @@ class SpotScalpingStrategyV3(_V3Base):
                 return {"success": False, "reason": "Deep 4h and 1h bearish context"}
         loc, body, vr = self.location(one), abs(c-o)/atr, self.volume_ratio(one)
         prior_high = float(one["high"].iloc[-11:-1].max())
-        bullish = self.bias(five, fifteen, "LONG") or (c1 > e200 and v(five, "close") >= v(five, "EMA_21"))
+        c5, e21_5 = v(five, "close"), v(five, "EMA_21")
+        bullish = self.bias(five, fifteen, "LONG") or (
+            c1 > e200 and c5 is not None and e21_5 is not None and c5 >= e21_5
+        )
         pull = (bullish and low <= ema20+.20*atr and c > ema9 and c > o and
                 40 <= rsi <= 70 and hist >= prev and loc >= .54 and body >= .07 and vr >= .68)
         breakout = (bullish and c > prior_high+.01*atr and c > o and 48 <= rsi <= 76 and
