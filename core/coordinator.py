@@ -820,23 +820,6 @@ class TradingCoordinator(SpotDemoMixin):
                             current["trailing_structure_level"] = str(trail_update["structure_level"])
                             current["trailing_stop_method"] = trail_update["method"]
 
-                        # Net scalping objective: 3% of original position notional,
-                        # after entry fees, estimated exit fees and slippage.
-                        if not reason and not current.get("net_profit_partial_done"):
-                            entry_price = Decimal(str(current.get("entry_price") or 0))
-                            initial_qty = Decimal(str(current.get("quantity") or 0))
-                            remaining_qty = Decimal(str(current.get("remaining_quantity") or current.get("quantity") or 0))
-                            realized_net = Decimal(str(current.get("net_pnl") or 0))
-                            fee_rate = self.demo_execution.futures_fee_rate
-                            slip_rate = self.demo_execution.futures_slippage_rate
-                            gross_open = ((exit_price - entry_price) if direction == "LONG"
-                                          else (entry_price - exit_price)) * remaining_qty
-                            estimated_exit_cost = exit_price * remaining_qty * (fee_rate + slip_rate)
-                            net_open = realized_net + gross_open - estimated_exit_cost
-                            target_net = entry_price * initial_qty * Decimal("0.03")
-                            if initial_qty > 0 and net_open >= target_net:
-                                reason = "NET_PROFIT_PARTIAL"
-
                         if not reason:
                             self._save_demo_state()
                             continue
