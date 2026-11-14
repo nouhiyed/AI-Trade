@@ -13,7 +13,6 @@ from core.learning import setup_key
 DEFAULTS = {
     "enabled": False,
     "interval_sec": 120,
-    "scan_limit": 12,
     "min_confidence": 60.0,
     "max_concurrent": 3,
     "risk_pct": 0.5,
@@ -24,7 +23,7 @@ DEFAULTS = {
 
 }
 LIMITS = {
-    "interval_sec": (30, 3600), "scan_limit": (3, 40),
+    "interval_sec": (30, 3600),
     "min_confidence": (25.0, 100.0), "max_concurrent": (1, 5),
     "risk_pct": (0.05, 1.0), "cooldown_min": (0, 1440),
 }
