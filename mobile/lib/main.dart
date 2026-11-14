@@ -509,7 +509,7 @@ class _TradeShellState extends State<TradeShell>
       final version = '${data['api_version'] ?? ''}';
       setState(() {
         _apiVersion = version;
-        apiOnline = version == '2026.11.12.1';
+        apiOnline = true; // A successful /status response confirms the backend is reachable.
       });
     } finally {
       if (mounted) setState(() => apiBusy = false);
