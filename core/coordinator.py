@@ -1479,8 +1479,8 @@ class TradingCoordinator(SpotDemoMixin):
             "proposed_levels": {k: str(v) for k, v in proposed.items()},
         }
 
-    def scan_futures(self, limit=12, min_quote_volume=None):
-        """Scan liquid USDT perpetuals and rank actionable Futures signals."""
+    def scan_futures(self, limit=None, min_quote_volume=None):
+        """Analyze every eligible USDT perpetual by default; rank valid signals only."""
         if not self._agent_enabled("futures"):
             return {
                 "success": False,
