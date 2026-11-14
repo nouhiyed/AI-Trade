@@ -36,7 +36,7 @@ class _BaseScalper:
         entry, atr = cls.value(frame, "close"), cls.value(frame, "ATR")
         if entry is None or atr is None or entry <= 0 or atr <= 0:
             return {"success": False, "reason": "Missing valid 5m close or ATR"}
-        distance = max(1.15 * atr, entry * 0.0008)
+        distance = max(float(getattr(cls, "STOP_ATR", 1.15)) * atr, entry * 0.0008)
         stop = entry - distance if direction == "LONG" else entry + distance
         target = entry + target_r * distance if direction == "LONG" else entry - target_r * distance
         fee = cls.FEE_RATE[market]
