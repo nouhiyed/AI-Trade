@@ -1247,23 +1247,18 @@ class TradingCoordinator(SpotDemoMixin):
 
                 signal = agent.analyze(agent_data)
                 direction = str(signal.get("direction", "WAIT")).upper() if isinstance(signal, dict) else "WAIT"
-                if domain == "futures" and isinstance(signal, dict):
-                    if direction in ("LONG", "SHORT"):
-                        signal["trade_plan"] = self.trade_planner.create(
-                            agent_data, direction, min_reward_risk=1.5,
-                            preferred_timeframe=preferred_timeframe,
-                            market="futures",
-                        )
+                # V3 is the sole strategy. Its own cost-adjusted plan is authoritative;
+                # never fall back to the retired structural planner or legacy agent rules.
+                if not isinstance(signal, dict) or signal.get("strategy_version") != "v3":
+                    raise RuntimeError("V3-only strategy path is unavailable")
+                v3_plan = signal.get("trade_plan")
+                if not isinstance(v3_plan, dict):
+                    raise RuntimeError("V3 did not return a trade plan")
+                if v3_plan.get("success") is not True:
+                    direction = "WAIT"
+                    signal["direction"] = "WAIT"
 
-                if domain == "spot" and isinstance(signal, dict):
-                    if str(signal.get("direction", "")).upper() == "BUY":
-                        signal["trade_plan"] = self.trade_planner.create(
-                            agent_data, "LONG", min_reward_risk=1.5,
-                            preferred_timeframe=preferred_timeframe,
-                            market="spot",
-                        )
-
-                # Strategy tag makes the journal able to compare actual entry styles.
+                # Strategy tag makes the journal compare V3 setup families.
                 tf_details = signal.get("timeframes") or {}
                 smc_flags = [
                     flag for values in tf_details.values()
@@ -1273,6 +1268,8 @@ class TradingCoordinator(SpotDemoMixin):
                 plan_style = (signal.get("trade_plan") or {}).get("entry_strategy")
                 if plan_style:
                     signal["strategy_tag"] = plan_style
+                elif signal.get("strategy_tag"):
+                    signal["strategy_tag"] = signal["strategy_tag"]
                 elif any("sweep" in flag for flag in smc_flags) and any("choch" in flag for flag in smc_flags):
                     signal["strategy_tag"] = "liquidity_sweep_reversal"
                 elif any("choch" in flag for flag in smc_flags):
