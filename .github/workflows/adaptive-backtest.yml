@@ -17,12 +17,14 @@ on:
       - "core/market_regime.py"
       - "core/backtest_costs.py"
       - "core/scalping_strategies.py"
+      - "core/scalping_v2.py"
       - "scripts/backtest.py"
       - "scripts/backtest_adaptive.py"
       - "scripts/backtest_scalping.py"
       - "tests/test_adaptive_trend.py"
       - "tests/test_backtest_costs.py"
       - "tests/test_scalping_strategies.py"
+      - "tests/test_scalping_v2.py"
       - ".github/workflows/adaptive-backtest.yml"
 
 permissions:
@@ -91,13 +93,43 @@ jobs:
             --years "${{ inputs.years || '2' }}" \
             --symbols "${{ matrix.symbol }}" \
             --output "adaptive_backtest_results"
-      - name: Run separate Futures and Spot scalpers (1m execution / 5m signals)
+      - name: Run repaired v1 scalper baseline with fill-anchored levels
         run: |
           python scripts/backtest_scalping.py \
             --years "${{ inputs.years || '2' }}" \
             --symbols "${{ matrix.symbol }}" \
-            --output "scalping_results" \
+            --strategy-version v1 \
+            --output "scalping_v1_fixed" \
             --cache "data/backtest_cache"
+      - name: Run new Futures and Spot Scalping v2
+        run: |
+          python scripts/backtest_scalping.py \
+            --years "${{ inputs.years || '2' }}" \
+            --symbols "${{ matrix.symbol }}" \
+            --strategy-version v2 \
+            --output "scalping_v2" \
+            --cache "data/backtest_cache"
+      - name: Compare repaired v1 against v2
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          symbol = "${{ matrix.symbol }}"
+          rows = []
+          for market in ("futures", "spot"):
+              old = json.loads(Path(f"scalping_v1_fixed/{symbol}/{market}_summary.json").read_text())
+              new = json.loads(Path(f"scalping_v2/{symbol}/{market}_summary.json").read_text())
+              rows.append({
+                  "market": market,
+                  "repaired_v1": {k: old.get(k) for k in ("trades", "trades_per_30_days", "net_pnl", "net_return_pct", "profit_factor", "max_drawdown_pct", "win_rate_pct", "total_fees")},
+                  "v2": {k: new.get(k) for k in ("trades", "trades_per_30_days", "net_pnl", "net_return_pct", "profit_factor", "max_drawdown_pct", "win_rate_pct", "total_fees")},
+                  "net_pnl_change": round(float(new.get("net_pnl", 0)) - float(old.get("net_pnl", 0)), 4),
+              })
+          result = {"symbol": symbol, "comparison": rows, "note": "Both use the same 1m execution, fill-anchored SL/TP, cost model, risk and historical window."}
+          out = Path(f"scalping_v2/{symbol}/v1_vs_v2.json")
+          out.write_text(json.dumps(result, indent=2), encoding="utf-8")
+          print(out.read_text())
+          PY
       - name: Compare baseline and Adaptive Trend per market
         run: |
           python - <<'PY'
@@ -146,7 +178,8 @@ jobs:
           path: |
             baseline_results/${{ matrix.symbol }}/
             adaptive_backtest_results/
-            scalping_results/
+            scalping_v1_fixed/
+            scalping_v2/
           if-no-files-found: warn
           retention-days: 30
 
