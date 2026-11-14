@@ -22,6 +22,7 @@ apk-output/
 # DEMO runtime state
 config/demo_state.json
 config/autopilot.json
+config/scan_rotation.json
 
 # Local Telegram credentials (never commit)
 config/telegram.json\n\n# Generated historical backtest reports\nbacktest_results/\n

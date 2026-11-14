@@ -1474,6 +1474,18 @@ class TradingCoordinator(SpotDemoMixin):
                 "opportunities": [],
             }
 
+        scan_meta = {
+            "universe_total": len(universe),
+            "batch_size": len(universe),
+            "cycle": 0,
+            "cycle_complete": True,
+        }
+        if limit is None:
+            from core.scan_rotation import next_scan_batch
+            universe, scan_meta = next_scan_batch(
+                "futures", universe, batch_size=20
+            )
+
         opportunities = []
         errors = {}
         rejections = {}
@@ -1542,6 +1554,7 @@ class TradingCoordinator(SpotDemoMixin):
             "errors": errors,
             "rejections": rejections,
             "rejection_samples": rejection_samples,
+            "scan": scan_meta,
         }
 
     def analyze_all(self, market_data):

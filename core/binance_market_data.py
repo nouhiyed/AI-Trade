@@ -1,10 +1,22 @@
 import time
+import threading
+from email.utils import parsedate_to_datetime
 from datetime import datetime, timezone
 
 import pandas as pd
 import requests
 
 from core.orderbook import analyze_orderbook
+
+
+
+_BINANCE_REQUEST_LOCK = threading.Lock()
+_BINANCE_LAST_REQUEST_AT = 0.0
+_BINANCE_MIN_REQUEST_INTERVAL = 0.12
+
+
+class _BinanceRateLimitError(RuntimeError):
+    """Do not retry a Binance rate-limit or IP-ban response on fallback hosts."""
 
 
 class BinanceMarketData:
@@ -45,33 +57,98 @@ class BinanceMarketData:
         })
 
     def _request(self, market, endpoint, params):
-        market = market.lower()
+        global _BINANCE_LAST_REQUEST_AT
 
+        market = market.lower()
         if market not in self.BASE_URLS:
             raise ValueError("Market must be spot or futures")
 
         failures = []
-        # Bound the complete fallback sequence, not just each individual host.
-        # A slow/unreachable hostname must not stall a scan for the whole cycle.
         deadline = time.monotonic() + min(self.timeout, self.total_timeout)
+
         for base_url in self.FALLBACK_URLS[market]:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                failures.append("overall request time budget exhausted")
-                break
-            try:
-                response = self.session.get(
-                    base_url + endpoint,
-                    params=params,
-                    timeout=max(0.05, min(remaining, 2.5)),
-                )
-                response.raise_for_status()
-                payload = response.json()
-                if isinstance(payload, dict) and payload.get("code") not in (None, 0, "0"):
-                    raise RuntimeError(str(payload.get("msg") or payload.get("message") or payload.get("code")))
-                return payload
-            except (requests.RequestException, ValueError, RuntimeError) as error:
-                failures.append(f"{base_url}: {type(error).__name__}: {error}")
+            attempt = 0
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    failures.append("overall request time budget exhausted")
+                    break
+
+                # One shared limiter covers all BinanceMarketData instances and both markets.
+                with _BINANCE_REQUEST_LOCK:
+                    wait = _BINANCE_MIN_REQUEST_INTERVAL - (
+                        time.monotonic() - _BINANCE_LAST_REQUEST_AT
+                    )
+                    if wait > 0:
+                        time.sleep(min(wait, remaining))
+                    if time.monotonic() >= deadline:
+                        failures.append("overall request time budget exhausted")
+                        break
+                    _BINANCE_LAST_REQUEST_AT = time.monotonic()
+
+                try:
+                    response = self.session.get(
+                        base_url + endpoint,
+                        params=params,
+                        timeout=max(0.05, min(deadline - time.monotonic(), 2.5)),
+                    )
+                    status = int(getattr(response, "status_code", 200))
+
+                    if status == 418:
+                        raise _BinanceRateLimitError(
+                            "Binance IP ban (HTTP 418); stopped all fallback requests"
+                        )
+
+                    if status == 429:
+                        retry_after = response.headers.get("Retry-After", "")
+                        try:
+                            wait_seconds = max(0.0, float(retry_after))
+                        except (TypeError, ValueError):
+                            try:
+                                retry_at = parsedate_to_datetime(retry_after)
+                                if retry_at.tzinfo is None:
+                                    retry_at = retry_at.replace(tzinfo=timezone.utc)
+                                wait_seconds = max(
+                                    0.0,
+                                    (retry_at - datetime.now(timezone.utc)).total_seconds(),
+                                )
+                            except (TypeError, ValueError, OverflowError):
+                                wait_seconds = 1.0
+
+                        remaining = deadline - time.monotonic()
+                        if attempt == 0 and wait_seconds < remaining:
+                            time.sleep(wait_seconds)
+                            attempt += 1
+                            continue
+
+                        raise _BinanceRateLimitError(
+                            "Binance rate limit (HTTP 429); "
+                            f"Retry-After={retry_after or 'missing'}; stopped fallback requests"
+                        )
+
+                    response.raise_for_status()
+                    payload = response.json()
+                    if (
+                        isinstance(payload, dict)
+                        and payload.get("code") not in (None, 0, "0")
+                    ):
+                        raise RuntimeError(
+                            str(
+                                payload.get("msg")
+                                or payload.get("message")
+                                or payload.get("code")
+                            )
+                        )
+                    return payload
+
+                except _BinanceRateLimitError:
+                    raise
+                except (requests.RequestException, ValueError, RuntimeError) as error:
+                    failures.append(
+                        f"{base_url}: {type(error).__name__}: {error}"
+                    )
+                    break
+
         raise RuntimeError(
             f"All official Binance {market} API endpoints failed: "
             + " | ".join(failures[-3:])

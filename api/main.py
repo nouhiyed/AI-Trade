@@ -391,7 +391,12 @@ class APIHandler(BaseHTTPRequestHandler):
                 )
 
             if path == "/scan/spot":
-                return self.send_json(coordinator.scan_spot(limit=data.get("limit", 8)))
+                return self.send_json(
+                    coordinator.scan_spot(
+                        limit=data.get("limit"),
+                        min_quote_volume=data.get("min_quote_volume"),
+                    )
+                )
 
             if path == "/analyze":
                 symbol = data.get("symbol", "BTCUSDT")

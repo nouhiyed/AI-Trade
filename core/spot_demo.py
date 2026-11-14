@@ -40,29 +40,52 @@ class SpotDemoMixin:
         minimum = (float(min_quote_volume)
                    if min_quote_volume is not None else None)
         try:
-            tickers = self.market_feed._request("spot", "/api/v3/ticker/24hr", {})
+            symbols = self.market_feed.fetch_symbols("spot")
+            tickers = self.market_feed._request(
+                "spot", "/api/v3/ticker/24hr", {}
+            )
         except Exception as error:
-            return {"success": False,
-                    "reason": "Spot universe scan failed: " + str(error),
-                    "opportunities": []}
-        skip = ("UPUSDT", "DOWNUSDT", "USDCUSDT", "FDUSDUSDT", "TUSDUSDT",
-                "BUSDUSDT", "USDPUSDT", "EURUSDT", "AEURUSDT", "USD1USDT", "DAIUSDT")
+            return {
+                "success": False,
+                "reason": "Spot universe scan failed: " + str(error),
+                "opportunities": [],
+            }
+
+        ticker_by_symbol = {
+            str(item.get("symbol", "")): item for item in tickers
+        }
         ranked = []
-        for item in tickers:
-            symbol = str(item.get("symbol", ""))
-            if not symbol.endswith("USDT") or symbol.endswith(skip) or "_" in symbol:
-                continue
+        for symbol in symbols:
+            item = ticker_by_symbol.get(symbol, {})
             try:
                 volume = float(item.get("quoteVolume", 0))
                 price = float(item.get("lastPrice", 0))
             except (TypeError, ValueError):
+                volume, price = 0.0, 0.0
+
+            if minimum is not None and volume < minimum:
                 continue
-            if price > 0 and (minimum is None or volume >= minimum):
-                ranked.append({"symbol": symbol, "quote_volume": volume,
-                               "last_price": price})
-        ranked.sort(key=lambda r: r["quote_volume"], reverse=True)
-        # No implicit 8/30-symbol cap: automatic scans cover every eligible pair.
+
+            ranked.append({
+                "symbol": symbol,
+                "quote_volume": volume,
+                "last_price": price,
+            })
+
+        ranked.sort(key=lambda item: item["quote_volume"], reverse=True)
         universe = ranked if limit is None else ranked[:max(1, int(limit))]
+
+        scan_meta = {
+            "universe_total": len(universe),
+            "batch_size": len(universe),
+            "cycle": 0,
+            "cycle_complete": True,
+        }
+        if limit is None:
+            from core.scan_rotation import next_scan_batch
+            universe, scan_meta = next_scan_batch(
+                "spot", universe, batch_size=20
+            )
 
         opportunities, errors = [], {}
         rejections, rejection_samples = {}, []
@@ -90,9 +113,11 @@ class SpotDemoMixin:
                     reject(symbol, plan.get("reason") or "Trade plan rejected")
             except Exception as error:
                 errors[symbol] = str(error)
-        return self._finish_scan(
+        result = self._finish_scan(
             "spot", universe, opportunities, errors,
             rejections=rejections, rejection_samples=rejection_samples)
+        result["scan"] = scan_meta
+        return result
 
     def _as_opportunity(self, item, signal, domain):
         if not isinstance(signal, dict):
