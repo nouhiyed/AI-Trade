@@ -1,4 +1,4 @@
-"""The sole live strategy: V3 1m trigger with closed higher-timeframe context.
+"""The sole live strategy: V3 1m trigger with closed higher-timeframe context.\nThis module is the only strategy path used by Futures and Spot agents.
 
 No legacy strategy fallback is permitted. Every accepted plan must clear 1.5
 net reward/risk after the configured round-trip fee and adverse-cost estimate.
