@@ -125,11 +125,13 @@ class Autopilot:
                         {"reason": "Max concurrent trades reached"})
 
                 sources = []
-                limit = int(cfg["scan_limit"])
+                # Automatic scanning always uses the complete eligible universe.
+                # scan_limit is retained only for backward-compatible config reads;
+                # it must never cap the market universe.
                 if cfg["trade_futures"]:
                     sources.append(("futures", lambda: self.c.scan_futures()))
                 if cfg["trade_spot"]:
-                    sources.append(("spot", lambda: self.c.scan_spot(limit=min(limit, 8))))
+                    sources.append(("spot", lambda: self.c.scan_spot()))
 
                 # Scan every enabled market independently. One failed scanner or
                 # domain processor must not hide results from the other domains.
