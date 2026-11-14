@@ -70,6 +70,17 @@ class ApiService {
     }
   }
 
+  static Future<Map<String, dynamic>> scalpingSignal({
+    required String market,
+    required String symbol,
+  }) =>
+      _request(
+        'GET',
+        '/scalping/signal?market=${Uri.encodeQueryComponent(market)}'
+        '&symbol=${Uri.encodeQueryComponent(symbol)}',
+        requestTimeout: const Duration(seconds: 35),
+      );
+
   static Future<Map<String, dynamic>> marketSymbols(String market) =>
       _request(
         'GET',
@@ -101,7 +112,7 @@ class ApiService {
       'GET', '/health', requestTimeout: const Duration(seconds: 5));
     return result['ok'] == true &&
         result['mode'] == 'DEMO' &&
-        result['api_version'] == '2026.11.12.1';
+        result['api_version'] == '2026.11.14.1';
   }
 
   static Future<Map<String, dynamic>> status() =>
