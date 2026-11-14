@@ -30,8 +30,8 @@ class TestDemoRiskRelease(unittest.TestCase):
 
     def _signal(self):
         self.c.last_signals["futures"] = {
-            "symbol": "BTCUSDT", "direction": "LONG",
-            "trade_plan": {"success": True, "direction": "LONG",
+            "symbol": "BTCUSDT", "direction": "LONG", "strategy_version": "v3",
+            "trade_plan": {"success": True, "strategy_version": "v3", "direction": "LONG",
                            "entry": 100, "stop_loss": 99, "take_profit": 103, "atr": 0.5},
         }
 
