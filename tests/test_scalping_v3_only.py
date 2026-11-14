@@ -40,6 +40,7 @@ class V3OnlyStrategyTests(unittest.TestCase):
         self.assertEqual(result["strategy_version"], "v3")
         self.assertIn(result["direction"], ("LONG", "SHORT"))
         self.assertGreaterEqual(result["net_reward_risk"], 1.5)
+        self.assertEqual(result["max_hold_minutes"], 12)
         self.assertLess(result["stop_loss"], result["entry"])
         self.assertGreater(result["take_profit"], result["entry"])
 
@@ -48,6 +49,7 @@ class V3OnlyStrategyTests(unittest.TestCase):
         self.assertTrue(result["success"], result)
         self.assertEqual(result["direction"], "LONG")
         self.assertGreaterEqual(result["net_reward_risk"], 1.5)
+        self.assertEqual(result["max_hold_minutes"], 15)
         self.assertLess(result["stop_loss"], result["entry"])
         self.assertGreater(result["take_profit"], result["entry"])
 
