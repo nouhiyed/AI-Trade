@@ -1,6 +1,7 @@
 """Independent 1m execution / 5m signal backtest for separate Spot and Futures scalpers."""
 from __future__ import annotations
 import argparse, json, sys
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -54,6 +55,7 @@ def run_one(market, symbol, years, cache_dir):
     trades, position = [], None
     equity = peak = STARTING_CAPITAL
     max_dd, first_time, last_signal = 0.0, None, None
+    diagnostics, setup_counts = Counter(), Counter()
     for i in range(210, len(base)-1):
         bar, asof = base.iloc[i], int(times["1m"][i])
         engine._CURRENT_EXECUTION_COMPONENTS = costs.components(bar)
@@ -119,12 +121,22 @@ def run_one(market, symbol, years, cache_dir):
             data[tf] = prepared[tf].iloc[max(0,count-240):count].copy()
         if not ready:
             continue
+        diagnostics["signal_evaluations"] += 1
         plan = strategy.analyze(data, costs.components(data["5m"].iloc[-1]))
         if not plan.get("success"):
+            reason = str(plan.get("reason", "unknown")).lower()
+            if "cost" in reason or "reward" in reason:
+                diagnostics["rejected_cost"] += 1
+            elif "no qualifying" in reason:
+                diagnostics["no_setup"] += 1
+            else:
+                diagnostics["rejected_other"] += 1
             continue
+        diagnostics["plans_passed"] += 1
         next_bar = base.iloc[i+1]
         raw_entry, atr = float(next_bar["open"]), float(plan["atr"])
         if abs(raw_entry-float(plan["entry"])) > max(MAX_GAP_ATR*atr, float(plan["entry"])*.0025):
+            diagnostics["rejected_gap"] += 1
             continue
         engine._CURRENT_EXECUTION_COMPONENTS = costs.components(next_bar)
         SLIPPAGE_RATE[market] = engine._CURRENT_EXECUTION_COMPONENTS["total_adverse_rate"]
@@ -136,10 +148,13 @@ def run_one(market, symbol, years, cache_dir):
         distance = abs(fill-stop)
         qty = min(equity*RISK_FRACTION/distance, equity*MAX_NOTIONAL_MULTIPLE/fill)
         if qty <= 0:
+            diagnostics["rejected_size"] += 1
             continue
         fee = fill*qty*FEE_RATE[market]
         equity -= fee
         entry_time = pd.Timestamp(next_bar["open_time"])
+        diagnostics["entries_opened"] += 1
+        setup_counts[plan["setup"]] += 1
         position = {
             "symbol":symbol,"market":market,"direction":direction,"timeframe":"1m execution / 5m signal",
             "entry_time":entry_time.isoformat(),"entry_fill":fill,"initial_quantity":qty,"remaining_quantity":qty,
@@ -166,8 +181,14 @@ def run_one(market, symbol, years, cache_dir):
     metrics = _metrics(trades,equity,max_dd,market,symbol,
         first_time or pd.Timestamp(base["close_time"].iloc[0]).isoformat(),
         pd.Timestamp(base["close_time"].iloc[-1]).isoformat())
+    elapsed_days = max(1.0, (pd.Timestamp(base["close_time"].iloc[-1]) - pd.Timestamp(first_time or base["close_time"].iloc[0])).total_seconds()/86400.0)
+    holding = [float(t.get("holding_minutes", 0.0)) for t in trades]
     metrics.update({
         "strategy":"futures_momentum_range_scalper_v1" if market=="futures" else "spot_long_scalper_v1",
+        "trades_per_30_days":round(len(trades)*30.4375/elapsed_days, 3),
+        "average_holding_minutes":round(sum(holding)/len(holding), 2) if holding else 0.0,
+        "signal_diagnostics":dict(diagnostics),
+        "setup_counts":dict(setup_counts),
         "signal_timeframe":"5m","execution_timeframe":"1m","risk_fraction":RISK_FRACTION,
         "max_holding_minutes":strategy.MAX_HOLD_MINUTES,
         "exit_policy":"Full target/stop exit; cost-adjusted break-even stop after +0.9R; hard time exit.",
