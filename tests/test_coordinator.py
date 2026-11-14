@@ -76,7 +76,8 @@ class TestTradingCoordinator(unittest.TestCase):
                 "symbol": symbol,
                 "direction": "LONG",
                 "confidence": 80,
-                "trade_plan": {"success": True, "direction": "LONG", "entry": 100, "take_profit": 102, "stop_loss": 99, "reward_risk": 2.0},
+                "strategy_version": "v3",
+                "trade_plan": {"success": True, "strategy_version": "v3", "direction": "LONG", "entry": 100, "take_profit": 102, "stop_loss": 99, "reward_risk": 2.0},
             }}}
 
         self.system.analyze_live = analyze
@@ -98,8 +99,9 @@ class TestTradingCoordinator(unittest.TestCase):
                     "symbol": symbol,
                     "direction": "LONG",
                     "confidence": 82,
+                    "strategy_version": "v3",
                     "trade_plan": {
-                        "success": True, "direction": "LONG", "entry": 100, "stop_loss": 99, "take_profit": 102, "reward_risk": 2.0,
+                        "success": True, "strategy_version": "v3", "direction": "LONG", "entry": 100, "stop_loss": 99, "take_profit": 102, "reward_risk": 2.0,
                     },
                 }
             }
@@ -127,7 +129,8 @@ class TestTradingCoordinator(unittest.TestCase):
         self.system.analyze_live = lambda symbol, preferred_timeframe=None, domains=None: {
             "signals": {"spot": {
                 "symbol": symbol, "direction": "BUY", "confidence": 82,
-                "trade_plan": {"success": True, "direction": "LONG", "entry": 100, "stop_loss": 99, "take_profit": 102, "reward_risk": 2.0},
+                    "strategy_version": "v3",
+                "trade_plan": {"success": True, "strategy_version": "v3", "direction": "LONG", "entry": 100, "stop_loss": 99, "take_profit": 102, "reward_risk": 2.0},
             }}
         }
         calls = []
@@ -162,8 +165,9 @@ class TestTradingCoordinator(unittest.TestCase):
         self.system.analyze_live = lambda symbol, preferred_timeframe=None, domains=None: {
             "signals": {"futures": {
                 "symbol": symbol, "direction": "LONG", "confidence": 80,
+                "strategy_version": "v3",
                 "trade_plan": {
-                    "success": True, "direction": "LONG",
+                    "success": True, "strategy_version": "v3", "direction": "LONG",
                     "entry": 100, "stop_loss": 99, "take_profit": 98,
                 },
             }}
@@ -181,8 +185,9 @@ class TestTradingCoordinator(unittest.TestCase):
     def test_market_data_failure_before_order_releases_reservation(self):
         self.system.last_signals["futures"] = {
             "symbol": "BTCUSDT", "direction": "LONG", "confidence": 80,
+                "strategy_version": "v3",
             "trade_plan": {
-                "success": True, "direction": "LONG", "entry": 100,
+                "success": True, "strategy_version": "v3", "direction": "LONG", "entry": 100,
                 "stop_loss": 99, "take_profit": 102, "atr": 0.5,
             },
         }
@@ -221,9 +226,10 @@ class TestTradingCoordinator(unittest.TestCase):
             "symbol": "BTCUSDT",
             "direction": "LONG",
             "confidence": 82,
+                    "strategy_version": "v3",
             "setup_key": "manual-close-regression",
             "trade_plan": {
-                "success": True,
+                "success": True, "strategy_version": "v3",
                 "direction": "LONG",
                 "entry": 100,
                 "stop_loss": 99,
@@ -295,9 +301,10 @@ class TestTradingCoordinator(unittest.TestCase):
                 "symbol": symbol,
                 "direction": "LONG",
                 "confidence": 82,
+                    "strategy_version": "v3",
                 "setup_key": "concurrent-manual-close",
                 "trade_plan": {
-                    "success": True,
+                    "success": True, "strategy_version": "v3",
                     "direction": "LONG",
                     "entry": entry,
                     "stop_loss": stop,
@@ -340,9 +347,10 @@ class TestTradingCoordinator(unittest.TestCase):
             "symbol": "BTCUSDT",
             "direction": "LONG",
             "confidence": 82,
+                    "strategy_version": "v3",
             "setup_key": "manual-close-monitor-priority",
             "trade_plan": {
-                "success": True, "direction": "LONG",
+                "success": True, "strategy_version": "v3", "direction": "LONG",
                 "entry": 100, "stop_loss": 99, "take_profit": 103,
                 "atr": 0.5, "reward_risk": 3.0, "timeframe": "5m",
             },
