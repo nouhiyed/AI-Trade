@@ -220,9 +220,12 @@ class Autopilot:
                     skip("Direction changed during pre-entry confirmation")
                     continue
                 fresh_plan = fresh_signal.get("trade_plan")
-                if not isinstance(fresh_plan, dict) or fresh_plan.get("success") is not True:
-                    skip((fresh_plan or {}).get("reason") or
-                         "Fresh structure confirmation failed; waiting for a better entry")
+                if fresh_signal.get("strategy_version") != "v3" or not isinstance(fresh_plan, dict) or fresh_plan.get("strategy_version") != "v3":
+                    skip("Fresh analysis is not an approved V3 signal and plan")
+                    continue
+                if fresh_plan.get("success") is not True:
+                    skip(fresh_plan.get("reason") or
+                         "Fresh V3 confirmation failed; waiting for a better entry")
                     continue
                 signal, plan = fresh_signal, fresh_plan
                 confidence = float(signal.get("confidence") or 0)
