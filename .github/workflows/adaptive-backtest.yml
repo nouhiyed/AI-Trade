@@ -18,6 +18,7 @@ on:
       - "core/backtest_costs.py"
       - "core/scalping_strategies.py"
       - "core/scalping_v2.py"
+      - "core/scalping_v3.py"
       - "scripts/backtest.py"
       - "scripts/backtest_adaptive.py"
       - "scripts/backtest_scalping.py"
@@ -25,6 +26,7 @@ on:
       - "tests/test_backtest_costs.py"
       - "tests/test_scalping_strategies.py"
       - "tests/test_scalping_v2.py"
+      - "tests/test_scalping_v3.py"
       - ".github/workflows/adaptive-backtest.yml"
 
 permissions:
@@ -109,6 +111,30 @@ jobs:
             --strategy-version v2 \
             --output "scalping_v2" \
             --cache "data/backtest_cache"
+      - name: Run higher-frequency Futures and Spot Scalping v3
+        run: |
+          python scripts/backtest_scalping.py \
+            --years "${{ inputs.years || '2' }}" \
+            --symbols "${{ matrix.symbol }}" \
+            --strategy-version v3 \
+            --output "scalping_v3" \
+            --cache "data/backtest_cache"
+      - name: Compare v2 against higher-frequency v3
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          symbol = "${{ matrix.symbol }}"
+          rows = []
+          for market in ("futures", "spot"):
+              old = json.loads(Path(f"scalping_v2/{symbol}/{market}_summary.json").read_text())
+              new = json.loads(Path(f"scalping_v3/{symbol}/{market}_summary.json").read_text())
+              keys = ("trades", "trades_per_30_days", "net_pnl", "net_return_pct", "profit_factor", "max_drawdown_pct", "win_rate_pct", "average_holding_minutes", "total_fees")
+              rows.append({"market": market, "v2": {k: old.get(k) for k in keys}, "v3": {k: new.get(k) for k in keys}})
+          out = Path(f"scalping_v3/{symbol}/v2_vs_v3.json")
+          out.write_text(json.dumps({"symbol": symbol, "comparison": rows, "trade_rate_target_per_hour": {"futures": 4, "spot": 2}, "target_scope": "aggregate across eight symbols; not forced"}, indent=2), encoding="utf-8")
+          print(out.read_text())
+          PY
       - name: Compare repaired v1 against v2
         run: |
           python - <<'PY'
@@ -180,6 +206,7 @@ jobs:
             adaptive_backtest_results/
             scalping_v1_fixed/
             scalping_v2/
+            scalping_v3/
           if-no-files-found: warn
           retention-days: 30
 
