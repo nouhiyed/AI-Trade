@@ -385,7 +385,7 @@ class APIHandler(BaseHTTPRequestHandler):
             if path == "/scan/futures":
                 return self.send_json(
                     coordinator.scan_futures(
-                        limit=data.get("limit", 12),
+                        limit=data.get("limit"),
                         min_quote_volume=data.get("min_quote_volume"),
                     )
                 )
