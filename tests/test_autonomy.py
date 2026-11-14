@@ -35,7 +35,8 @@ class Feed:
 
 def plan(symbol, direction="LONG", entry=100, stop=99, target=103):
     return {"symbol": symbol, "direction": direction, "confidence": 80,
-            "trade_plan": {"success": True, "direction": direction, "entry": entry,
+            "strategy_version": "v3",
+            "trade_plan": {"success": True, "strategy_version": "v3", "direction": direction, "entry": entry,
                            "stop_loss": stop, "take_profit": target, "reward_risk": 2.0, "atr": 0.5}}
 
 
