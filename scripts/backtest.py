@@ -25,7 +25,6 @@ if str(ROOT) not in sys.path:
 from agents.futures.agent import FuturesAgent
 from agents.spot.agent import SpotAgent
 from core.binance_market_data import BinanceMarketData
-from core.market_data_engine import MarketDataEngine
 from core.technical import analyze as analyze_technical
 
 TIMEFRAMES = {
