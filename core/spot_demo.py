@@ -32,12 +32,14 @@ class SpotDemoMixin:
 
     # ---- scanning ----------------------------------------------------------------
 
-    def scan_spot(self, limit=8, min_quote_volume=None):
+    def scan_spot(self, limit=None, min_quote_volume=None):
         if not self._agent_enabled("spot"):
             return {"success": False, "reason": "Spot agent is stopped",
                     "opportunities": []}
-        minimum = float(min_quote_volume if min_quote_volume is not None
-                        else os.getenv("SPOT_MIN_QUOTE_VOLUME", "20000000"))
+        # Volume ranks the universe but does not exclude eligible USDT pairs.
+        # A volume floor is applied only when explicitly requested by a caller.
+        minimum = (float(min_quote_volume)
+                   if min_quote_volume is not None else None)
         try:
             tickers = self.market_feed._request("spot", "/api/v3/ticker/24hr", {})
         except Exception as error:
@@ -56,11 +58,12 @@ class SpotDemoMixin:
                 price = float(item.get("lastPrice", 0))
             except (TypeError, ValueError):
                 continue
-            if volume >= minimum and price > 0:
+            if price > 0 and (minimum is None or volume >= minimum):
                 ranked.append({"symbol": symbol, "quote_volume": volume,
                                "last_price": price})
         ranked.sort(key=lambda r: r["quote_volume"], reverse=True)
-        universe = ranked[: max(1, min(int(limit), 30))]
+        # No implicit 8/30-symbol cap: automatic scans cover every eligible pair.
+        universe = ranked if limit is None else ranked[:max(1, int(limit))]
 
         opportunities, errors = [], {}
         rejections, rejection_samples = {}, []
