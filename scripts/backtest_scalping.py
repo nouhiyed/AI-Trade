@@ -29,7 +29,19 @@ def run_one(market, symbol, years, cache_dir):
     market_engine, prepared = MarketDataEngine(), {}
     for tf in tfs:
         raw = download_history(market, symbol, tf, start_dt, end_dt, cache_dir, years)
-        prepared[tf] = market_engine._prepare_frame(raw, symbol, market, tf)
+        if tf == "1m":
+            # Execution bars need OHLCV, timestamps and a lightweight ATR only.
+            # Avoid running the full multi-indicator/SMC pipeline over ~1M rows.
+            prev_close = raw["close"].shift(1)
+            true_range = pd.concat([
+                raw["high"] - raw["low"],
+                (raw["high"] - prev_close).abs(),
+                (raw["low"] - prev_close).abs(),
+            ], axis=1).max(axis=1)
+            raw["ATR"] = true_range.rolling(14, min_periods=14).mean()
+            prepared[tf] = raw
+        else:
+            prepared[tf] = market_engine._prepare_frame(raw, symbol, market, tf)
         print(f"Prepared {market} {symbol} {tf}: {len(raw)} candles", flush=True)
     base = prepared["1m"]
     strategy = FuturesScalpingStrategy() if market == "futures" else SpotScalpingStrategy()
@@ -91,7 +103,7 @@ def run_one(market, symbol, years, cache_dir):
             max_dd = max(max_dd, (peak-mark_equity)/peak)
         if position is not None:
             continue
-        n5 = int(pd.Series(times["5m"]).searchsorted(asof, side="right"))
+        n5 = int(times["5m"].searchsorted(asof, side="right"))
         if n5 < 30:
             continue
         signal_time = int(times["5m"][n5-1])
@@ -100,7 +112,7 @@ def run_one(market, symbol, years, cache_dir):
         last_signal = signal_time
         data, ready = {"symbol": symbol}, True
         for tf in tfs[1:]:
-            count = int(pd.Series(times[tf]).searchsorted(asof, side="right"))
+            count = int(times[tf].searchsorted(asof, side="right"))
             if count < 30:
                 ready = False
                 break
