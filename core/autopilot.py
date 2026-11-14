@@ -127,7 +127,7 @@ class Autopilot:
                 sources = []
                 limit = int(cfg["scan_limit"])
                 if cfg["trade_futures"]:
-                    sources.append(("futures", lambda: self.c.scan_futures(limit=limit)))
+                    sources.append(("futures", lambda: self.c.scan_futures()))
                 if cfg["trade_spot"]:
                     sources.append(("spot", lambda: self.c.scan_spot(limit=min(limit, 8))))
 
