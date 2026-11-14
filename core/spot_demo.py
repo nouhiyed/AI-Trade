@@ -40,10 +40,21 @@ class SpotDemoMixin:
         minimum = (float(min_quote_volume)
                    if min_quote_volume is not None else None)
         try:
-            symbols = self.market_feed.fetch_symbols("spot")
             tickers = self.market_feed._request(
                 "spot", "/api/v3/ticker/24hr", {}
             )
+            if limit is None:
+                # Automatic scans use exchangeInfo as the authoritative,
+                # complete list of eligible Spot USDT symbols.
+                symbols = self.market_feed.fetch_symbols("spot")
+            else:
+                # A user-requested limited scan can use the live Spot ticker
+                # response directly, avoiding a second exchangeInfo request.
+                symbols = sorted({
+                    str(item.get("symbol", "")).strip().upper()
+                    for item in tickers
+                    if str(item.get("symbol", "")).strip().upper().endswith("USDT")
+                })
         except Exception as error:
             return {
                 "success": False,
@@ -52,7 +63,7 @@ class SpotDemoMixin:
             }
 
         ticker_by_symbol = {
-            str(item.get("symbol", "")): item for item in tickers
+            str(item.get("symbol", "")).strip().upper(): item for item in tickers
         }
         ranked = []
         for symbol in symbols:
