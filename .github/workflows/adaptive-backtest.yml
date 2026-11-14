@@ -31,7 +31,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ai-trader-separate-scalping-research-v1
+  group: ai-trader-scalping-v2-research
   cancel-in-progress: false
 
 jobs:
