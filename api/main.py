@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 from uuid import uuid4
 
-API_VERSION = "2026.11.12.1"
+API_VERSION = "2026.11.14.1"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
@@ -19,6 +19,8 @@ from core.coordinator import TradingCoordinator
 from core.autopilot import Autopilot
 from core.market_context import MarketContext
 from core import performance
+from core.backtest_costs import BacktestCostModel
+from core.scalping_v2 import FuturesScalpingStrategyV2, SpotScalpingStrategyV2
 
 # Runtime objects are created only after the HTTP socket is bound. A second
 # launcher must fail fast on Address already in use without opening SQLite.
@@ -156,6 +158,37 @@ class APIHandler(BaseHTTPRequestHandler):
                     "count": len(symbols),
                     "source": source,
                     "received_at": time.time(),
+                })
+
+            if path == "/scalping/signal":
+                market = params.get("market", ["futures"])[0].lower()
+                symbol = params.get("symbol", ["BTCUSDT"])[0].upper()
+                if market not in {"spot", "futures"}:
+                    return self.send_json({"success": False, "reason": "Unsupported market"}, 400)
+                if not symbol.isalnum() or len(symbol) < 6 or len(symbol) > 20:
+                    return self.send_json({"success": False, "reason": "Invalid symbol"}, 400)
+                live = coordinator.market_engine.build_live(symbol, domains={market})
+                agent_data = coordinator.market_engine.for_live_agent(live, market)
+                required = ("5m", "15m", "1h", "4h") if market == "spot" else ("5m", "15m", "1h")
+                missing = [tf for tf in required if tf not in agent_data or len(agent_data[tf]) < 40]
+                if missing:
+                    return self.send_json({
+                        "success": False, "reason": "Insufficient live Binance candles",
+                        "missing_timeframes": missing, "errors": live.get("errors", {}),
+                        "source": live.get("source", "binance_rest"),
+                    }, 503)
+                costs = BacktestCostModel(market).components(agent_data["5m"].iloc[-1])
+                strategy = FuturesScalpingStrategyV2() if market == "futures" else SpotScalpingStrategyV2()
+                plan = strategy.analyze(agent_data, costs)
+                return self.send_json({
+                    **plan,
+                    "market": market,
+                    "symbol": symbol,
+                    "strategy_version": "v2",
+                    "source": live.get("source", "binance_rest"),
+                    "received_at": time.time(),
+                    "execution_enabled": False,
+                    "notice": "Signal analysis only. No exchange order is submitted.",
                 })
 
             if path == "/market/candles":
