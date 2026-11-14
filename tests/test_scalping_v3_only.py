@@ -53,6 +53,26 @@ class V3OnlyStrategyTests(unittest.TestCase):
         self.assertLess(result["stop_loss"], result["entry"])
         self.assertGreater(result["take_profit"], result["entry"])
 
+    def test_futures_v3_supports_short_setups(self):
+        data = frames()
+        one = data["1m"]
+        one.loc[one.index[-1], ["open", "high", "low", "close"]] = [100.1, 100.2, 99.6, 99.7]
+        one.loc[one.index[-1], ["EMA_9", "EMA_20", "RSI", "MACD_hist"]] = [100.0, 100.0, 40.0, -0.05]
+        one.loc[one.index[-2], "MACD_hist"] = -0.02
+        five = data["5m"]
+        five["close"] = 99.5
+        five["EMA_21"] = 100.0
+        fifteen = data["15m"]
+        fifteen["close"] = 99.0
+        fifteen["EMA_21"] = 99.5
+        fifteen["EMA_50"] = 100.0
+        result = FuturesScalpingStrategyV3().analyze(data)
+        self.assertTrue(result["success"], result)
+        self.assertEqual(result["direction"], "SHORT")
+        self.assertGreater(result["stop_loss"], result["entry"])
+        self.assertLess(result["take_profit"], result["entry"])
+        self.assertGreaterEqual(result["net_reward_risk"], 1.5)
+
     def test_spot_v3_blocks_deep_bearish_four_hour_context(self):
         data = frames()
         data["4h"]["close"] = 90.0
