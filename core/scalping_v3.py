@@ -36,8 +36,10 @@ class _ScalperV3(_BaseScalper):
         return (c15 < e50_15 and (c5 <= e21_5 or e21_15 < e50_15))
 
     @classmethod
-    def _plan(cls, market, direction, five, setup, regime, target_r, costs):
-        result = cls.plan(market,direction,five,setup,regime,target_r,costs)
+    def _plan(cls, market, direction, five, setup, regime, target_r, costs, current_price):
+        risk_frame = five.copy()
+        risk_frame.loc[risk_frame.index[-1], "close"] = current_price
+        result = cls.plan(market,direction,risk_frame,setup,regime,target_r,costs)
         if result.get("success"):
             result.update(strategy=("futures_scalper_v3" if market=="futures" else "spot_scalper_v3"),
                           strategy_version="v3", stop_atr_multiple=cls.STOP_ATR)
@@ -70,16 +72,16 @@ class FuturesScalpingStrategyV3(_ScalperV3):
         short_break=(bear and c<prior_low-0.015*atr and c<o and 24<=rsi<=52
                      and loc<=0.38 and body>=0.12 and vr>=0.85)
         if long_pull:
-            return self._plan("futures","LONG",five,"MICRO_PULLBACK","BULL_TREND",1.35,costs)
+            return self._plan("futures","LONG",five,"MICRO_PULLBACK","BULL_TREND",1.35,costs,c)
         if short_pull:
             return self._plan("futures","SHORT",five,"MICRO_PULLBACK","BEAR_TREND",1.35,costs)
         if long_break:
-            return self._plan("futures","LONG",five,"MICRO_BREAKOUT","BULL_TREND",1.45,costs)
+            return self._plan("futures","LONG",five,"MICRO_BREAKOUT","BULL_TREND",1.45,costs,c)
         if short_break:
             return self._plan("futures","SHORT",five,"MICRO_BREAKOUT","BEAR_TREND",1.45,costs)
         # Counter-trend trades are limited to clear 1m rejection in a weak 5m range.
         if adx5<=20 and loc>=0.62 and c>o and rsi<=29 and c<=v(one,"BB_lower")*1.003:
-            return self._plan("futures","LONG",five,"RANGE_REJECTION","RANGE",1.25,costs)
+            return self._plan("futures","LONG",five,"RANGE_REJECTION","RANGE",1.25,costs,c)
         if adx5<=20 and loc<=0.38 and c<o and rsi>=71 and c>=v(one,"BB_upper")*0.997:
             return self._plan("futures","SHORT",five,"RANGE_REJECTION","RANGE",1.25,costs)
         return {"success":False,"reason":"No qualifying v3 micro setup"}
@@ -115,7 +117,7 @@ class SpotScalpingStrategyV3(_ScalperV3):
         if pull:
             return self._plan("spot","LONG",five,"MICRO_PULLBACK","BULL_TREND",1.45,costs)
         if breakout:
-            return self._plan("spot","LONG",five,"MICRO_BREAKOUT","BULL_TREND",1.55,costs)
+            return self._plan("spot","LONG",five,"MICRO_BREAKOUT","BULL_TREND",1.55,costs,c)
         adx5=v(five,"ADX"); bb=v(one,"BB_lower")
         if adx5 is not None and adx5<=19 and bb is not None and rsi<=27 and c<=bb*1.004 and c>o and loc>=0.60 and vr>=0.65:
             return self._plan("spot","LONG",five,"RANGE_BOUNCE","RANGE",1.35,costs)
