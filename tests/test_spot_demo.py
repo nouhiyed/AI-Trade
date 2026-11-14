@@ -124,6 +124,30 @@ class TestSpot(Base):
         self.assertFalse(self.c.request_demo_spot_trade("ETHUSDT", "spot")["approved"])
 
 
+    def test_spot_scan_covers_full_universe_without_volume_floor_or_30_cap(self):
+        tickers = [
+            {"symbol": f"COIN{i:03d}USDT", "quoteVolume": str(i + 1),
+             "lastPrice": "1.0"}
+            for i in range(45)
+        ]
+        self.feed._request = lambda market, path, params: tickers
+        analyzed = []
+        def analyze(symbol, domains):
+            analyzed.append(symbol)
+            return {"signals": {"spot": {
+                "symbol": symbol, "direction": "WAIT",
+                "reason": "No entry signal",
+            }}}
+        self.c.analyze_live = analyze
+
+        result = self.c.scan_spot()
+
+        self.assertEqual(result["scanned"], 45)
+        self.assertEqual(len(analyzed), 45)
+        self.assertEqual(analyzed[0], "COIN044USDT")
+        self.assertEqual(result["actionable"], 0)
+
+
 class TestAutopilotMarkets(Base):
     def test_autopilot_config_persists_across_backend_restart(self):
         config_path = "config/autopilot-persist.json"
