@@ -1,4 +1,5 @@
 name: Build AI Trade APK
+# V3-only CI: test backend contracts before producing the Android artifact.
 
 # Rebuild trigger: refresh the Android APK pipeline.
 
