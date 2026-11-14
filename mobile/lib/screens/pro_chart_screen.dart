@@ -51,6 +51,7 @@ class _ProChartScreenState extends State<ProChartScreen> {
   bool _pageReady = false;
   bool _loading = false;
   bool _submitting = false;
+  bool _scalpingBusy = false;
   String? _error;
   String _market = 'futures';
   late String _symbol;
@@ -275,6 +276,61 @@ class _ProChartScreenState extends State<ProChartScreen> {
     }
   }
 
+  Future<void> _analyzeScalpingV2() async {
+    if (_scalpingBusy || _symbol.isEmpty) return;
+    setState(() => _scalpingBusy = true);
+    try {
+      final result = await ApiService.scalpingSignal(
+        market: _market,
+        symbol: _symbol,
+      );
+      if (!mounted) return;
+      String price(dynamic value) {
+        final number = value is num ? value.toDouble() : double.tryParse('$value');
+        return number == null ? '—' : number.toStringAsPrecision(9);
+      }
+      final success = result['success'] == true;
+      final details = success
+          ? [
+              '${(result['direction'] ?? '').toString()} • ${(result['setup'] ?? '').toString()}',
+              'Entry: ${price(result['entry'])}',
+              'Stop loss: ${price(result['stop_loss'])}',
+              'Take profit: ${price(result['take_profit'])}',
+              'Reward/Risk: ${price(result['reward_risk'])}',
+              'Net R/R estimate: ${price(result['net_reward_risk'])}',
+            ].join('\n')
+          : '${result['reason'] ?? t('لا توجد إشارة مطابقة حالياً', 'No qualifying setup right now')}';
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: widget.panel,
+          title: Text(
+            t('تحليل Scalping v2 • $_symbol', 'Scalping v2 • $_symbol'),
+            style: TextStyle(color: widget.text, fontWeight: FontWeight.w800),
+          ),
+          content: SelectableText(
+            '$details\n\n${t('المصدر: Binance لحظي • تحليل فقط، دون إرسال أوامر', 'Source: live Binance • analysis only, no orders submitted')}',
+            style: TextStyle(color: widget.text, height: 1.55),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(t('إغلاق', 'Close')),
+            ),
+          ],
+        ),
+      );
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$error')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _scalpingBusy = false);
+    }
+  }
+
   Future<void> _pickSymbol() async {
     if (_symbols.isEmpty) await _loadSymbols();
     if (!mounted) return;
@@ -480,6 +536,20 @@ class _ProChartScreenState extends State<ProChartScreen> {
                 label: Text(_submitting
                     ? t('جارٍ التحليل...', 'ANALYZING...')
                     : t('إرسال للوكيل', 'SEND TO AGENT')),
+              ),
+            ),
+          ),
+        if (widget.showSubmitButton)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+            child: SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _scalpingBusy ? null : _analyzeScalpingV2,
+                icon: const Icon(Icons.bolt, size: 18),
+                label: Text(_scalpingBusy
+                    ? t('جارٍ فحص السوق...', 'CHECKING LIVE MARKET...')
+                    : t('تحليل Scalping v2', 'ANALYZE SCALPING v2')),
               ),
             ),
           ),
