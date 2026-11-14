@@ -14,7 +14,6 @@ from core.risk_manager import RiskManager
 from core.market_data_engine import MarketDataEngine
 from core.binance_market_data import BinanceMarketData
 from core.market_scanner import FuturesMarketScanner
-from core.trade_planner import TradePlanner
 from core.demo.database import DemoDatabase
 from core.demo.ledger import Ledger
 from core.demo.engine import DemoEngine
@@ -33,7 +32,6 @@ class TradingCoordinator(SpotDemoMixin):
         self.market_feed = BinanceMarketData(timeout=6, total_timeout=6)
         self.market_engine = MarketDataEngine(timeout=6)
         self.market_scanner = FuturesMarketScanner(timeout=6)
-        self.trade_planner = TradePlanner()
         # Injected by the API runtime; kept optional for offline/unit-test use.
         self.market_context = None
 
