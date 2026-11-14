@@ -1246,26 +1246,10 @@ class TradingCoordinator(SpotDemoMixin):
                     direction = "WAIT"
                     signal["direction"] = "WAIT"
 
-                # Strategy tag makes the journal compare V3 setup families.
-                tf_details = signal.get("timeframes") or {}
-                smc_flags = [
-                    flag for values in tf_details.values()
-                    if isinstance(values, dict)
-                    for flag, active in (values.get("smc") or {}).items() if active
-                ]
-                plan_style = (signal.get("trade_plan") or {}).get("entry_strategy")
-                if plan_style:
-                    signal["strategy_tag"] = plan_style
-                elif signal.get("strategy_tag"):
-                    signal["strategy_tag"] = signal["strategy_tag"]
-                elif any("sweep" in flag for flag in smc_flags) and any("choch" in flag for flag in smc_flags):
-                    signal["strategy_tag"] = "liquidity_sweep_reversal"
-                elif any("choch" in flag for flag in smc_flags):
-                    signal["strategy_tag"] = "market_structure_shift"
-                elif any("bos" in flag for flag in smc_flags):
-                    signal["strategy_tag"] = "breakout_retest"
-                else:
-                    signal["strategy_tag"] = "support_resistance_rejection"
+                # Journal labels are sourced exclusively from the V3 setup.
+                signal["strategy_tag"] = (
+                    "v3_" + str(v3_plan.get("setup", "no_setup")).lower()
+                )
                 if (self.market_context is not None and
                         isinstance(signal.get("trade_plan"), dict) and
                         signal["trade_plan"].get("success") is True):
@@ -1361,7 +1345,7 @@ class TradingCoordinator(SpotDemoMixin):
             is_long, is_short = True, False
 
         # Chart prices are reference annotations only. The execution levels must
-        # come from the same structure-rejection planner used by autopilot.
+        # come exclusively from the approved V3 plan used by autopilot.
         agent_plan = signal.get("trade_plan") or {}
         if not isinstance(agent_plan, dict) or agent_plan.get("success") is not True:
             reason = (agent_plan.get("reason") if isinstance(agent_plan, dict) else None) or (
