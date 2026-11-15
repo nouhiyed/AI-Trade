@@ -82,12 +82,42 @@ class TradingKeepAliveService : Service() {
         }
 
         val script = """
-            cd /data/data/com.termux/files/home/AI-Trader || exit 7
-            if ! python -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8001/health", timeout=2)' >/dev/null 2>&1; then
-              if [ ! -f api/main.py ]; then
-                echo "AI-Trader repository not found in ~/AI-Trader" >&2
-                exit 7
-              fi
+            set -eu
+            REPO="/data/data/com.termux/files/home/AI-Trader"
+            RUNTIME="/data/data/com.termux/files/home/AI-Trader-runtime"
+            cd "\$REPO" || exit 7
+
+            # Fetch the exact current main revision without changing the user's
+            # checkout, index, working tree, or untracked data.
+            git fetch --quiet origin main
+            COMMIT="\$(git rev-parse origin/main)"
+            RELEASE="\$RUNTIME/releases/\$COMMIT"
+            mkdir -p "\$RUNTIME/releases"
+
+            if [ ! -f "\$RELEASE/api/main.py" ]; then
+              TEMP="\$RUNTIME/.release-\$COMMIT.tmp"
+              rm -rf "\$TEMP"
+              mkdir -p "\$TEMP"
+              git archive "\$COMMIT" | tar -x -C "\$TEMP"
+
+              # Persistent user data stays in the original Termux checkout.
+              for DIR in config data logs backup; do
+                if [ -d "\$REPO/\$DIR" ] && [ ! -e "\$TEMP/\$DIR" ]; then
+                  ln -s "\$REPO/\$DIR" "\$TEMP/\$DIR"
+                fi
+              done
+              rm -rf "\$RELEASE"
+              mv "\$TEMP" "\$RELEASE"
+            fi
+
+            EXPECTED_VERSION="\$(git show "origin/main:api/main.py" | sed -n 's/^API_VERSION = "\(.*\)"/\1/p' | head -n 1)"
+            CURRENT_VERSION="\$(python -c 'import json,urllib.request; print(json.load(urllib.request.urlopen("http://127.0.0.1:8001/health",timeout=2)).get("api_version",""))' 2>/dev/null || true)"
+
+            if [ "\$CURRENT_VERSION" != "\$EXPECTED_VERSION" ]; then
+              # Stop only the old API module, never the user's Termux session.
+              pkill -f '[a]pi.main' 2>/dev/null || true
+              sleep 1
+              cd "\$RELEASE"
               mkdir -p logs
               nohup env PYTHONPATH=. python -u -m api.main >> logs/api-background.log 2>&1 </dev/null &
             fi
