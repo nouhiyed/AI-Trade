@@ -1,4 +1,4 @@
-name: V3 Historical Backtest
+name: V3 Historical Backtest - 12 Coins
 
 on:
   workflow_dispatch:
@@ -17,7 +17,7 @@ permissions:
 
 concurrency:
   group: v3-historical-backtest
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   backtest:
@@ -38,15 +38,15 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
-      - name: Run two-year V3 historical backtest
+      - name: Run two-year V3 historical backtest (12 coins)
         run: |
-          python scripts/backtest.py --years 2 --symbols BTCUSDT ETHUSDT --output backtest_results --cache data/backtest_cache
+          python scripts/backtest.py --years 2 --symbols BTCUSDT ETHUSDT BNBUSDT SOLUSDT XRPUSDT ADAUSDT DOGEUSDT AVAXUSDT LINKUSDT DOTUSDT LTCUSDT BCHUSDT --output backtest_results --cache data/backtest_cache
 
       - name: Upload historical results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: V3-Historical-Backtest-BTC-ETH-2Y
+          name: V3-Historical-Backtest-12-Coins-2Y
           path: backtest_results/
           if-no-files-found: warn
           retention-days: 30
