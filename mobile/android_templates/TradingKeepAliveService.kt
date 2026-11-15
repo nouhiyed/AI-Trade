@@ -48,6 +48,11 @@ class TradingKeepAliveService : Service() {
     private fun startBackendMonitor() {
         running = true
         worker = Thread {
+            // Reconcile the local engine with the latest GitHub main once when
+            // the Android service starts, even if an older API is responding.
+            val startupMessage = requestTermuxBackend()
+            (getSystemService(NOTIFICATION_SERVICE) as NotificationManager)
+                .notify(1001, buildNotification(startupMessage))
             while (running) {
                 val message = if (checkBackend()) {
                     lastLaunchAttemptMs = 0L
