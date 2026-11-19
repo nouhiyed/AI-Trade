@@ -21,7 +21,7 @@ class SpotDemoMixin:
     def _spot_like_price(self, domain, symbol, side):
         """Reference price for a BUY/SELL, also stored as the account mark."""
         side = side.upper()
-        quote = self.market_feed.fetch_book_ticker("spot", symbol)
+        quote = self.market_engine.get_book_ticker("spot", symbol)
         mid = Decimal(str(quote["mid_price"]))
         ref = Decimal(str(quote["ask"] if side == "BUY" else quote["bid"]))
         if not ref.is_finite() or ref <= 0 or not mid.is_finite() or mid <= 0:
@@ -37,10 +37,31 @@ class SpotDemoMixin:
                     "opportunities": []}
         minimum = float(min_quote_volume) if min_quote_volume is not None else None
         try:
-            tickers = self.market_feed._request("spot", "/api/v3/ticker/24hr", {})
-            symbols = (self.market_feed.fetch_symbols("spot") if limit is None else
-                sorted({str(x.get("symbol", "")).strip().upper() for x in tickers
-                        if str(x.get("symbol", "")).strip().upper().endswith("USDT")}))
+            cached = list(self.market_universes.get("spot") or [])
+            if limit is None and cached:
+                ranked = cached
+            else:
+                tickers = self.market_feed._request("spot", "/api/v3/ticker/24hr", {})
+                symbols = (self.market_feed.fetch_symbols("spot") if limit is None else
+                    sorted({str(x.get("symbol", "")).strip().upper() for x in tickers
+                            if str(x.get("symbol", "")).strip().upper().endswith("USDT")}))
+                ticker_by_symbol = {str(x.get("symbol", "")).strip().upper(): x
+                                    for x in tickers}
+                ranked = []
+                for symbol in symbols:
+                    item = ticker_by_symbol.get(symbol, {})
+                    try:
+                        volume, price = float(item.get("quoteVolume", 0)), float(item.get("lastPrice", 0))
+                    except (TypeError, ValueError):
+                        continue
+                    if price > 0 and (minimum is None or volume >= minimum):
+                        ranked.append({"symbol": symbol, "quote_volume": volume,
+                                       "last_price": price})
+                ranked.sort(key=lambda item: item["quote_volume"], reverse=True)
+            if minimum is not None:
+                ranked = [item for item in ranked
+                          if float(item.get("quote_volume", 0)) >= minimum]
+            universe = ranked[:(max(1, int(limit)) if limit is not None else 30)]
         except Exception as error:
             cycle_id = self.pipeline_funnel.start("spot", 0)
             self._funnel_record("spot", None, reason=str(error), error=True,
@@ -49,32 +70,19 @@ class SpotDemoMixin:
             return {"success": False, "reason": "Spot universe scan failed: " + str(error),
                     "opportunities": [], "errors": {"__universe__": str(error)},
                     "error_count": 1, "fatal_errors": 1, "funnel": funnel}
-        ticker_by_symbol = {str(x.get("symbol", "")).strip().upper(): x for x in tickers}
-        ranked = []
-        for symbol in symbols:
-            item = ticker_by_symbol.get(symbol, {})
-            try:
-                volume, price = float(item.get("quoteVolume", 0)), float(item.get("lastPrice", 0))
-            except (TypeError, ValueError):
-                volume, price = 0.0, 0.0
-            if minimum is not None and volume < minimum:
-                continue
-            ranked.append({"symbol": symbol, "quote_volume": volume, "last_price": price})
-        ranked.sort(key=lambda item: item["quote_volume"], reverse=True)
-        universe = ranked if limit is None else ranked[:max(1, int(limit))]
+
         scan_meta = {"universe_total": len(universe), "batch_size": len(universe),
                      "cycle": 0, "cycle_complete": True}
-        if limit is None:
-            from core.scan_rotation import next_scan_batch
-            universe, scan_meta = next_scan_batch("spot", universe, batch_size=20)
         cycle_id = self.pipeline_funnel.start("spot", len(universe), "5m")
         opportunities, errors, rejections, rejection_samples = [], {}, {}, []
+
         def reject(symbol, reason):
             key = str(reason or "No actionable signal")
             rejections[key] = rejections.get(key, 0) + 1
             self._funnel_record("spot", None, reason=key, cycle_id=cycle_id)
             if len(rejection_samples) < 10:
                 rejection_samples.append({"symbol": symbol, "reason": key})
+
         processed = 0
         for item in universe:
             symbol = item["symbol"]
