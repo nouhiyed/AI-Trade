@@ -28,6 +28,8 @@ class PipelineFunnel:
             current = self._cycles.get(domain)
             if current and current.get("candle_open") == candle_open:
                 current["expected"] = max(current["expected"], max(0, int(expected or 0)))
+                current["success"] = False
+                current.pop("finished_at", None)
                 return current["cycle_id"]
             cycle = {
                 "cycle_id": uuid4().hex,
