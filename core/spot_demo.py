@@ -33,8 +33,14 @@ class SpotDemoMixin:
 
     def scan_spot(self, limit=None, min_quote_volume=None, profile="standard"):
         if self.market_universes.get("spot") and not self.market_data_ready:
+            expected = len(self.market_universes.get("spot") or [])
+            cycle_id = self.pipeline_funnel.start("spot", expected, "5m")
+            self._funnel_record("spot", None, reason="Binance candle cache warmup is incomplete",
+                                error=True, fatal=True, cycle_id=cycle_id)
+            funnel = self.pipeline_funnel.finish("spot", 0, expected)
             return {"success": False, "reason": "Binance candle cache warmup is incomplete",
-                    "opportunities": [], "error_count": 1, "fatal_errors": 1}
+                    "opportunities": [], "error_count": 1, "fatal_errors": 1,
+                    "funnel": funnel}
         if not self._agent_enabled("spot"):
             return {"success": False, "reason": "Spot agent is stopped",
                     "opportunities": []}
