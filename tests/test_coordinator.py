@@ -52,6 +52,25 @@ class TestTradingCoordinator(unittest.TestCase):
         self.assertFalse(drifted)
         self.assertIn("0.3 ATR", reason)
 
+    def test_explore_profile_relaxes_only_entry_age_and_atr_drift(self):
+        plan = {
+            "entry": 100, "stop_loss": 99, "take_profit": 103, "atr": 1,
+        }
+        valid, reason = self.system._validate_demo_entry_price(
+            plan, "LONG", 100.45, signal_created_at=1000, now=1119,
+            profile="explore")
+        self.assertTrue(valid, reason)
+        expired, reason = self.system._validate_demo_entry_price(
+            plan, "LONG", 100.10, signal_created_at=1000, now=1121,
+            profile="explore")
+        self.assertFalse(expired)
+        self.assertIn("120 seconds", reason)
+        outside_structure, reason = self.system._validate_demo_entry_price(
+            plan, "LONG", 103.1, signal_created_at=1000, now=1119,
+            profile="explore")
+        self.assertFalse(outside_structure)
+        self.assertIn("structure", reason.lower())
+
     def test_trade_requires_signal(self):
         result = self.system.request_trade(
             domain="futures",
