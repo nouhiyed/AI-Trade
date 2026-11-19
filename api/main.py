@@ -539,6 +539,14 @@ class APIHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         print("[API]", format % args)
 
+def market_data_warmup_worker():
+    try:
+        result = coordinator.start_market_data()
+        print("[MARKET DATA] startup warmup:", result)
+    except Exception as error:
+        print("[MARKET DATA] startup warmup failed:", error)
+
+
 def demo_monitor_worker():
     print("[DEMO] Automatic position monitor started")
     while True:
@@ -575,6 +583,11 @@ if __name__ == "__main__":
         daemon=True,
     )
     monitor_thread.start()
+    threading.Thread(
+        target=market_data_warmup_worker,
+        name="binance-market-data-warmup",
+        daemon=True,
+    ).start()
     threading.Thread(
         target=autopilot.run_forever,
         name="autopilot",
