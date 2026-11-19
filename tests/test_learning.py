@@ -15,13 +15,14 @@ class TestLearningEngine(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def add_closed(self, count, pnl, setup="momentum|SHORT|c80|rr2+"):
+    def add_closed(self, count, pnl, setup="momentum|SHORT|c80|rr2+", profile="standard"):
         for i in range(count):
             trade_id = f"{setup}-{i}"
             self.journal.record_open(
                 trade_id, "futures", "BTCUSDT", "SHORT", setup, 80,
                 100, 101, 98, risk_amount=1,
                 context={"features": {"rsi_oversold": True, "adx_trending": False}},
+                profile=profile,
             )
             self.journal.record_close(trade_id, pnl, exit_price=99 if pnl > 0 else 102,
                                       reason="TAKE_PROFIT" if pnl > 0 else "STOP_LOSS")
@@ -46,6 +47,14 @@ class TestLearningEngine(unittest.TestCase):
         features = {item["feature"]: item for item in report["features"]}
         self.assertTrue(features["rsi_oversold:on"]["mature"])
         self.assertEqual(features["rsi_oversold:on"]["trades"], 20)
+
+    def test_explore_trades_do_not_change_standard_learning_or_profitability(self):
+        self.add_closed(20, -1, profile="explore")
+        self.assertEqual(self.learning.evaluate(), [])
+        report = self.learning.report()
+        self.assertEqual(report["closed_trades"], 0)
+        self.assertEqual(report["explore_closed_trades"], 20)
+        self.assertTrue(any("150 Standard" in item for item in report["suggestions"]))
 
     def test_setup_key_separates_entry_strategy(self):
         a = setup_key("SHORT", 80, 2.1, "futures", "liquidity_reversal")
