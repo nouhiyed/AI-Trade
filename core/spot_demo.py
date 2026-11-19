@@ -202,7 +202,8 @@ class SpotDemoMixin:
 
             price = self._spot_like_price(domain, symbol, "BUY")
             valid_entry, entry_reason = self._validate_demo_entry_price(
-                plan, "LONG", price, min_net_rr=1.5, market="spot"
+                plan, "LONG", price, min_net_rr=1.5, market="spot",
+                signal_created_at=signal.get("_signal_created_at"),
             )
             if not valid_entry:
                 return {"approved": False, "reason": entry_reason}
@@ -215,6 +216,8 @@ class SpotDemoMixin:
                 risk_pct=float(risk_pct), leverage=1)
             if not reservation.get("approved"):
                 return reservation
+            self._funnel_record("spot", "risk_approved",
+                                cycle_id=signal.get("_funnel_cycle_id"))
             trade_id = reservation["trade_id"]
             self.risk.update_reservation_status(trade_id, "DEMO_PENDING")
 
@@ -262,6 +265,8 @@ class SpotDemoMixin:
             self.risk.update_reservation_status(
                 trade_id, "DEMO_OPEN", protection_verified=False,
                 execution_source="INTERNAL_DEMO")
+            self._funnel_record("spot", "trade_opened",
+                                cycle_id=signal.get("_funnel_cycle_id"))
             return {"approved": True, "mode": "DEMO", **record}
 
         except Exception as error:
