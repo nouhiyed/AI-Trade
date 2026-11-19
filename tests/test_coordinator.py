@@ -65,8 +65,9 @@ class TestTradingCoordinator(unittest.TestCase):
             profile="explore")
         self.assertFalse(expired)
         self.assertIn("120 seconds", reason)
+        narrow_plan = {**plan, "take_profit": 100.4}
         outside_structure, reason = self.system._validate_demo_entry_price(
-            plan, "LONG", 103.1, signal_created_at=1000, now=1119,
+            narrow_plan, "LONG", 100.45, signal_created_at=1000, now=1119,
             profile="explore")
         self.assertFalse(outside_structure)
         self.assertIn("structure", reason.lower())
