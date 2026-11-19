@@ -148,7 +148,11 @@ class SpotScalpingStrategyV3(_V3Base):
         c1, e200 = v(hourly, "close"), v(hourly, "EMA_200")
         if None in (c, o, h, low, ema9, ema20, atr, rsi, hist, prev, c1, e200) or atr <= 0:
             return {"success": False, "reason": "V3 Spot indicators are incomplete"}
-        if four is not None and len(four) >= 30:
+        # Explore is an explicitly opt-in data-collection profile. It relaxes
+        # only this higher-timeframe structure veto; the V3 entry setup, SL/TP
+        # geometry, costs and minimum net RR remain mandatory.
+        if (str(data.get("profile", "standard")).lower() != "explore"
+                and four is not None and len(four) >= 30):
             c4, e2004 = v(four, "close"), v(four, "EMA_200")
             if c4 is not None and e2004 and c4 < e2004*.975 and c1 < e200:
                 return {"success": False, "reason": "Deep 4h and 1h bearish context"}
