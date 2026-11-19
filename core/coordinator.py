@@ -1491,7 +1491,7 @@ class TradingCoordinator(SpotDemoMixin):
             cycle_id = self.pipeline_funnel.start("futures", 0)
             self._funnel_record("futures", "events_received", reason=str(error),
                                 error=True, fatal=True, cycle_id=cycle_id)
-            funnel = self.pipeline_funnel.finish("futures", 0, 0, fatal=True)
+            funnel = self.pipeline_funnel.finish("futures", 0, 0)
             return {"success": False, "reason": "Market universe scan failed: " + str(error),
                     "opportunities": [], "errors": {"__universe__": str(error)},
                     "error_count": 1, "fatal_errors": 1, "funnel": funnel}
