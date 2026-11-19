@@ -1560,8 +1560,14 @@ class TradingCoordinator(SpotDemoMixin):
     def scan_futures(self, limit=None, min_quote_volume=None, profile="standard"):
         """Scan Futures and retain per-stage funnel counts for this cycle."""
         if self.market_universes.get("futures") and not self.market_data_ready:
+            expected = len(self.market_universes.get("futures") or [])
+            cycle_id = self.pipeline_funnel.start("futures", expected, "5m")
+            self._funnel_record("futures", None, reason="Binance candle cache warmup is incomplete",
+                                error=True, fatal=True, cycle_id=cycle_id)
+            funnel = self.pipeline_funnel.finish("futures", 0, expected)
             return {"success": False, "reason": "Binance candle cache warmup is incomplete",
-                    "opportunities": [], "error_count": 1, "fatal_errors": 1}
+                    "opportunities": [], "error_count": 1, "fatal_errors": 1,
+                    "funnel": funnel}
         if not self._agent_enabled("futures"):
             return {"success": False, "reason": "Futures agent is stopped", "opportunities": []}
         try:
