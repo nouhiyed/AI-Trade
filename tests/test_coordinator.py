@@ -36,7 +36,7 @@ class TestTradingCoordinator(unittest.TestCase):
 
     def test_demo_entry_allows_03_atr_drift_within_90_seconds(self):
         plan = {
-            "entry": 100, "stop_loss": 99, "take_profit": 103, "atr": 1,
+            "entry": 100, "stop_loss": 99, "take_profit": 105, "atr": 1,
         }
         valid, reason = self.system._validate_demo_entry_price(
             plan, "LONG", 100.25, signal_created_at=1000, now=1089)
@@ -278,7 +278,7 @@ class TestTradingCoordinator(unittest.TestCase):
             },
         }
         self.system._demo_market_price = (
-            lambda symbol, market="futures": Decimal("100")
+            lambda symbol, market="futures", side=None: Decimal("100")
         )
 
         opened = self.system.request_demo_futures_trade(
@@ -292,7 +292,7 @@ class TestTradingCoordinator(unittest.TestCase):
 
         # A manual close uses the current executable market quote.
         self.system._demo_market_price = (
-            lambda symbol, market="futures": Decimal("101")
+            lambda symbol, market="futures", side=None: Decimal("101")
         )
         closed = self.system.close_demo_position(position_id)
 
@@ -327,7 +327,7 @@ class TestTradingCoordinator(unittest.TestCase):
 
         quotes = {"BTCUSDT": "100", "ETHUSDT": "200"}
         self.system._demo_market_price = (
-            lambda symbol, market="futures": Decimal(quotes[symbol])
+            lambda symbol, market="futures", side=None: Decimal(quotes[symbol])
         )
         opened_ids = []
 
@@ -394,7 +394,7 @@ class TestTradingCoordinator(unittest.TestCase):
             },
         }
         self.system._demo_market_price = (
-            lambda symbol, market="futures": Decimal("100")
+            lambda symbol, market="futures", side=None: Decimal("100")
         )
         opened = self.system.request_demo_futures_trade(
             "BTCUSDT", "LONG", signal_override=signal
@@ -420,7 +420,7 @@ class TestTradingCoordinator(unittest.TestCase):
             )
             self.assertTrue(monitor_entered.wait(2), "monitor did not reach Binance quote")
             self.system._demo_market_price = (
-                lambda symbol, market="futures": Decimal("101")
+                lambda symbol, market="futures", side=None: Decimal("101")
             )
             close = pool.submit(self.system.close_demo_position, position_id)
             try:
