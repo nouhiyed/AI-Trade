@@ -339,8 +339,22 @@ class BinanceCandleCache:
 
     def status(self):
         with self._lock:
+            ready = {
+                (market, symbol)
+                for market, symbol, timeframe in self._candles
+                if timeframe == "1m"
+            }.intersection({
+                (market, symbol)
+                for market, symbol, timeframe in self._candles
+                if timeframe == "5m"
+            })
+            ready_by_market = {
+                market: sum(1 for item_market, _ in ready if item_market == market)
+                for market in ("spot", "futures")
+            }
             return {
-                "ready_symbols": len(self._candles),
+                "ready_symbols": len(ready),
+                "ready_by_market": ready_by_market,
                 "errors": dict(self._errors),
                 "symbols": {key: list(value) for key, value in self._symbols.items()},
                 "stream_threads": len(self._threads),
