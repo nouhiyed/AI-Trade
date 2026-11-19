@@ -193,17 +193,27 @@ class Autopilot:
 
     def _process(self, domain, scan, cfg, open_symbols, slots, result):
         for opp in scan.get("opportunities", []):
-            if slots <= 0:
-                break
             symbol = str(opp.get("symbol", "")).upper()
+            if slots <= 0:
+                reason = "Max concurrent trades reached"
+                result["skipped"].append({
+                    "domain": domain, "symbol": symbol, "reason": reason})
+                self.c._funnel_record(
+                    domain, None, reason=reason,
+                    cycle_id=(opp.get("signal") or {}).get("_funnel_cycle_id"))
+                continue
             try:
                 direction = str(opp["direction"]).upper()
                 signal, plan = opp["signal"], opp["trade_plan"]
                 confidence = float(opp.get("confidence") or 0)
 
                 def skip(reason):
+                    reason = str(reason)
                     result["skipped"].append({
-                        "domain": domain, "symbol": symbol, "reason": str(reason)})
+                        "domain": domain, "symbol": symbol, "reason": reason})
+                    self.c._funnel_record(
+                        domain, None, reason=reason,
+                        cycle_id=signal.get("_funnel_cycle_id"))
 
                 if not symbol:
                     skip("Missing symbol")
