@@ -215,6 +215,7 @@ class SpotDemoMixin:
             valid_entry, entry_reason = self._validate_demo_entry_price(
                 plan, "LONG", price, min_net_rr=1.5, market="spot",
                 signal_created_at=signal.get("_signal_created_at"),
+                profile=signal.get("profile", "standard"),
             )
             if not valid_entry:
                 return {"approved": False, "reason": entry_reason}
