@@ -7,12 +7,14 @@ from core.technical import analyze as analyze_technical
 from core.market_structure import analyze_market_structure
 from core.orderbook import analyze_orderbook
 from core.binance_market_data import BinanceMarketData
+from core.binance_candle_cache import BinanceCandleCache
 
 
 class MarketDataEngine:
     def __init__(self, raw_dir="data/raw", timeout=6):
         self.raw_dir = Path(raw_dir)
         self.binance = BinanceMarketData(timeout=timeout, total_timeout=timeout)
+        self.cache = BinanceCandleCache(self.binance)
 
         self.timeframes = {
             "futures": ["1m", "5m", "15m", "1h"],
@@ -132,73 +134,46 @@ class MarketDataEngine:
 
         return result
 
+    def start_live_streams(self, symbols_by_market):
+        return self.cache.start(symbols_by_market)
+
+    def stop_live_streams(self):
+        self.cache.stop()
+
+    def get_book_ticker(self, market, symbol):
+        quote = self.cache.get_quote(market, symbol)
+        if quote is None:
+            raise RuntimeError(
+                f"Binance {market} bookTicker stream is not ready for {symbol}")
+        return quote
+
     def build_live(self, symbol, domains=None):
         symbol = str(symbol).strip().upper()
-
         if not symbol:
             raise ValueError("Symbol cannot be empty")
-
+        selected_domains = (set(self.timeframes) if domains is None
+                            else set(domains))
+        unknown = selected_domains.difference(self.timeframes)
+        if unknown:
+            raise ValueError("Unknown market domain(s): " + ", ".join(sorted(unknown)))
         result = {
             "symbol": symbol,
-            "source": "binance_rest",
-            "timeframes": {
-                "futures": {},
-                "spot": {}
-            },
-            "orderbooks": {
-                "futures": {},
-                "spot": {}
-            },
-            "errors": {}
+            "source": "binance_websocket_cache",
+            "timeframes": {"futures": {}, "spot": {}},
+            "orderbooks": {"futures": {}, "spot": {}},
+            "errors": {},
         }
-
-        market_domains = {
-            "futures": "futures",
-            "spot": "spot"
-        }
-
-        selected_domains = (set(market_domains.values()) if domains is None
-                            else set(domains))
-        unknown_domains = selected_domains.difference(market_domains.values())
-        if unknown_domains:
-            raise ValueError("Unknown market domain(s): " + ", ".join(sorted(unknown_domains)))
-
-        for market, domain in market_domains.items():
-            if domain not in selected_domains:
-                continue
-            frames = self.timeframes[domain]
-
-            try:
-                snapshot = self.binance.fetch_snapshot(
-                    market=market,
-                    symbol=symbol,
-                    timeframes=frames,
-                    candle_limit=500,
-                    orderbook_limit=100
-                )
-
-                for timeframe, error in snapshot.get("errors", {}).items():
-                    result["errors"][f"{market}_{timeframe}"] = error
-
-                result["orderbooks"][domain] = snapshot.get(
-                    "orderbook", {}
-                )
-
-                for timeframe, df in snapshot.get("candles", {}).items():
-                    try:
-                        prepared = self._prepare_frame(
-                            df, symbol, market, timeframe
-                        )
-                        result["timeframes"][domain][timeframe] = prepared
-
-                    except Exception as error:
-                        result["errors"][
-                            f"{market}_{timeframe}_processing"
-                        ] = str(error)
-
-            except Exception as error:
-                result["errors"][f"{market}_snapshot"] = str(error)
-
+        for domain in selected_domains:
+            snapshot = self.cache.snapshot(domain, symbol, self.timeframes[domain])
+            result["orderbooks"][domain] = snapshot.get("orderbook", {})
+            for timeframe, error in snapshot.get("errors", {}).items():
+                result["errors"][f"{domain}_{timeframe}"] = error
+            for timeframe, frame in snapshot.get("candles", {}).items():
+                try:
+                    result["timeframes"][domain][timeframe] = self._prepare_frame(
+                        frame, symbol, domain, timeframe)
+                except Exception as error:
+                    result["errors"][f"{domain}_{timeframe}_processing"] = str(error)
         return result
 
     def for_agent(self, market_data, domain):
