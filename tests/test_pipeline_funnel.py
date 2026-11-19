@@ -63,6 +63,17 @@ class TestPipelineFunnel(unittest.TestCase):
             self.assertEqual(snapshot["history"][0]["cycle_id"], first)
             self.assertTrue(snapshot["history"][0]["success"])
 
+    def test_repeated_scan_passes_do_not_inflate_cycle_completion(self):
+        funnel = PipelineFunnel()
+        funnel.start("spot", expected=20)
+        first = funnel.finish("spot", processed=18, expected=20)
+        self.assertEqual(first["completion_pct"], 90.0)
+        funnel.start("spot", expected=20)
+        second = funnel.finish("spot", processed=18, expected=20)
+        self.assertEqual(second["processed"], 18)
+        self.assertEqual(second["completion_pct"], 90.0)
+        self.assertFalse(second["success"])
+
     def test_cycles_are_aggregated_within_the_same_five_minute_candle(self):
         funnel = PipelineFunnel()
         first = funnel.start("futures", expected=20)
