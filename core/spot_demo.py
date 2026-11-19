@@ -91,6 +91,7 @@ class SpotDemoMixin:
                     self._funnel_record("spot", None, error=True,
                                         reason="Analysis data error", cycle_id=cycle_id)
                     continue
+                processed += 1
                 if not isinstance(signal, dict):
                     reject(symbol, "Missing Spot analysis")
                     continue
@@ -112,8 +113,6 @@ class SpotDemoMixin:
                 errors[symbol] = str(error)
                 self._funnel_record("spot", None, error=True,
                                     reason="Symbol analysis exception", cycle_id=cycle_id)
-            finally:
-                processed += 1
         result = self._finish_scan("spot", universe, opportunities, errors,
             rejections=rejections, rejection_samples=rejection_samples,
             cycle_id=cycle_id, processed=processed)
