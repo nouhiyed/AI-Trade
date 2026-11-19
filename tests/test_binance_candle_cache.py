@@ -1,3 +1,4 @@
+import time
 import unittest
 from unittest.mock import Mock
 
@@ -57,7 +58,8 @@ class TestBinanceCandleCache(unittest.TestCase):
 
     def test_streamed_quote_is_available_without_rest(self):
         self.cache._quotes[("futures", "BTCUSDT")] = {
-            "bid": 100.0, "ask": 101.0, "mid_price": 100.5}
+            "bid": 100.0, "ask": 101.0, "mid_price": 100.5,
+            "received_at": time.time()}
         self.assertEqual(self.cache.get_quote("futures", "BTCUSDT")["ask"], 101.0)
 
 
