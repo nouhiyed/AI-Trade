@@ -108,7 +108,7 @@ class TestTradingCoordinator(unittest.TestCase):
     def test_chart_submission_analyzes_only_selected_domain(self):
         calls = []
 
-        def analyze(symbol, preferred_timeframe=None, domains=None):
+        def analyze(symbol, preferred_timeframe=None, domains=None, profile='standard'):
             calls.append((symbol, preferred_timeframe, domains))
             return {"signals": {"futures": {
                 "symbol": symbol,
@@ -442,7 +442,7 @@ class TestTradingCoordinator(unittest.TestCase):
         ]
         calls = []
 
-        def analyze(symbol, preferred_timeframe=None, domains=None):
+        def analyze(symbol, preferred_timeframe=None, domains=None, profile='standard'):
             calls.append(domains)
             return {"signals": {"futures": {
                 "direction": "WAIT", "confidence": 0,
@@ -460,7 +460,7 @@ class TestTradingCoordinator(unittest.TestCase):
         ]
         calls = []
 
-        def analyze(symbol, preferred_timeframe=None, domains=None):
+        def analyze(symbol, preferred_timeframe=None, domains=None, profile='standard'):
             calls.append(domains)
             return {"signals": {"spot": {
                 "direction": "WAIT", "confidence": 0,
