@@ -97,7 +97,7 @@ class BinanceCandleCache:
         result = result.drop_duplicates("open_time").sort_values("open_time")
         result = result.tail(count).reset_index(drop=True)
         required = (minimum_rows if minimum_rows is not None else
-                    (30 if interval == "4h" else min(count, 200)))
+                    min(count, 200))
         if len(result) < required:
             raise RuntimeError(
                 f"Insufficient {interval} history for {symbol}: {len(result)} / {required}")
@@ -129,7 +129,7 @@ class BinanceCandleCache:
                 try:
                     four = self._fetch_history(
                         market, symbol, "4h", self.FOUR_HOUR_HISTORY,
-                        minimum_rows=30)
+                        minimum_rows=self.FOUR_HOUR_HISTORY)
                     with self._lock:
                         self._candles[key4] = four
                 except Exception as error:
