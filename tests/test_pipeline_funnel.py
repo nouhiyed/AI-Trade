@@ -34,6 +34,19 @@ class TestPipelineFunnel(unittest.TestCase):
         self.assertFalse(result["success"])
         self.assertEqual(result["fatal_errors"], 1)
 
+    def test_completed_five_minute_cycles_are_retained_in_history(self):
+        funnel = PipelineFunnel()
+        first = funnel.start("futures", expected=10)
+        result = funnel.finish("futures", processed=10, expected=10)
+        self.assertTrue(result["success"])
+        funnel._cycles["futures"]["candle_open"] -= 300
+        second = funnel.start("futures", expected=10)
+        self.assertNotEqual(first, second)
+        snapshot = funnel.snapshot("futures")
+        self.assertEqual(len(snapshot["history"]), 1)
+        self.assertEqual(snapshot["history"][0]["cycle_id"], first)
+        self.assertTrue(snapshot["history"][0]["success"])
+
     def test_cycles_are_aggregated_within_the_same_five_minute_candle(self):
         funnel = PipelineFunnel()
         first = funnel.start("futures", expected=20)
