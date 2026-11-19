@@ -33,6 +33,7 @@ class BinanceCandleCache:
         self._quotes = {}
         self._books = {}
         self._errors = {}
+        self._retry_after = {}
         self._symbols = {"spot": [], "futures": []}
         self._threads = []
         self._stop = threading.Event()
@@ -114,6 +115,8 @@ class BinanceCandleCache:
         with self._lock:
             if key1 in self._candles and key5 in self._candles:
                 return True
+            if self.clock() < self._retry_after.get((market, symbol), 0):
+                return False
         try:
             five_count = self.FIVE_MINUTE_HISTORY if market == "spot" else 800
             one = self._fetch_history(
@@ -125,6 +128,7 @@ class BinanceCandleCache:
                 self._candles[key1] = one
                 self._candles[key5] = five
                 self._errors.pop(f"{market}:{symbol}", None)
+                self._retry_after.pop((market, symbol), None)
             if market == "spot":
                 try:
                     four = self._fetch_history(
@@ -137,7 +141,12 @@ class BinanceCandleCache:
             return True
         except Exception as error:
             with self._lock:
-                self._errors[f"{market}:{symbol}"] = str(error)
+                message = str(error)
+                self._errors[f"{market}:{symbol}"] = message
+                if "Insufficient 5m history" in message or "Insufficient 1m history" in message:
+                    # A newly listed pair cannot yet provide the hourly EMA200
+                    # history. Avoid hammering REST every 30 seconds; retry hourly.
+                    self._retry_after[(market, symbol)] = self.clock() + 3600
             return False
 
     def warmup(self, symbols_by_market):
