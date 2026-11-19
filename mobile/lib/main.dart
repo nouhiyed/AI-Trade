@@ -428,6 +428,7 @@ class _TradeShellState extends State<TradeShell>
   String _apiVersion = '';
   Map<String, dynamic> demoData = {};
   Map<String, dynamic> agentControls = {};
+  Map<String, dynamic> _funnelData = {};
   final Set<String> closingPositionIds = {};
   final TextEditingController _telegramTokenController = TextEditingController();
   final TextEditingController _telegramChatController = TextEditingController();
@@ -506,6 +507,14 @@ class _TradeShellState extends State<TradeShell>
         return;
       }
       _applyStatus(data);
+      try {
+        final funnel = await ApiService.funnel();
+        if (mounted && funnel['cycles'] is Map) {
+          _funnelData = Map<String, dynamic>.from(funnel['cycles'] as Map);
+        }
+      } catch (_) {
+        // Keep the last known funnel visible if this optional panel is unavailable.
+      }
       final version = '${data['api_version'] ?? ''}';
       setState(() {
         _apiVersion = version;
@@ -1439,6 +1448,111 @@ class _TradeShellState extends State<TradeShell>
     );
   }
 
+  Widget _funnelCard() {
+    final futures = _funnelData['futures'] is Map
+        ? Map<String, dynamic>.from(_funnelData['futures'] as Map)
+        : <String, dynamic>{};
+    final spot = _funnelData['spot'] is Map
+        ? Map<String, dynamic>.from(_funnelData['spot'] as Map)
+        : <String, dynamic>{};
+    final stages = [
+      ('events_received', tr('الأحداث الواردة', 'Events received')),
+      ('passed_filter', tr('اجتازت الفلتر', 'Passed filter')),
+      ('strategy_accepted', tr('قبلتها الاستراتيجية', 'Strategy accepted')),
+      ('valid_plan', tr('خطة صالحة', 'Valid plan')),
+      ('risk_approved', tr('وافقت المخاطرة', 'Risk approved')),
+      ('trade_opened', tr('صفقات مفتوحة', 'Trades opened')),
+    ];
+    String value(Map<String, dynamic> cycle, String key) {
+      final values = cycle['stages'];
+      if (values is Map) return '${values[key] ?? 0}';
+      return '0';
+    }
+    Widget domainPanel(String title, Map<String, dynamic> cycle, Color accent) {
+      final complete = double.tryParse('${cycle['completion_pct'] ?? 0}') ?? 0;
+      final rejects = cycle['top_rejections'];
+      final errors = cycle['errors'] ?? 0;
+      final success = cycle['success'] == true;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Container(width: 7, height: 7, decoration: BoxDecoration(
+              color: accent, shape: BoxShape.circle)),
+            const SizedBox(width: 7),
+            Expanded(child: Text(title, style: TextStyle(
+              color: widget.text, fontWeight: FontWeight.w900, fontSize: 12))),
+            Text('${complete.toStringAsFixed(1)}%',
+              style: TextStyle(color: success ? green : widget.muted,
+                fontWeight: FontWeight.w900, fontSize: 11)),
+          ]),
+          const SizedBox(height: 8),
+          ClipRRect(borderRadius: BorderRadius.circular(8),
+            child: LinearProgressIndicator(value: (complete / 100).clamp(0.0, 1.0),
+              minHeight: 5, backgroundColor: widget.muted.withOpacity(.14),
+              valueColor: AlwaysStoppedAnimation<Color>(accent))),
+          const SizedBox(height: 7),
+          ...stages.map((stage) => Padding(
+            padding: const EdgeInsets.symmetric(vertical: 2),
+            child: Row(children: [
+              Expanded(child: Text(stage.$2, style: TextStyle(
+                color: widget.muted, fontSize: 10))),
+              Text(value(cycle, stage.$1), style: TextStyle(
+                color: widget.text, fontWeight: FontWeight.bold,
+                fontSize: 10, fontFeatures: const [])),
+            ]),
+          )),
+          const SizedBox(height: 4),
+          Text('${tr('الأخطاء', 'Errors')}: $errors  •  ${tr('الحد الأدنى للنجاح 95%', '95% cycle target')}',
+            style: TextStyle(color: widget.muted, fontSize: 9)),
+          if (rejects is List && rejects.isNotEmpty) ...[
+            const SizedBox(height: 5),
+            Text(tr('أكثر أسباب الرفض', 'Top rejection reasons'),
+              style: TextStyle(color: widget.text, fontSize: 10,
+                fontWeight: FontWeight.w800)),
+            ...rejects.take(3).map((item) {
+              if (item is! Map) return const SizedBox.shrink();
+              return Text('• ${item['reason'] ?? ''} (${item['count'] ?? 0})',
+                maxLines: 1, overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: widget.muted, fontSize: 9));
+            }),
+          ],
+        ],
+      );
+    }
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: widget.panel.withOpacity(.92),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: cyan.withOpacity(.20)),
+        boxShadow: [BoxShadow(color: cyan.withOpacity(.05), blurRadius: 18)],
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.filter_alt_rounded, color: cyan, size: 18),
+          const SizedBox(width: 7),
+          Expanded(child: Text(tr('لوحة قمع الإشارات', 'SIGNAL FUNNEL'),
+            style: TextStyle(color: widget.text, fontWeight: FontWeight.w900,
+              fontSize: 12, letterSpacing: .5))),
+          Text(tr('آخر دورة', 'LATEST CYCLE'),
+            style: TextStyle(color: widget.muted, fontSize: 8)),
+        ]),
+        const SizedBox(height: 12),
+        if (futures.isEmpty && spot.isEmpty)
+          Text(tr('بانتظار أول دورة مسح...', 'Waiting for the first scan cycle...'),
+            style: TextStyle(color: widget.muted, fontSize: 10))
+        else ...[
+          if (futures.isNotEmpty) domainPanel('FUTURES', futures, cyan),
+          if (futures.isNotEmpty && spot.isNotEmpty)
+            Padding(padding: const EdgeInsets.symmetric(vertical: 10),
+              child: Divider(color: widget.muted.withOpacity(.16), height: 1)),
+          if (spot.isNotEmpty) domainPanel('SPOT', spot, blue),
+        ],
+      ]),
+    );
+  }
+
   Widget _home() => ListView(
         key: const PageStorageKey('home'),
         padding: const EdgeInsets.fromLTRB(15, 0, 15, 22),
@@ -1448,6 +1562,9 @@ class _TradeShellState extends State<TradeShell>
           _hero(),
           const SizedBox(height: 15),
           _portfolioCard(),
+          const SizedBox(height: 12),
+          _funnelCard(),
+          const SizedBox(height: 12),
           _heading(
             tr('فريق الوكلاء', 'AGENT NETWORK'),
             '2 AGENTS',
