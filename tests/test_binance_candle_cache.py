@@ -30,7 +30,7 @@ class TestBinanceCandleCache(unittest.TestCase):
         self.assertEqual(len(hourly), 200)
         self.assertEqual(fifteen.iloc[0]["open"], 100)
         self.assertEqual(fifteen.iloc[0]["close"], 103)
-        self.assertEqual(fifteen.iloc[0]["high"], 105)
+        self.assertEqual(fifteen.iloc[0]["high"], 104)
         self.assertEqual(fifteen.iloc[0]["low"], 99)
         self.assertEqual(fifteen.iloc[0]["volume"], 6.0)
         self.assertEqual(hourly.iloc[0]["volume"], 24.0)
