@@ -12,6 +12,7 @@ from core.learning import setup_key
 
 DEFAULTS = {
     "enabled": False,
+    "profile": "standard",
     "interval_sec": 120,
     "min_confidence": 60.0,
     "max_concurrent": 3,
@@ -59,6 +60,11 @@ class Autopilot:
             if key not in DEFAULTS:
                 continue
             default = DEFAULTS[key]
+            if key == "profile":
+                profile = str(value or "standard").strip().lower()
+                if profile in ("standard", "explore"):
+                    self.config["profile"] = profile
+                continue
             if isinstance(default, bool):
                 if isinstance(value, bool):
                     self.config[key] = value
@@ -75,6 +81,9 @@ class Autopilot:
             lo, hi = LIMITS[key]
             number = min(max(number, lo), hi)
             self.config[key] = int(number) if isinstance(default, int) else number
+        if self.config.get("profile") == "explore":
+            self.config["risk_pct"] = min(
+                0.25, max(0.10, float(self.config.get("risk_pct", 0.25))))
         if persist:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self.path.write_text(json.dumps(self.config, indent=2))
@@ -99,7 +108,10 @@ class Autopilot:
         """Run one cycle and always publish its latest outcome."""
         with self._lock:
             cfg = dict(self.config)
+            if cfg.get("profile") == "explore":
+                cfg["risk_pct"] = min(0.25, max(0.10, float(cfg["risk_pct"])))
             result = {"status": "RUNNING", "phase": "starting",
+                      "profile": cfg.get("profile", "standard"),
                       "opened": [], "skipped": [], "scanned": 0,
                       "actionable": 0, "errors": 0, "cycle_success": True}
             self.last_run = int(self.clock())
@@ -244,7 +256,8 @@ class Autopilot:
                 strategy_tag = signal.get("strategy_tag") or "momentum"
                 key = setup_key(
                     direction, confidence, plan.get("reward_risk"), domain, strategy_tag)
-                if not self.c.learning.allows(key):
+                if (not self.c.learning.allows(key)
+                        and cfg.get("profile") != "explore"):
                     skip("Setup disabled by learning: " + key)
                     continue
 
@@ -263,6 +276,7 @@ class Autopilot:
 
                 signal = dict(signal)
                 signal["market_context"] = assessment
+                signal["profile"] = cfg.get("profile", "standard")
                 signal["entry_origin"] = "AUTOPILOT"
                 signal["setup_key"] = key
                 signal["confidence"] = confidence
