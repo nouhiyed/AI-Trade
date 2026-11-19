@@ -313,7 +313,9 @@ class TradingCoordinator(SpotDemoMixin):
             "spot": [item["symbol"] for item in spot],
         })
         requested = len(futures) + len(spot)
-        self.market_data_ready = warmed.get("warmed_symbols", 0) > 0
+        self.market_data_ready = (
+            requested > 0 and warmed.get("warmed_symbols", 0) >= requested * 0.95
+        )
         return {**warmed, "success": self.market_data_ready,
                 "universe": {"futures": len(futures), "spot": len(spot)},
                 "requested_symbols": requested}
@@ -1525,6 +1527,9 @@ class TradingCoordinator(SpotDemoMixin):
 
     def scan_futures(self, limit=None, min_quote_volume=None):
         """Scan Futures and retain per-stage funnel counts for this cycle."""
+        if self.market_universes.get("futures") and not self.market_data_ready:
+            return {"success": False, "reason": "Binance candle cache warmup is incomplete",
+                    "opportunities": [], "error_count": 1, "fatal_errors": 1}
         if not self._agent_enabled("futures"):
             return {"success": False, "reason": "Futures agent is stopped", "opportunities": []}
         try:
