@@ -147,7 +147,7 @@ class TestSpot(Base):
             }}}
 
         self.c.analyze_live = analyze
-        result = self.c.scan_spot()
+        result = self.c.scan_spot(limit=250)
 
         self.assertTrue(result["success"], result)
         self.assertEqual(result["scanned"], 30)
