@@ -23,6 +23,7 @@ from core.notifier import Notifier
 from core.chart_image import render_trade_chart
 from core.spot_demo import SpotDemoMixin
 from core.trailing_stop import calculate_trailing_stop
+from core.pipeline_funnel import PipelineFunnel
 
 
 class TradingCoordinator(SpotDemoMixin):
@@ -50,6 +51,7 @@ class TradingCoordinator(SpotDemoMixin):
         self._demo_position_locks = {}
         self._demo_position_locks_guard = threading.Lock()
         self.mode = "DEMO"
+        self.pipeline_funnel = PipelineFunnel()
         self.demo_state_path = Path("config/demo_state.json")
         self.demo_positions = self._load_demo_state()
 
@@ -276,6 +278,15 @@ class TradingCoordinator(SpotDemoMixin):
             ),
         }
 
+    def _funnel_record(self, domain, stage, count=1, reason=None,
+                       error=False, fatal=False, cycle_id=None):
+        return self.pipeline_funnel.record(
+            domain, stage, count=count, reason=reason, error=error,
+            fatal=fatal, cycle_id=cycle_id)
+
+    def get_pipeline_funnel(self, domain=None):
+        return self.pipeline_funnel.snapshot(domain)
+
     def _demo_market_price(self, symbol, market="futures"):
         quote = self.market_feed.fetch_book_ticker(market, symbol)
         price = Decimal(str(quote["mid_price"]))
@@ -407,8 +418,9 @@ class TradingCoordinator(SpotDemoMixin):
         return features
 
     def _validate_demo_entry_price(self, plan, direction, market_price,
-                                   min_net_rr=1.5, market="futures"):
-        """Reject stale fills that distort structural levels or net reward/risk."""
+                                   min_net_rr=1.5, market="futures",
+                                   signal_created_at=None, now=None):
+        """Validate 90s signal freshness, 0.3 ATR drift and structural net RR."""
         try:
             entry = Decimal(str(plan["entry"]))
             stop = Decimal(str(plan["stop_loss"]))
@@ -417,9 +429,13 @@ class TradingCoordinator(SpotDemoMixin):
             price = Decimal(str(market_price))
             if not all(v.is_finite() and v > 0 for v in (entry, stop, target, atr, price)):
                 return False, "Invalid plan or execution price"
-            max_drift = max(atr * Decimal("0.10"), entry * Decimal("0.0002"))
+            if signal_created_at is not None:
+                age = float(time.time() if now is None else now) - float(signal_created_at)
+                if age < 0 or age > 90:
+                    return False, "Signal expired: execution must occur within 90 seconds"
+            max_drift = atr * Decimal("0.3")
             if abs(price - entry) > max_drift:
-                return False, "Entry moved more than 0.10 ATR after confirmation; wait for a new setup"
+                return False, "Price drift exceeds 0.3 ATR from the signal entry"
             if str(direction).upper() == "SHORT":
                 if not target < price < stop:
                     return False, "Live price invalidated the SHORT structure"
@@ -1046,7 +1062,8 @@ class TradingCoordinator(SpotDemoMixin):
 
             market_price = self._demo_market_price(symbol)
             valid_entry, entry_reason = self._validate_demo_entry_price(
-                plan, direction, market_price, min_net_rr=1.5, market="futures"
+                plan, direction, market_price, min_net_rr=1.5, market="futures",
+                signal_created_at=signal.get("_signal_created_at"),
             )
             if not valid_entry:
                 self.risk.release_reservation(trade_id)
@@ -1234,6 +1251,8 @@ class TradingCoordinator(SpotDemoMixin):
                 )
 
                 signal = agent.analyze(agent_data)
+                if isinstance(signal, dict):
+                    signal["_signal_created_at"] = time.time()
                 direction = str(signal.get("direction", "WAIT")).upper() if isinstance(signal, dict) else "WAIT"
                 # V3 is the sole strategy. Its own cost-adjusted plan is authoritative;
                 # never fall back to the retired structural planner or legacy agent rules.
@@ -1454,65 +1473,55 @@ class TradingCoordinator(SpotDemoMixin):
         }
 
     def scan_futures(self, limit=None, min_quote_volume=None):
-        """Analyze every eligible USDT perpetual by default; rank valid signals only."""
+        """Scan Futures and retain per-stage funnel counts for this cycle."""
         if not self._agent_enabled("futures"):
-            return {
-                "success": False,
-                "reason": "Futures agent is stopped",
-                "opportunities": [],
-            }
-
+            return {"success": False, "reason": "Futures agent is stopped", "opportunities": []}
         try:
             universe = self.market_scanner.scan_universe(
-                limit=limit,
-                min_quote_volume=min_quote_volume,
-            )
+                limit=limit, min_quote_volume=min_quote_volume)
         except Exception as error:
-            return {
-                "success": False,
-                "reason": "Market universe scan failed: " + str(error),
-                "opportunities": [],
-            }
-
-        scan_meta = {
-            "universe_total": len(universe),
-            "batch_size": len(universe),
-            "cycle": 0,
-            "cycle_complete": True,
-        }
+            cycle_id = self.pipeline_funnel.start("futures", 0)
+            self._funnel_record("futures", "events_received", reason=str(error),
+                                error=True, fatal=True, cycle_id=cycle_id)
+            funnel = self.pipeline_funnel.finish("futures", 0, 0, fatal=True)
+            return {"success": False, "reason": "Market universe scan failed: " + str(error),
+                    "opportunities": [], "errors": {"__universe__": str(error)},
+                    "error_count": 1, "fatal_errors": 1, "funnel": funnel}
+        scan_meta = {"universe_total": len(universe), "batch_size": len(universe),
+                     "cycle": 0, "cycle_complete": True}
         if limit is None:
             from core.scan_rotation import next_scan_batch
-            universe, scan_meta = next_scan_batch(
-                "futures", universe, batch_size=20
-            )
-
-        opportunities = []
-        errors = {}
-        rejections = {}
-        rejection_samples = []
-
+            universe, scan_meta = next_scan_batch("futures", universe, batch_size=20)
+        cycle_id = self.pipeline_funnel.start("futures", len(universe), "5m")
+        opportunities, errors, rejections, rejection_samples = [], {}, {}, []
         def reject(reason, symbol):
             key = str(reason or "No actionable signal")
             rejections[key] = rejections.get(key, 0) + 1
+            self._funnel_record("futures", "events_received", reason=key, cycle_id=cycle_id)
             if len(rejection_samples) < 12:
                 rejection_samples.append({"symbol": symbol, "reason": key})
-
+        processed = 0
         for item in universe:
             symbol = item["symbol"]
+            self._funnel_record("futures", "events_received", cycle_id=cycle_id)
             try:
                 analysis = self.analyze_live(symbol, domains=["futures"])
                 signal = analysis.get("signals", {}).get("futures", {})
                 if not isinstance(signal, dict):
                     reject("Missing Futures analysis", symbol)
                     continue
-
+                if signal.get("error") or analysis.get("data_errors"):
+                    errors[symbol] = str(signal.get("error") or analysis.get("data_errors"))
+                    self._funnel_record("futures", "errors", error=True,
+                                        reason="Analysis data error", cycle_id=cycle_id)
+                    continue
+                self._funnel_record("futures", "passed_filter", cycle_id=cycle_id)
                 direction = str(signal.get("direction", "WAIT")).upper()
                 confidence = float(signal.get("confidence", 0) or 0)
-
                 if direction not in ("LONG", "SHORT"):
                     reject(signal.get("reason") or "Signal is WAIT", symbol)
                     continue
-
+                self._funnel_record("futures", "strategy_accepted", cycle_id=cycle_id)
                 trade_plan = signal.get("trade_plan")
                 if signal.get("strategy_version") != "v3" or not isinstance(trade_plan, dict) or trade_plan.get("strategy_version") != "v3":
                     reject("Only V3 signals and plans are eligible", symbol)
@@ -1520,42 +1529,28 @@ class TradingCoordinator(SpotDemoMixin):
                 if trade_plan.get("success") is not True:
                     reject(trade_plan.get("reason") or "Trade plan rejected", symbol)
                     continue
-
-                opportunities.append({
-                    **item,
-                    "direction": direction,
-                    "confidence": confidence,
-                    "trade_plan": trade_plan,
-                    "signal": signal,
-                })
+                self._funnel_record("futures", "valid_plan", cycle_id=cycle_id)
+                signal["_funnel_cycle_id"] = cycle_id
+                opportunities.append({**item, "direction": direction,
+                    "confidence": confidence, "trade_plan": trade_plan,
+                    "signal": signal, "scan_cycle_id": cycle_id})
             except Exception as error:
                 errors[symbol] = str(error)
-
-        opportunities.sort(
-            key=lambda item: (
-                item["confidence"],
-                item["quote_volume"],
-            ),
-            reverse=True,
-        )
-
-        # Keep the selected symbol's signal as the latest Futures signal.
+                self._funnel_record("futures", "errors", error=True,
+                                    reason="Symbol analysis exception", cycle_id=cycle_id)
+            finally:
+                processed += 1
+        opportunities.sort(key=lambda item: (item["confidence"], item["quote_volume"]), reverse=True)
         if opportunities:
             self.last_signals["futures"] = opportunities[0]["signal"]
-
-        return {
-            "success": True,
-            "scanned": len(universe),
+        funnel = self.pipeline_funnel.finish("futures", processed, len(universe))
+        return {"success": bool(funnel["success"]), "scanned": len(universe),
             "actionable": len(opportunities),
-            "selected": (
-                opportunities[0]["symbol"] if opportunities else None
-            ),
-            "opportunities": opportunities,
-            "errors": errors,
-            "rejections": rejections,
-            "rejection_samples": rejection_samples,
-            "scan": scan_meta,
-        }
+            "selected": opportunities[0]["symbol"] if opportunities else None,
+            "opportunities": opportunities, "errors": errors,
+            "error_count": len(errors), "fatal_errors": funnel["fatal_errors"],
+            "rejections": rejections, "rejection_samples": rejection_samples,
+            "scan": scan_meta, "funnel": funnel}
 
     def analyze_all(self, market_data):
         results = {}
