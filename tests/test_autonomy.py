@@ -172,7 +172,7 @@ class TestAutopilot(Base):
 
     def test_explore_profile_uses_small_risk_tags_trade_and_ignores_learning_disable(self):
         self._scan([("BTCUSDT", 80)])
-        key = setup_key("LONG", 80, 2.0, "futures", "v3_micro_pullback")
+        key = setup_key("LONG", 80, 2.0, "futures", "momentum")
         self.c.journal.set_setup_disabled(key, True, "standard profile sample")
         ap = Autopilot(self.c, config_path="config/ap-explore.json")
         ap.update({"enabled": True, "profile": "explore", "risk_pct": 0.8})
