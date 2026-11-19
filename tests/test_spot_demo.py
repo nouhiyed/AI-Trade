@@ -139,7 +139,7 @@ class TestSpot(Base):
         self.feed._request = lambda market, path, params: tickers
         analyzed = []
 
-        def analyze(symbol, domains):
+        def analyze(symbol, domains, profile='standard'):
             analyzed.append(symbol)
             return {"signals": {"spot": {
                 "symbol": symbol, "direction": "WAIT",
