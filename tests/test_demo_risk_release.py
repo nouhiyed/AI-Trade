@@ -22,6 +22,7 @@ class TestDemoRiskRelease(unittest.TestCase):
         self.c = TradingCoordinator(initial_balance=1000)
         self.feed = Feed()
         self.c.market_feed = self.feed
+        self.c.market_engine.get_book_ticker = self.feed.fetch_book_ticker
 
     def tearDown(self):
         self.c.demo_database.connection.close()
