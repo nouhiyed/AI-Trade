@@ -531,7 +531,31 @@ class TradingCoordinator(SpotDemoMixin):
             )
             record["timeframe"] = str(timeframe).lower()
             record["profile"] = str(signal.get("profile") or "standard")
+            actual_entry = float(record.get("entry_price") or record.get("entry") or 0)
+            signal_entry = float(plan.get("entry") or actual_entry)
+            atr = float(plan.get("atr") or 0)
+            signal_created_at = float(signal.get("_signal_created_at") or 0)
+            execution_metrics = {
+                "signal_entry": signal_entry,
+                "actual_entry": actual_entry,
+                "entry_delta": actual_entry - signal_entry,
+                "entry_delta_pct": (
+                    (actual_entry - signal_entry) / signal_entry * 100
+                    if signal_entry else None),
+                "entry_drift_atr": (
+                    abs(actual_entry - signal_entry) / atr if atr > 0 else None),
+                "entry_delay_seconds": (
+                    max(0.0, time.time() - signal_created_at)
+                    if signal_created_at > 0 else None),
+            }
+            record.update({
+                "signal_entry_price": signal_entry,
+                "entry_delta_pct": execution_metrics["entry_delta_pct"],
+                "entry_drift_atr": execution_metrics["entry_drift_atr"],
+                "entry_delay_seconds": execution_metrics["entry_delay_seconds"],
+            })
             context = {
+                "execution": execution_metrics,
                 "profile": record["profile"],
                 "confidence": signal.get("confidence"),
                 "scores": signal.get("scores"),
