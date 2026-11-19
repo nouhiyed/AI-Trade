@@ -168,6 +168,10 @@ class MarketDataEngine:
             snapshot = self.cache.snapshot(domain, symbol, self.timeframes[domain])
             result["orderbooks"][domain] = snapshot.get("orderbook", {})
             for timeframe, error in snapshot.get("errors", {}).items():
+                # V3 Spot uses 4h only as optional additional context; its
+                # mandatory inputs are 1m, 5m, 15m and the derived 1h frame.
+                if domain == "spot" and timeframe == "4h":
+                    continue
                 result["errors"][f"{domain}_{timeframe}"] = error
             for timeframe, frame in snapshot.get("candles", {}).items():
                 try:
