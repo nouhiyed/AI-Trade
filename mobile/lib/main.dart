@@ -1499,7 +1499,7 @@ class _TradeShellState extends State<TradeShell>
                 color: widget.muted, fontSize: 10))),
               Text(value(cycle, stage.$1), style: TextStyle(
                 color: widget.text, fontWeight: FontWeight.bold,
-                fontSize: 10, fontFeatures: const [])),
+                fontSize: 10)),
             ]),
           )),
           const SizedBox(height: 4),
