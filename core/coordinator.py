@@ -453,8 +453,10 @@ class TradingCoordinator(SpotDemoMixin):
 
     def _validate_demo_entry_price(self, plan, direction, market_price,
                                    min_net_rr=1.5, market="futures",
-                                   signal_created_at=None, now=None):
-        """Validate 90s signal freshness, 0.3 ATR drift and structural net RR."""
+                                   signal_created_at=None, now=None,
+                                   profile="standard"):
+        """Validate profile freshness/drift while never bypassing valid SL/TP geometry."""
+
         try:
             entry = Decimal(str(plan["entry"]))
             stop = Decimal(str(plan["stop_loss"]))
@@ -465,9 +467,11 @@ class TradingCoordinator(SpotDemoMixin):
                 return False, "Invalid plan or execution price"
             if signal_created_at is not None:
                 age = float(time.time() if now is None else now) - float(signal_created_at)
-                if age < 0 or age > 90:
-                    return False, "Signal expired: execution must occur within 90 seconds"
-            max_drift = atr * Decimal("0.3")
+                max_age = 120 if str(profile).lower() == "explore" else 90
+                if age < 0 or age > max_age:
+                    return False, f"Signal expired: execution must occur within {max_age} seconds"
+            drift_multiple = Decimal("0.5") if str(profile).lower() == "explore" else Decimal("0.3")
+            max_drift = atr * drift_multiple
             if abs(price - entry) > max_drift:
                 return False, "Price moved beyond 0.3 ATR from the signal entry"
             if str(direction).upper() == "SHORT":
@@ -1108,6 +1112,7 @@ class TradingCoordinator(SpotDemoMixin):
             valid_entry, entry_reason = self._validate_demo_entry_price(
                 plan, direction, market_price, min_net_rr=1.5, market="futures",
                 signal_created_at=signal.get("_signal_created_at"),
+                profile=signal.get("profile", "standard"),
             )
             if not valid_entry:
                 self.risk.release_reservation(trade_id)
