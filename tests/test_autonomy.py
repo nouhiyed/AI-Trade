@@ -181,6 +181,9 @@ class TestAutopilot(Base):
         self.assertEqual(len(out["opened"]), 1, out)
         trade = self.c.demo_positions[out["opened"][0]["trade_id"]]
         self.assertEqual(trade["profile"], "explore")
+        self.assertIsNotNone(trade["entry_drift_atr"])
+        self.assertIsNotNone(trade["entry_delay_seconds"])
+        self.assertIn("execution", trade["context"])
         row = self.c.journal.recent()[0]
         self.assertEqual(row["profile"], "explore")
         self.assertEqual(out["profile"], "explore")
