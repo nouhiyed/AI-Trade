@@ -1471,6 +1471,7 @@ class _TradeShellState extends State<TradeShell>
     Widget domainPanel(String title, Map<String, dynamic> cycle, Color accent) {
       final complete = double.tryParse('${cycle['completion_pct'] ?? 0}') ?? 0;
       final rejects = cycle['top_rejections'];
+      final history = cycle['history'];
       final errors = cycle['errors'] ?? 0;
       final success = cycle['success'] == true;
       return Column(
@@ -1515,6 +1516,30 @@ class _TradeShellState extends State<TradeShell>
               return Text('• ${item['reason'] ?? ''} (${item['count'] ?? 0})',
                 maxLines: 1, overflow: TextOverflow.ellipsis,
                 style: TextStyle(color: widget.muted, fontSize: 9));
+            }),
+          ],
+          if (history is List && history.isNotEmpty) ...[
+            const SizedBox(height: 7),
+            Text(tr('الدورات السابقة', 'Previous 5m cycles'),
+              style: TextStyle(color: widget.text, fontSize: 10,
+                fontWeight: FontWeight.w800)),
+            ...history.reversed.take(3).map((item) {
+              if (item is! Map) return const SizedBox.shrink();
+              final priorStages = item['stages'] is Map
+                  ? item['stages'] as Map : const {};
+              final priorPct = double.tryParse('${item['completion_pct'] ?? 0}') ?? 0;
+              final priorTrades = priorStages['trade_opened'] ?? 0;
+              final priorSuccess = item['success'] == true;
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 1),
+                child: Row(children: [
+                  Expanded(child: Text(
+                    '${priorPct.toStringAsFixed(1)}% · ${priorTrades} ${tr('صفقات', 'trades')}',
+                    style: TextStyle(color: widget.muted, fontSize: 9))),
+                  Icon(priorSuccess ? Icons.check_circle : Icons.error_outline,
+                    size: 11, color: priorSuccess ? green : red),
+                ]),
+              );
             }),
           ],
         ],
