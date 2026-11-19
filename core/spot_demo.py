@@ -31,7 +31,7 @@ class SpotDemoMixin:
 
     # ---- scanning ----------------------------------------------------------------
 
-    def scan_spot(self, limit=None, min_quote_volume=None):
+    def scan_spot(self, limit=None, min_quote_volume=None, profile="standard"):
         if self.market_universes.get("spot") and not self.market_data_ready:
             return {"success": False, "reason": "Binance candle cache warmup is incomplete",
                     "opportunities": [], "error_count": 1, "fatal_errors": 1}
@@ -91,7 +91,8 @@ class SpotDemoMixin:
             symbol = item["symbol"]
             self._funnel_record("spot", "events_received", cycle_id=cycle_id)
             try:
-                analysis = self.analyze_live(symbol, domains=["spot"])
+                analysis = self.analyze_live(
+                    symbol, domains=["spot"], profile=profile)
                 signal = analysis.get("signals", {}).get("spot", {})
                 if analysis.get("data_errors") or (
                     isinstance(signal, dict) and signal.get("error")
