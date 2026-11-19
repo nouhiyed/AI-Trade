@@ -45,7 +45,7 @@ class SpotDemoMixin:
             cycle_id = self.pipeline_funnel.start("spot", 0)
             self._funnel_record("spot", None, reason=str(error), error=True,
                                 fatal=True, cycle_id=cycle_id)
-            funnel = self.pipeline_funnel.finish("spot", 0, 0, fatal=True)
+            funnel = self.pipeline_funnel.finish("spot", 0, 0)
             return {"success": False, "reason": "Spot universe scan failed: " + str(error),
                     "opportunities": [], "errors": {"__universe__": str(error)},
                     "error_count": 1, "fatal_errors": 1, "funnel": funnel}
