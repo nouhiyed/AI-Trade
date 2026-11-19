@@ -12,6 +12,7 @@ from core.learning import setup_key
 
 DEFAULTS = {
     "enabled": False,
+    "profile": "standard",
     "interval_sec": 120,
     "min_confidence": 60.0,
     "max_concurrent": 3,
@@ -59,6 +60,11 @@ class Autopilot:
             if key not in DEFAULTS:
                 continue
             default = DEFAULTS[key]
+            if key == "profile":
+                profile = str(value or "standard").strip().lower()
+                if profile in ("standard", "explore"):
+                    self.config["profile"] = profile
+                continue
             if isinstance(default, bool):
                 if isinstance(value, bool):
                     self.config[key] = value
@@ -75,6 +81,9 @@ class Autopilot:
             lo, hi = LIMITS[key]
             number = min(max(number, lo), hi)
             self.config[key] = int(number) if isinstance(default, int) else number
+        if self.config.get("profile") == "explore":
+            self.config["risk_pct"] = min(
+                0.25, max(0.10, float(self.config.get("risk_pct", 0.25))))
         if persist:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self.path.write_text(json.dumps(self.config, indent=2))
@@ -99,9 +108,12 @@ class Autopilot:
         """Run one cycle and always publish its latest outcome."""
         with self._lock:
             cfg = dict(self.config)
+            if cfg.get("profile") == "explore":
+                cfg["risk_pct"] = min(0.25, max(0.10, float(cfg["risk_pct"])))
             result = {"status": "RUNNING", "phase": "starting",
+                      "profile": cfg.get("profile", "standard"),
                       "opened": [], "skipped": [], "scanned": 0,
-                      "actionable": 0}
+                      "actionable": 0, "errors": 0, "cycle_success": True}
             self.last_run = int(self.clock())
             self.last_result = dict(result)
 
@@ -128,9 +140,11 @@ class Autopilot:
                 # scan_limit is retained only for backward-compatible config reads;
                 # it must never cap the market universe.
                 if cfg["trade_futures"]:
-                    sources.append(("futures", lambda: self.c.scan_futures()))
+                    sources.append(("futures", lambda: self.c.scan_futures(
+                        profile=cfg.get("profile", "standard"))))
                 if cfg["trade_spot"]:
-                    sources.append(("spot", lambda: self.c.scan_spot()))
+                    sources.append(("spot", lambda: self.c.scan_spot(
+                        profile=cfg.get("profile", "standard"))))
 
                 # Scan every enabled market independently. One failed scanner or
                 # domain processor must not hide results from the other domains.
@@ -144,12 +158,21 @@ class Autopilot:
                             raise TypeError("Scanner returned an invalid response")
                         result["scanned"] += scan.get("scanned") or 0
                         result["actionable"] += scan.get("actionable") or 0
+                        result["errors"] += scan.get("error_count") or 0
+                        result["cycle_success"] = (
+                            result["cycle_success"] and scan.get("success") is True
+                        )
                         if scan.get("rejections"):
                             result.setdefault("rejections", {})[domain] = scan["rejections"]
                         if scan.get("rejection_samples"):
                             result.setdefault("rejection_samples", []).extend(
                                 scan["rejection_samples"][:8])
-                        if not scan.get("success"):
+                        # Per-symbol errors are reported separately. A partial
+                        # cycle may still execute its valid opportunities; only a
+                        # fatal universe/feed failure blocks the whole domain.
+                        if scan.get("fatal_errors", 0) > 0 or (
+                            not scan.get("success") and not scan.get("opportunities")
+                        ):
                             result["skipped"].append({
                                 "domain": domain,
                                 "reason": scan.get("reason", "Scan failed"),
@@ -184,17 +207,27 @@ class Autopilot:
 
     def _process(self, domain, scan, cfg, open_symbols, slots, result):
         for opp in scan.get("opportunities", []):
-            if slots <= 0:
-                break
             symbol = str(opp.get("symbol", "")).upper()
+            if slots <= 0:
+                reason = "Max concurrent trades reached"
+                result["skipped"].append({
+                    "domain": domain, "symbol": symbol, "reason": reason})
+                self.c._funnel_record(
+                    domain, None, reason=reason,
+                    cycle_id=(opp.get("signal") or {}).get("_funnel_cycle_id"))
+                continue
             try:
                 direction = str(opp["direction"]).upper()
                 signal, plan = opp["signal"], opp["trade_plan"]
                 confidence = float(opp.get("confidence") or 0)
 
                 def skip(reason):
+                    reason = str(reason)
                     result["skipped"].append({
-                        "domain": domain, "symbol": symbol, "reason": str(reason)})
+                        "domain": domain, "symbol": symbol, "reason": reason})
+                    self.c._funnel_record(
+                        domain, None, reason=reason,
+                        cycle_id=signal.get("_funnel_cycle_id"))
 
                 if not symbol:
                     skip("Missing symbol")
@@ -206,33 +239,17 @@ class Autopilot:
                     skip("Cooldown after a recent trade")
                     continue
 
-                # Rebuild analysis from fresh, closed Binance candles immediately
-                # before execution. Scanner opportunities may be stale by the time
-                # the autopilot reaches them.
-                fresh = self.c.analyze_live(symbol, domains=[domain])
-                fresh_signal = (fresh.get("signals") or {}).get(domain)
-                if not isinstance(fresh_signal, dict):
-                    skip("Fresh pre-entry analysis is unavailable")
-                    continue
-                fresh_direction = str(fresh_signal.get("direction", "WAIT")).upper()
-                normalized_direction = "LONG" if fresh_direction == "BUY" else fresh_direction
-                if normalized_direction != direction:
-                    skip("Direction changed during pre-entry confirmation")
-                    continue
-                fresh_plan = fresh_signal.get("trade_plan")
-                if fresh_signal.get("strategy_version") != "v3" or not isinstance(fresh_plan, dict) or fresh_plan.get("strategy_version") != "v3":
-                    skip("Fresh analysis is not an approved V3 signal and plan")
-                    continue
-                if fresh_plan.get("success") is not True:
-                    skip(fresh_plan.get("reason") or
-                         "Fresh V3 confirmation failed; waiting for a better entry")
-                    continue
-                signal, plan = fresh_signal, fresh_plan
-                confidence = float(signal.get("confidence") or 0)
-
-                if confidence < float(cfg["min_confidence"]):
-                    skip("Fresh confidence below minimum")
-                    continue
+                # Execute the already-approved scan opportunity immediately.
+                # Freshness and price drift are checked against the streamed
+                # bid/ask at the execution boundary (90s / 0.3 ATR); re-running
+                # the full strategy here used to invalidate otherwise valid
+                # signals and introduced a second REST analysis request.
+                signal = dict(signal)
+                if not signal.get("_signal_created_at"):
+                    signal["_signal_created_at"] = self.clock()
+                signal["_funnel_cycle_id"] = (
+                    signal.get("_funnel_cycle_id") or opp.get("scan_cycle_id"))
+                confidence = float(signal.get("confidence") or confidence)
 
                 if confidence < float(cfg["min_confidence"]):
                     skip("Confidence below minimum")
@@ -241,7 +258,8 @@ class Autopilot:
                 strategy_tag = signal.get("strategy_tag") or "momentum"
                 key = setup_key(
                     direction, confidence, plan.get("reward_risk"), domain, strategy_tag)
-                if not self.c.learning.allows(key):
+                if (not self.c.learning.allows(key)
+                        and cfg.get("profile") != "explore"):
                     skip("Setup disabled by learning: " + key)
                     continue
 
@@ -260,6 +278,7 @@ class Autopilot:
 
                 signal = dict(signal)
                 signal["market_context"] = assessment
+                signal["profile"] = cfg.get("profile", "standard")
                 signal["entry_origin"] = "AUTOPILOT"
                 signal["setup_key"] = key
                 signal["confidence"] = confidence
@@ -292,10 +311,13 @@ class Autopilot:
                     skip(trade.get("reason", "Rejected"))
             except Exception as error:
                 # Isolate malformed opportunities and transient agent errors.
+                reason = "Opportunity processing error: " + str(error)
                 result["skipped"].append({
-                    "domain": domain, "symbol": symbol,
-                    "reason": "Opportunity processing error: " + str(error),
+                    "domain": domain, "symbol": symbol, "reason": reason,
                 })
+                self.c._funnel_record(
+                    domain, None, reason=reason,
+                    cycle_id=(opp.get("signal") or {}).get("_funnel_cycle_id"))
         return slots
 
     def run_forever(self, stop_event=None):

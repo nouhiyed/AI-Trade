@@ -174,9 +174,12 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
   Widget _autopilotCard() {
     final cfg = _map(_auto['config']);
     final enabled = cfg['enabled'] == true;
+    final profile = '${cfg['profile'] ?? 'standard'}'.toLowerCase();
+    final explore = profile == 'explore';
     final minConf = (double.tryParse('${cfg['min_confidence']}') ?? 60.0).clamp(25.0, 100.0).toDouble();
     final maxConc = (double.tryParse('${cfg['max_concurrent']}') ?? 3.0).clamp(1.0, 5.0).toDouble();
-    final risk = (double.tryParse('${cfg['risk_pct']}') ?? 0.5).clamp(0.1, 1.0).toDouble();
+    final risk = (double.tryParse('${cfg['risk_pct']}') ?? 0.5)
+        .clamp(0.1, explore ? 0.25 : 1.0).toDouble();
     final last = _map(_auto['last_result']);
     final opened = last['opened'] is List ? (last['opened'] as List).length : 0;
     final rejections = _map(last['rejections']);
@@ -246,6 +249,27 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
         Wrap(
           spacing: 8,
           children: [
+            ChoiceChip(
+              label: Text(t('عادي', 'STANDARD')),
+              selected: !explore,
+              onSelected: _serverOnline && !_autoSaving ? (_) {
+                _setAuto({'profile': 'standard'});
+              } : null,
+            ),
+            ChoiceChip(
+              label: Text(t('استكشاف', 'EXPLORE')),
+              selected: explore,
+              selectedColor: Colors.orange.withOpacity(.18),
+              onSelected: _serverOnline && !_autoSaving ? (_) {
+                final nextRisk = risk.clamp(0.1, 0.25).toDouble();
+                setState(() {
+                  cfg['profile'] = 'explore';
+                  cfg['risk_pct'] = nextRisk;
+                  _auto['config'] = cfg;
+                });
+                _setAuto({'profile': 'explore', 'risk_pct': nextRisk});
+              } : null,
+            ),
             for (final m in const ['futures', 'spot'])
               FilterChip(
                 label: Text(m.toUpperCase(), style: const TextStyle(fontSize: 11)),
@@ -264,7 +288,14 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
         slider(t('أدنى ثقة', 'Min confidence'), minConf, 25, 100, 15, 'min_confidence'),
         slider(t('أقصى صفقات متزامنة', 'Max concurrent trades'), maxConc, 1, 5, 4,
             'max_concurrent', asInt: true),
-        slider(t('المخاطرة لكل صفقة %', 'Risk per trade %'), risk, 0.1, 1.0, 9, 'risk_pct'),
+        if (explore)
+          Text(
+            t('وضع جمع بيانات فقط: المخاطرة 0.10–0.25%، يخفف فيتو 4h/1h ونافذة الدخول؛ تبقى خطة V3 والوقف والهدف إلزامية.',
+              'Data collection only: 0.10–0.25% risk; relaxes the 4h/1h context veto and entry window. V3 plan, stop and target remain mandatory.'),
+            style: const TextStyle(color: Colors.orange, fontSize: 10),
+          ),
+        slider(t('المخاطرة لكل صفقة %', 'Risk per trade %'), risk, 0.1,
+            explore ? 0.25 : 1.0, explore ? 3 : 9, 'risk_pct'),
         Row(
           children: [
             OutlinedButton.icon(
@@ -322,10 +353,29 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
   Widget _metricsCard() {
     final o = _map(_perf['overall']);
     final net = double.tryParse('${o['net_pnl']}') ?? 0;
+    final standardTrades = int.tryParse('${_perf['standard_trades'] ?? o['trades'] ?? 0}') ?? 0;
+    final exploreTrades = int.tryParse('${_perf['explore_trades'] ?? 0}') ?? 0;
     return _card(Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _title(t('الأداء', 'Performance')),
+        Text(
+          t('مؤشرات الربحية تعرض Standard فقط. صفقات Explore منفصلة ولا تدخل في الحكم على الأداء.',
+            'Profitability metrics show Standard only. Explore trades are separate and excluded from performance judgments.'),
+          style: TextStyle(color: widget.muted, fontSize: 10),
+        ),
+        const SizedBox(height: 5),
+        Text(
+          '${t('Standard', 'Standard')}: $standardTrades / 150   •   Explore: $exploreTrades',
+          style: TextStyle(color: widget.muted, fontSize: 10, fontWeight: FontWeight.w700),
+        ),
+        if (standardTrades < 150)
+          Text(
+            t('لا تحكم على الربحية قبل 150 صفقة Standard ومقارنة بخط أساس عشوائي.',
+              'Do not assess profitability before 150 Standard trades and a random baseline comparison.'),
+            style: const TextStyle(color: Colors.orange, fontSize: 10),
+          ),
+        const SizedBox(height: 8),
         Wrap(
           runSpacing: 12,
           spacing: 6,
@@ -509,8 +559,11 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
                               ),
                             ),
                             Text(
-                              '${trade['direction'] ?? ''} · ${trade['close_reason'] ?? 'CLOSED'} · ${t('عرض التشارت والتفاصيل', 'View chart & details')}',
-                              style: TextStyle(color: widget.muted, fontSize: 10),
+                              '${(trade['profile'] ?? 'standard').toString().toUpperCase()} · ${trade['direction'] ?? ''} · ${trade['close_reason'] ?? 'CLOSED'} · ${t('عرض التشارت والتفاصيل', 'View chart & details')}',
+                              style: TextStyle(
+                                color: '${trade['profile'] ?? 'standard'}' == 'explore'
+                                    ? Colors.orange : widget.muted,
+                                fontSize: 10),
                             ),
                           ],
                         ),

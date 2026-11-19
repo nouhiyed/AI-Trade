@@ -315,6 +315,17 @@ class APIHandler(BaseHTTPRequestHandler):
                     })
                 limit = min(max(int(params.get("limit", ["50"])[0]), 1), 500)
                 return self.send_json({"trades": coordinator.journal.recent(limit)})
+            if path == "/funnel":
+                domain = params.get("domain", [None])[0]
+                return self.send_json({
+                    "success": True,
+                    "cycles": coordinator.get_pipeline_funnel(domain),
+                })
+            if path == "/market-data":
+                return self.send_json({
+                    "ready": coordinator.market_data_ready,
+                    **coordinator.market_engine.cache.status(),
+                })
             if path == "/learning":
                 return self.send_json(coordinator.learning.report())
             if path == "/autopilot":
@@ -358,7 +369,11 @@ class APIHandler(BaseHTTPRequestHandler):
                     "api_version": API_VERSION,
                     "system": coordinator.get_system_status(),
                     "controls": coordinator.get_agent_controls(),
-                    "demo": coordinator.get_demo_positions()
+                    "demo": coordinator.get_demo_positions(),
+                    "market_data": {
+                        "ready": coordinator.market_data_ready,
+                        "cache": coordinator.market_engine.cache.status(),
+                    },
                 })
             return self.send_json({"error": "Not found"}, 404)
         except Exception as e:
@@ -533,6 +548,18 @@ class APIHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         print("[API]", format % args)
 
+def market_data_warmup_worker():
+    while True:
+        try:
+            result = coordinator.start_market_data()
+            print("[MARKET DATA] startup warmup:", result)
+            if result.get("success"):
+                return
+        except Exception as error:
+            print("[MARKET DATA] startup warmup failed:", error)
+        time.sleep(30)
+
+
 def demo_monitor_worker():
     print("[DEMO] Automatic position monitor started")
     while True:
@@ -569,6 +596,11 @@ if __name__ == "__main__":
         daemon=True,
     )
     monitor_thread.start()
+    threading.Thread(
+        target=market_data_warmup_worker,
+        name="binance-market-data-warmup",
+        daemon=True,
+    ).start()
     threading.Thread(
         target=autopilot.run_forever,
         name="autopilot",

@@ -23,6 +23,7 @@ from core.notifier import Notifier
 from core.chart_image import render_trade_chart
 from core.spot_demo import SpotDemoMixin
 from core.trailing_stop import calculate_trailing_stop
+from core.pipeline_funnel import PipelineFunnel
 
 
 class TradingCoordinator(SpotDemoMixin):
@@ -32,6 +33,8 @@ class TradingCoordinator(SpotDemoMixin):
         self.market_feed = BinanceMarketData(timeout=6, total_timeout=6)
         self.market_engine = MarketDataEngine(timeout=6)
         self.market_scanner = FuturesMarketScanner(timeout=6)
+        self.market_universes = {"futures": [], "spot": []}
+        self.market_data_ready = False
         # Injected by the API runtime; kept optional for offline/unit-test use.
         self.market_context = None
 
@@ -50,6 +53,7 @@ class TradingCoordinator(SpotDemoMixin):
         self._demo_position_locks = {}
         self._demo_position_locks_guard = threading.Lock()
         self.mode = "DEMO"
+        self.pipeline_funnel = PipelineFunnel(state_file="data/funnel_history.json")
         self.demo_state_path = Path("config/demo_state.json")
         self.demo_positions = self._load_demo_state()
 
@@ -276,9 +280,57 @@ class TradingCoordinator(SpotDemoMixin):
             ),
         }
 
-    def _demo_market_price(self, symbol, market="futures"):
-        quote = self.market_feed.fetch_book_ticker(market, symbol)
-        price = Decimal(str(quote["mid_price"]))
+    def _funnel_record(self, domain, stage, count=1, reason=None,
+                       error=False, fatal=False, cycle_id=None):
+        return self.pipeline_funnel.record(
+            domain, stage, count=count, reason=reason, error=error,
+            fatal=fatal, cycle_id=cycle_id)
+
+    def get_pipeline_funnel(self, domain=None):
+        return self.pipeline_funnel.snapshot(domain)
+
+    def start_market_data(self):
+        """Warm top-30 liquid universes once, then keep them live via WebSockets."""
+        futures = list(self.market_universes.get("futures") or [])
+        if not futures:
+            futures = self.market_scanner.scan_universe(limit=30)
+            self.market_universes["futures"] = futures
+        spot = list(self.market_universes.get("spot") or [])
+        if not spot:
+            tickers = self.market_feed._request("spot", "/api/v3/ticker/24hr", {})
+            eligible = set(self.market_feed.fetch_symbols("spot"))
+            by_symbol = {str(item.get("symbol", "")).upper(): item for item in tickers}
+            spot = []
+            for symbol in eligible:
+                item = by_symbol.get(symbol, {})
+                try:
+                    volume, price = float(item.get("quoteVolume", 0)), float(item.get("lastPrice", 0))
+                except (TypeError, ValueError):
+                    continue
+                if price > 0:
+                    spot.append({"symbol": symbol, "quote_volume": volume,
+                                 "last_price": price})
+            spot.sort(key=lambda item: item["quote_volume"], reverse=True)
+            spot = spot[:30]
+            self.market_universes["spot"] = spot
+        warmed = self.market_engine.start_live_streams({
+            "futures": [item["symbol"] for item in futures],
+            "spot": [item["symbol"] for item in spot],
+        })
+        requested = len(futures) + len(spot)
+        self.market_data_ready = (
+            requested > 0 and warmed.get("warmed_symbols", 0) >= requested * 0.95
+        )
+        return {**warmed, "success": self.market_data_ready,
+                "universe": {"futures": len(futures), "spot": len(spot)},
+                "requested_symbols": requested}
+
+    def _demo_market_price(self, symbol, market="futures", side=None):
+        quote = self.market_engine.get_book_ticker(market, symbol)
+        selected = ("ask" if str(side).upper() in ("BUY", "LONG")
+                    else "bid" if str(side).upper() in ("SELL", "SHORT")
+                    else "mid_price")
+        price = Decimal(str(quote[selected]))
         if not price.is_finite() or price <= 0:
             raise ValueError("Invalid live market price")
         market_type = "SPOT" if str(market).lower() == "spot" else "FUTURES"
@@ -407,8 +459,11 @@ class TradingCoordinator(SpotDemoMixin):
         return features
 
     def _validate_demo_entry_price(self, plan, direction, market_price,
-                                   min_net_rr=1.5, market="futures"):
-        """Reject stale fills that distort structural levels or net reward/risk."""
+                                   min_net_rr=1.5, market="futures",
+                                   signal_created_at=None, now=None,
+                                   profile="standard"):
+        """Validate profile freshness/drift while never bypassing valid SL/TP geometry."""
+
         try:
             entry = Decimal(str(plan["entry"]))
             stop = Decimal(str(plan["stop_loss"]))
@@ -417,9 +472,15 @@ class TradingCoordinator(SpotDemoMixin):
             price = Decimal(str(market_price))
             if not all(v.is_finite() and v > 0 for v in (entry, stop, target, atr, price)):
                 return False, "Invalid plan or execution price"
-            max_drift = max(atr * Decimal("0.10"), entry * Decimal("0.0002"))
+            if signal_created_at is not None:
+                age = float(time.time() if now is None else now) - float(signal_created_at)
+                max_age = 120 if str(profile).lower() == "explore" else 90
+                if age < 0 or age > max_age:
+                    return False, f"Signal expired: execution must occur within {max_age} seconds"
+            drift_multiple = Decimal("0.5") if str(profile).lower() == "explore" else Decimal("0.3")
+            max_drift = atr * drift_multiple
             if abs(price - entry) > max_drift:
-                return False, "Entry moved more than 0.10 ATR after confirmation; wait for a new setup"
+                return False, "Price moved beyond 0.3 ATR from the signal entry"
             if str(direction).upper() == "SHORT":
                 if not target < price < stop:
                     return False, "Live price invalidated the SHORT structure"
@@ -474,7 +535,33 @@ class TradingCoordinator(SpotDemoMixin):
                 or "5m"
             )
             record["timeframe"] = str(timeframe).lower()
+            record["profile"] = str(signal.get("profile") or "standard")
+            actual_entry = float(record.get("entry_price") or record.get("entry") or 0)
+            signal_entry = float(plan.get("entry") or actual_entry)
+            atr = float(plan.get("atr") or 0)
+            signal_created_at = float(signal.get("_signal_created_at") or 0)
+            execution_metrics = {
+                "signal_entry": signal_entry,
+                "actual_entry": actual_entry,
+                "entry_delta": actual_entry - signal_entry,
+                "entry_delta_pct": (
+                    (actual_entry - signal_entry) / signal_entry * 100
+                    if signal_entry else None),
+                "entry_drift_atr": (
+                    abs(actual_entry - signal_entry) / atr if atr > 0 else None),
+                "entry_delay_seconds": (
+                    max(0.0, time.time() - signal_created_at)
+                    if signal_created_at > 0 else None),
+            }
+            record.update({
+                "signal_entry_price": signal_entry,
+                "entry_delta_pct": execution_metrics["entry_delta_pct"],
+                "entry_drift_atr": execution_metrics["entry_drift_atr"],
+                "entry_delay_seconds": execution_metrics["entry_delay_seconds"],
+            })
             context = {
+                "execution": execution_metrics,
+                "profile": record["profile"],
                 "confidence": signal.get("confidence"),
                 "scores": signal.get("scores"),
                 "market_context": signal.get("market_context"),
@@ -493,12 +580,17 @@ class TradingCoordinator(SpotDemoMixin):
             record["setup_key"] = key
             record["confidence"] = confidence
             record["risk_amount"] = reservation.get("risk")
+            record["requested_risk_amount"] = reservation.get(
+                "requested_risk", reservation.get("risk"))
+            record["position_size_capped"] = bool(reservation.get("sizing_capped"))
+            record["reserved_margin"] = reservation.get("margin")
             record["context"] = context
             self.journal.record_open(
                 record["trade_id"], record.get("domain", "futures"),
                 record["symbol"], record["direction"],
                 key, confidence, record["entry_price"], record["stop_loss"],
-                record["take_profit"], reservation.get("risk"), context)
+                record["take_profit"], reservation.get("risk"), context,
+                profile=record["profile"])
         except Exception as error:
             record["journal_error"] = str(error)
         if self.notifier.enabled:
@@ -1040,13 +1132,18 @@ class TradingCoordinator(SpotDemoMixin):
             )
             if not reservation.get("approved"):
                 return reservation
+            self._funnel_record("futures", "risk_approved",
+                                cycle_id=signal.get("_funnel_cycle_id"))
 
             trade_id = reservation["trade_id"]
             self.risk.update_reservation_status(trade_id, "DEMO_PENDING")
 
-            market_price = self._demo_market_price(symbol)
+            market_price = self._demo_market_price(
+                symbol, side="BUY" if direction == "LONG" else "SELL")
             valid_entry, entry_reason = self._validate_demo_entry_price(
-                plan, direction, market_price, min_net_rr=1.5, market="futures"
+                plan, direction, market_price, min_net_rr=1.5, market="futures",
+                signal_created_at=signal.get("_signal_created_at"),
+                profile=signal.get("profile", "standard"),
             )
             if not valid_entry:
                 self.risk.release_reservation(trade_id)
@@ -1126,6 +1223,8 @@ class TradingCoordinator(SpotDemoMixin):
                 protection_verified=False,
                 execution_source="INTERNAL_DEMO",
             )
+            self._funnel_record("futures", "trade_opened",
+                                cycle_id=signal.get("_funnel_cycle_id"))
             return {"approved": True, "mode": "DEMO", **record}
 
         except Exception as error:
@@ -1195,7 +1294,8 @@ class TradingCoordinator(SpotDemoMixin):
     def get_agent_controls(self):
         return {d: {"enabled": self._agent_enabled(d)} for d in self.agents}
 
-    def analyze_live(self, symbol, preferred_timeframe=None, domains=None):
+    def analyze_live(self, symbol, preferred_timeframe=None, domains=None,
+                     profile="standard"):
         symbol = str(symbol).strip().upper()
 
         if not symbol:
@@ -1233,7 +1333,11 @@ class TradingCoordinator(SpotDemoMixin):
                     live_data, domain
                 )
 
+                agent_data["profile"] = str(profile or "standard").lower()
                 signal = agent.analyze(agent_data)
+                if isinstance(signal, dict):
+                    signal["_signal_created_at"] = time.time()
+                    signal["profile"] = str(profile or "standard").lower()
                 direction = str(signal.get("direction", "WAIT")).upper() if isinstance(signal, dict) else "WAIT"
                 # V3 is the sole strategy. Its own cost-adjusted plan is authoritative;
                 # never fall back to the retired structural planner or legacy agent rules.
@@ -1453,66 +1557,73 @@ class TradingCoordinator(SpotDemoMixin):
             "proposed_levels": {k: str(v) for k, v in proposed.items()},
         }
 
-    def scan_futures(self, limit=None, min_quote_volume=None):
-        """Analyze every eligible USDT perpetual by default; rank valid signals only."""
+    def scan_futures(self, limit=None, min_quote_volume=None, profile="standard"):
+        """Scan Futures and retain per-stage funnel counts for this cycle."""
+        if self.market_universes.get("futures") and not self.market_data_ready:
+            expected = len(self.market_universes.get("futures") or [])
+            cycle_id = self.pipeline_funnel.start("futures", expected, "5m")
+            self._funnel_record("futures", None, reason="Binance candle cache warmup is incomplete",
+                                error=True, fatal=True, cycle_id=cycle_id)
+            funnel = self.pipeline_funnel.finish("futures", 0, expected)
+            return {"success": False, "reason": "Binance candle cache warmup is incomplete",
+                    "opportunities": [], "error_count": 1, "fatal_errors": 1,
+                    "funnel": funnel}
         if not self._agent_enabled("futures"):
-            return {
-                "success": False,
-                "reason": "Futures agent is stopped",
-                "opportunities": [],
-            }
-
+            return {"success": False, "reason": "Futures agent is stopped", "opportunities": []}
         try:
-            universe = self.market_scanner.scan_universe(
-                limit=limit,
-                min_quote_volume=min_quote_volume,
-            )
+            universe = list(self.market_universes.get("futures") or
+                            self.market_scanner.scan_universe(limit=30))
+            if limit is not None:
+                universe = universe[:max(1, int(limit))]
+            if min_quote_volume is not None:
+                universe = [item for item in universe
+                            if float(item.get("quote_volume", 0)) >= float(min_quote_volume)]
         except Exception as error:
-            return {
-                "success": False,
-                "reason": "Market universe scan failed: " + str(error),
-                "opportunities": [],
-            }
-
-        scan_meta = {
-            "universe_total": len(universe),
-            "batch_size": len(universe),
-            "cycle": 0,
-            "cycle_complete": True,
-        }
-        if limit is None:
-            from core.scan_rotation import next_scan_batch
-            universe, scan_meta = next_scan_batch(
-                "futures", universe, batch_size=20
-            )
-
-        opportunities = []
-        errors = {}
-        rejections = {}
-        rejection_samples = []
-
+            cycle_id = self.pipeline_funnel.start("futures", 0)
+            self._funnel_record("futures", "events_received", reason=str(error),
+                                error=True, fatal=True, cycle_id=cycle_id)
+            funnel = self.pipeline_funnel.finish("futures", 0, 0)
+            return {"success": False, "reason": "Market universe scan failed: " + str(error),
+                    "opportunities": [], "errors": {"__universe__": str(error)},
+                    "error_count": 1, "fatal_errors": 1, "funnel": funnel}
+        scan_meta = {"universe_total": len(universe), "batch_size": len(universe),
+                     "cycle": 0, "cycle_complete": True}
+        cycle_id = self.pipeline_funnel.start("futures", len(universe), "5m")
+        opportunities, errors, rejections, rejection_samples = [], {}, {}, []
         def reject(reason, symbol):
             key = str(reason or "No actionable signal")
             rejections[key] = rejections.get(key, 0) + 1
+            self._funnel_record("futures", None, reason=key, cycle_id=cycle_id)
             if len(rejection_samples) < 12:
                 rejection_samples.append({"symbol": symbol, "reason": key})
-
+        processed = 0
         for item in universe:
             symbol = item["symbol"]
+            self._funnel_record("futures", "events_received", cycle_id=cycle_id)
             try:
-                analysis = self.analyze_live(symbol, domains=["futures"])
+                analysis = self.analyze_live(
+                    symbol, domains=["futures"], profile=profile)
                 signal = analysis.get("signals", {}).get("futures", {})
+                if analysis.get("data_errors") or (
+                    isinstance(signal, dict) and signal.get("error")
+                ):
+                    errors[symbol] = str(
+                        (signal.get("error") if isinstance(signal, dict) else None)
+                        or analysis.get("data_errors"))
+                    self._funnel_record("futures", None, error=True,
+                                        reason="Analysis data error", cycle_id=cycle_id)
+                    continue
+                processed += 1
                 if not isinstance(signal, dict):
                     reject("Missing Futures analysis", symbol)
                     continue
-
+                self._funnel_record("futures", "passed_filter", cycle_id=cycle_id)
                 direction = str(signal.get("direction", "WAIT")).upper()
                 confidence = float(signal.get("confidence", 0) or 0)
-
                 if direction not in ("LONG", "SHORT"):
                     reject(signal.get("reason") or "Signal is WAIT", symbol)
                     continue
-
+                self._funnel_record("futures", "strategy_accepted", cycle_id=cycle_id)
                 trade_plan = signal.get("trade_plan")
                 if signal.get("strategy_version") != "v3" or not isinstance(trade_plan, dict) or trade_plan.get("strategy_version") != "v3":
                     reject("Only V3 signals and plans are eligible", symbol)
@@ -1520,42 +1631,26 @@ class TradingCoordinator(SpotDemoMixin):
                 if trade_plan.get("success") is not True:
                     reject(trade_plan.get("reason") or "Trade plan rejected", symbol)
                     continue
-
-                opportunities.append({
-                    **item,
-                    "direction": direction,
-                    "confidence": confidence,
-                    "trade_plan": trade_plan,
-                    "signal": signal,
-                })
+                self._funnel_record("futures", "valid_plan", cycle_id=cycle_id)
+                signal["_funnel_cycle_id"] = cycle_id
+                opportunities.append({**item, "direction": direction,
+                    "confidence": confidence, "trade_plan": trade_plan,
+                    "signal": signal, "scan_cycle_id": cycle_id})
             except Exception as error:
                 errors[symbol] = str(error)
-
-        opportunities.sort(
-            key=lambda item: (
-                item["confidence"],
-                item["quote_volume"],
-            ),
-            reverse=True,
-        )
-
-        # Keep the selected symbol's signal as the latest Futures signal.
+                self._funnel_record("futures", "errors", error=True,
+                                    reason="Symbol analysis exception", cycle_id=cycle_id)
+        opportunities.sort(key=lambda item: (item["confidence"], item["quote_volume"]), reverse=True)
         if opportunities:
             self.last_signals["futures"] = opportunities[0]["signal"]
-
-        return {
-            "success": True,
-            "scanned": len(universe),
+        funnel = self.pipeline_funnel.finish("futures", processed, len(universe))
+        return {"success": bool(funnel["success"]), "scanned": len(universe),
             "actionable": len(opportunities),
-            "selected": (
-                opportunities[0]["symbol"] if opportunities else None
-            ),
-            "opportunities": opportunities,
-            "errors": errors,
-            "rejections": rejections,
-            "rejection_samples": rejection_samples,
-            "scan": scan_meta,
-        }
+            "selected": opportunities[0]["symbol"] if opportunities else None,
+            "opportunities": opportunities, "errors": errors,
+            "error_count": len(errors), "fatal_errors": funnel["fatal_errors"],
+            "rejections": rejections, "rejection_samples": rejection_samples,
+            "scan": scan_meta, "funnel": funnel}
 
     def analyze_all(self, market_data):
         results = {}

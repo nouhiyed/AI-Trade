@@ -48,6 +48,7 @@ class Base(unittest.TestCase):
         self.c = TradingCoordinator(initial_balance=10000)
         self.feed = Feed()
         self.c.market_feed = self.feed
+        self.c.market_engine.get_book_ticker = self.feed.fetch_book_ticker
 
     def tearDown(self):
         self.c.demo_database.connection.close()
@@ -168,6 +169,24 @@ class TestAutopilot(Base):
         out = ap.tick()
         self.assertEqual(out["opened"], [])
         self.assertIn("disabled by learning", out["skipped"][0]["reason"])
+
+    def test_explore_profile_uses_small_risk_tags_trade_and_ignores_learning_disable(self):
+        self._scan([("BTCUSDT", 80)])
+        key = setup_key("LONG", 80, 2.0, "futures", "momentum")
+        self.c.journal.set_setup_disabled(key, True, "standard profile sample")
+        ap = Autopilot(self.c, config_path="config/ap-explore.json")
+        ap.update({"enabled": True, "profile": "explore", "risk_pct": 0.8})
+        self.assertEqual(ap.config["risk_pct"], 0.25)
+        out = ap.tick()
+        self.assertEqual(len(out["opened"]), 1, out)
+        trade = self.c.demo_positions[out["opened"][0]["trade_id"]]
+        self.assertEqual(trade["profile"], "explore")
+        self.assertIsNotNone(trade["entry_drift_atr"])
+        self.assertIsNotNone(trade["entry_delay_seconds"])
+        self.assertIn("execution", trade["context"])
+        row = self.c.journal.recent()[0]
+        self.assertEqual(row["profile"], "explore")
+        self.assertEqual(out["profile"], "explore")
 
     def test_context_veto_blocks_trade(self):
         class Ctx:

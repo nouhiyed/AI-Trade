@@ -34,6 +34,44 @@ class TestTradingCoordinator(unittest.TestCase):
         self.assertFalse(spot_ok)
         self.assertIn("reward/risk", spot_reason.lower())
 
+    def test_demo_entry_allows_03_atr_drift_within_90_seconds(self):
+        plan = {
+            "entry": 100, "stop_loss": 99, "take_profit": 105, "atr": 1,
+        }
+        valid, reason = self.system._validate_demo_entry_price(
+            plan, "LONG", 100.25, signal_created_at=1000, now=1089)
+        self.assertTrue(valid, reason)
+
+        expired, reason = self.system._validate_demo_entry_price(
+            plan, "LONG", 100.10, signal_created_at=1000, now=1091)
+        self.assertFalse(expired)
+        self.assertIn("90 seconds", reason)
+
+        drifted, reason = self.system._validate_demo_entry_price(
+            plan, "LONG", 100.31, signal_created_at=1000, now=1089)
+        self.assertFalse(drifted)
+        self.assertIn("0.3 ATR", reason)
+
+    def test_explore_profile_relaxes_only_entry_age_and_atr_drift(self):
+        plan = {
+            "entry": 100, "stop_loss": 99, "take_profit": 105, "atr": 1,
+        }
+        valid, reason = self.system._validate_demo_entry_price(
+            plan, "LONG", 100.45, signal_created_at=1000, now=1119,
+            profile="explore")
+        self.assertTrue(valid, reason)
+        expired, reason = self.system._validate_demo_entry_price(
+            plan, "LONG", 100.10, signal_created_at=1000, now=1121,
+            profile="explore")
+        self.assertFalse(expired)
+        self.assertIn("120 seconds", reason)
+        narrow_plan = {**plan, "take_profit": 100.4}
+        outside_structure, reason = self.system._validate_demo_entry_price(
+            narrow_plan, "LONG", 100.45, signal_created_at=1000, now=1119,
+            profile="explore")
+        self.assertFalse(outside_structure)
+        self.assertIn("structure", reason.lower())
+
     def test_trade_requires_signal(self):
         result = self.system.request_trade(
             domain="futures",
@@ -70,7 +108,7 @@ class TestTradingCoordinator(unittest.TestCase):
     def test_chart_submission_analyzes_only_selected_domain(self):
         calls = []
 
-        def analyze(symbol, preferred_timeframe=None, domains=None):
+        def analyze(symbol, preferred_timeframe=None, domains=None, profile='standard'):
             calls.append((symbol, preferred_timeframe, domains))
             return {"signals": {"futures": {
                 "symbol": symbol,
@@ -240,7 +278,7 @@ class TestTradingCoordinator(unittest.TestCase):
             },
         }
         self.system._demo_market_price = (
-            lambda symbol, market="futures": Decimal("100")
+            lambda symbol, market="futures", side=None: Decimal("100")
         )
 
         opened = self.system.request_demo_futures_trade(
@@ -254,7 +292,7 @@ class TestTradingCoordinator(unittest.TestCase):
 
         # A manual close uses the current executable market quote.
         self.system._demo_market_price = (
-            lambda symbol, market="futures": Decimal("101")
+            lambda symbol, market="futures", side=None: Decimal("101")
         )
         closed = self.system.close_demo_position(position_id)
 
@@ -289,7 +327,7 @@ class TestTradingCoordinator(unittest.TestCase):
 
         quotes = {"BTCUSDT": "100", "ETHUSDT": "200"}
         self.system._demo_market_price = (
-            lambda symbol, market="futures": Decimal(quotes[symbol])
+            lambda symbol, market="futures", side=None: Decimal(quotes[symbol])
         )
         opened_ids = []
 
@@ -356,7 +394,7 @@ class TestTradingCoordinator(unittest.TestCase):
             },
         }
         self.system._demo_market_price = (
-            lambda symbol, market="futures": Decimal("100")
+            lambda symbol, market="futures", side=None: Decimal("100")
         )
         opened = self.system.request_demo_futures_trade(
             "BTCUSDT", "LONG", signal_override=signal
@@ -382,7 +420,7 @@ class TestTradingCoordinator(unittest.TestCase):
             )
             self.assertTrue(monitor_entered.wait(2), "monitor did not reach Binance quote")
             self.system._demo_market_price = (
-                lambda symbol, market="futures": Decimal("101")
+                lambda symbol, market="futures", side=None: Decimal("101")
             )
             close = pool.submit(self.system.close_demo_position, position_id)
             try:
@@ -404,7 +442,7 @@ class TestTradingCoordinator(unittest.TestCase):
         ]
         calls = []
 
-        def analyze(symbol, preferred_timeframe=None, domains=None):
+        def analyze(symbol, preferred_timeframe=None, domains=None, profile='standard'):
             calls.append(domains)
             return {"signals": {"futures": {
                 "direction": "WAIT", "confidence": 0,
@@ -422,7 +460,7 @@ class TestTradingCoordinator(unittest.TestCase):
         ]
         calls = []
 
-        def analyze(symbol, preferred_timeframe=None, domains=None):
+        def analyze(symbol, preferred_timeframe=None, domains=None, profile='standard'):
             calls.append(domains)
             return {"signals": {"spot": {
                 "direction": "WAIT", "confidence": 0,
