@@ -291,23 +291,28 @@ class TradingCoordinator(SpotDemoMixin):
 
     def start_market_data(self):
         """Warm top-30 liquid universes once, then keep them live via WebSockets."""
-        futures = self.market_scanner.scan_universe(limit=30)
-        tickers = self.market_feed._request("spot", "/api/v3/ticker/24hr", {})
-        eligible = set(self.market_feed.fetch_symbols("spot"))
-        by_symbol = {str(item.get("symbol", "")).upper(): item for item in tickers}
-        spot = []
-        for symbol in eligible:
-            item = by_symbol.get(symbol, {})
-            try:
-                volume, price = float(item.get("quoteVolume", 0)), float(item.get("lastPrice", 0))
-            except (TypeError, ValueError):
-                continue
-            if price > 0:
-                spot.append({"symbol": symbol, "quote_volume": volume,
-                             "last_price": price})
-        spot.sort(key=lambda item: item["quote_volume"], reverse=True)
-        spot = spot[:30]
-        self.market_universes = {"futures": futures, "spot": spot}
+        futures = list(self.market_universes.get("futures") or [])
+        if not futures:
+            futures = self.market_scanner.scan_universe(limit=30)
+            self.market_universes["futures"] = futures
+        spot = list(self.market_universes.get("spot") or [])
+        if not spot:
+            tickers = self.market_feed._request("spot", "/api/v3/ticker/24hr", {})
+            eligible = set(self.market_feed.fetch_symbols("spot"))
+            by_symbol = {str(item.get("symbol", "")).upper(): item for item in tickers}
+            spot = []
+            for symbol in eligible:
+                item = by_symbol.get(symbol, {})
+                try:
+                    volume, price = float(item.get("quoteVolume", 0)), float(item.get("lastPrice", 0))
+                except (TypeError, ValueError):
+                    continue
+                if price > 0:
+                    spot.append({"symbol": symbol, "quote_volume": volume,
+                                 "last_price": price})
+            spot.sort(key=lambda item: item["quote_volume"], reverse=True)
+            spot = spot[:30]
+            self.market_universes["spot"] = spot
         warmed = self.market_engine.start_live_streams({
             "futures": [item["symbol"] for item in futures],
             "spot": [item["symbol"] for item in spot],
