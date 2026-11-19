@@ -321,6 +321,11 @@ class APIHandler(BaseHTTPRequestHandler):
                     "success": True,
                     "cycles": coordinator.get_pipeline_funnel(domain),
                 })
+            if path == "/market-data":
+                return self.send_json({
+                    "ready": coordinator.market_data_ready,
+                    **coordinator.market_engine.cache.status(),
+                })
             if path == "/learning":
                 return self.send_json(coordinator.learning.report())
             if path == "/autopilot":
@@ -364,7 +369,11 @@ class APIHandler(BaseHTTPRequestHandler):
                     "api_version": API_VERSION,
                     "system": coordinator.get_system_status(),
                     "controls": coordinator.get_agent_controls(),
-                    "demo": coordinator.get_demo_positions()
+                    "demo": coordinator.get_demo_positions(),
+                    "market_data": {
+                        "ready": coordinator.market_data_ready,
+                        "cache": coordinator.market_engine.cache.status(),
+                    },
                 })
             return self.send_json({"error": "Not found"}, 404)
         except Exception as e:
