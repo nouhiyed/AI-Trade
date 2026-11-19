@@ -435,7 +435,7 @@ class TradingCoordinator(SpotDemoMixin):
                     return False, "Signal expired: execution must occur within 90 seconds"
             max_drift = atr * Decimal("0.3")
             if abs(price - entry) > max_drift:
-                return False, "Price drift exceeds 0.3 ATR from the signal entry"
+                return False, "Price moved beyond 0.3 ATR from the signal entry"
             if str(direction).upper() == "SHORT":
                 if not target < price < stop:
                     return False, "Live price invalidated the SHORT structure"
