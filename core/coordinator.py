@@ -524,7 +524,9 @@ class TradingCoordinator(SpotDemoMixin):
                 or "5m"
             )
             record["timeframe"] = str(timeframe).lower()
+            record["profile"] = str(signal.get("profile") or "standard")
             context = {
+                "profile": record["profile"],
                 "confidence": signal.get("confidence"),
                 "scores": signal.get("scores"),
                 "market_context": signal.get("market_context"),
@@ -552,7 +554,8 @@ class TradingCoordinator(SpotDemoMixin):
                 record["trade_id"], record.get("domain", "futures"),
                 record["symbol"], record["direction"],
                 key, confidence, record["entry_price"], record["stop_loss"],
-                record["take_profit"], reservation.get("risk"), context)
+                record["take_profit"], reservation.get("risk"), context,
+                profile=record["profile"])
         except Exception as error:
             record["journal_error"] = str(error)
         if self.notifier.enabled:
