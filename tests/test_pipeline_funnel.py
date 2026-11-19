@@ -1,0 +1,45 @@
+import unittest
+
+from core.pipeline_funnel import PipelineFunnel
+
+
+class TestPipelineFunnel(unittest.TestCase):
+    def test_cycle_passes_at_95_percent_and_reports_errors_separately(self):
+        funnel = PipelineFunnel()
+        cycle_id = funnel.start("futures", expected=20)
+        for _ in range(19):
+            funnel.record("futures", "events_received", cycle_id=cycle_id)
+        funnel.record("futures", None, reason="WAIT signal", cycle_id=cycle_id)
+        funnel.record("futures", None, error=True, reason="timeout", cycle_id=cycle_id)
+        result = funnel.finish("futures", processed=19, expected=20)
+        self.assertTrue(result["success"])
+        self.assertEqual(result["completion_pct"], 95.0)
+        self.assertEqual(result["errors"], 1)
+        self.assertEqual(result["top_rejections"][0],
+                         {"reason": "WAIT signal", "count": 1})
+
+    def test_cycle_below_95_percent_is_not_successful(self):
+        funnel = PipelineFunnel()
+        cycle_id = funnel.start("spot", expected=20)
+        for _ in range(18):
+            funnel.record("spot", "events_received", cycle_id=cycle_id)
+        result = funnel.finish("spot", processed=18, expected=20)
+        self.assertFalse(result["success"])
+        self.assertEqual(result["completion_pct"], 90.0)
+
+    def test_fatal_error_fails_cycle_even_with_full_coverage(self):
+        funnel = PipelineFunnel()
+        cycle_id = funnel.start("futures", expected=10)
+        result = funnel.finish("futures", processed=10, expected=10, fatal=True)
+        self.assertFalse(result["success"])
+        self.assertEqual(result["fatal_errors"], 1)
+
+    def test_cycles_are_aggregated_within_the_same_five_minute_candle(self):
+        funnel = PipelineFunnel()
+        first = funnel.start("futures", expected=20)
+        second = funnel.start("futures", expected=20)
+        self.assertEqual(first, second)
+
+
+if __name__ == "__main__":
+    unittest.main()
