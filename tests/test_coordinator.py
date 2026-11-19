@@ -34,6 +34,24 @@ class TestTradingCoordinator(unittest.TestCase):
         self.assertFalse(spot_ok)
         self.assertIn("reward/risk", spot_reason.lower())
 
+    def test_demo_entry_allows_03_atr_drift_within_90_seconds(self):
+        plan = {
+            "entry": 100, "stop_loss": 99, "take_profit": 103, "atr": 1,
+        }
+        valid, reason = self.system._validate_demo_entry_price(
+            plan, "LONG", 100.25, signal_created_at=1000, now=1089)
+        self.assertTrue(valid, reason)
+
+        expired, reason = self.system._validate_demo_entry_price(
+            plan, "LONG", 100.10, signal_created_at=1000, now=1091)
+        self.assertFalse(expired)
+        self.assertIn("90 seconds", reason)
+
+        drifted, reason = self.system._validate_demo_entry_price(
+            plan, "LONG", 100.31, signal_created_at=1000, now=1089)
+        self.assertFalse(drifted)
+        self.assertIn("0.3 ATR", reason)
+
     def test_trade_requires_signal(self):
         result = self.system.request_trade(
             domain="futures",
