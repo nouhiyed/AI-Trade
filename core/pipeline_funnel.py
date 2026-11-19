@@ -119,7 +119,10 @@ class PipelineFunnel:
             done = max(0, int(processed if processed is not None else
                                cycle["stages"]["events_received"]))
             cycle["expected"] = max(cycle["expected"], total)
-            cycle["processed"] = cycle.get("processed", 0) + done
+            # Several autopilot passes may occur inside one 5m candle.
+            # Completion reflects the best full-universe pass, not a sum of
+            # repeated symbol counts that could exceed the universe size.
+            cycle["processed"] = max(cycle.get("processed", 0), done)
             cycle["completion_pct"] = round(
                 (min(cycle["processed"], cycle["expected"]) /
                  cycle["expected"] * 100.0) if cycle["expected"] else 100.0, 2)
