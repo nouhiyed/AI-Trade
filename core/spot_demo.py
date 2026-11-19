@@ -32,6 +32,9 @@ class SpotDemoMixin:
     # ---- scanning ----------------------------------------------------------------
 
     def scan_spot(self, limit=None, min_quote_volume=None):
+        if self.market_universes.get("spot") and not self.market_data_ready:
+            return {"success": False, "reason": "Binance candle cache warmup is incomplete",
+                    "opportunities": [], "error_count": 1, "fatal_errors": 1}
         if not self._agent_enabled("spot"):
             return {"success": False, "reason": "Spot agent is stopped",
                     "opportunities": []}
