@@ -12,8 +12,7 @@ class FuturesMarketScanner:
         Optional limit and min_quote_volume are only for explicit narrowed scans.
         Automatic scanning passes neither, so rank and volume never exclude a pair.
         """
-        if limit is not None:
-            limit = max(1, int(limit))
+        limit = 30 if limit is None else max(1, int(limit))
         minimum = float(min_quote_volume) if min_quote_volume is not None else None
 
         exchange = self.market._request("futures", "/fapi/v1/exchangeInfo", {})
@@ -50,6 +49,5 @@ class FuturesMarketScanner:
                 "change_24h_percent": change,
             })
 
-        # Liquidity controls order only; it never excludes eligible symbols.
         ranked.sort(key=lambda item: item["quote_volume"], reverse=True)
-        return ranked if limit is None else ranked[:limit]
+        return ranked[:limit]
