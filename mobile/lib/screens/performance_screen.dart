@@ -559,8 +559,11 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
                               ),
                             ),
                             Text(
-                              '${trade['direction'] ?? ''} · ${trade['close_reason'] ?? 'CLOSED'} · ${t('عرض التشارت والتفاصيل', 'View chart & details')}',
-                              style: TextStyle(color: widget.muted, fontSize: 10),
+                              '${(trade['profile'] ?? 'standard').toString().toUpperCase()} · ${trade['direction'] ?? ''} · ${trade['close_reason'] ?? 'CLOSED'} · ${t('عرض التشارت والتفاصيل', 'View chart & details')}',
+                              style: TextStyle(
+                                color: '${trade['profile'] ?? 'standard'}' == 'explore'
+                                    ? Colors.orange : widget.muted,
+                                fontSize: 10),
                             ),
                           ],
                         ),
