@@ -54,7 +54,7 @@ class TestTradingCoordinator(unittest.TestCase):
 
     def test_explore_profile_relaxes_only_entry_age_and_atr_drift(self):
         plan = {
-            "entry": 100, "stop_loss": 99, "take_profit": 103, "atr": 1,
+            "entry": 100, "stop_loss": 99, "take_profit": 105, "atr": 1,
         }
         valid, reason = self.system._validate_demo_entry_price(
             plan, "LONG", 100.45, signal_created_at=1000, now=1119,
