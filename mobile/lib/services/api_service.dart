@@ -105,6 +105,9 @@ class ApiService {
   static Future<Map<String, dynamic>> status() =>
       _request('GET', '/status', requestTimeout: const Duration(seconds: 8));
 
+  static Future<Map<String, dynamic>> funnel() =>
+      _request('GET', '/funnel', requestTimeout: const Duration(seconds: 5));
+
   static Future<Map<String, dynamic>> telegramStatus() =>
       _request('GET', '/notifications/status');
 
