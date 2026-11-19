@@ -1488,7 +1488,7 @@ class _TradeShellState extends State<TradeShell>
           ]),
           const SizedBox(height: 8),
           ClipRRect(borderRadius: BorderRadius.circular(8),
-            child: LinearProgressIndicator(value: (complete / 100).clamp(0.0, 1.0),
+            child: LinearProgressIndicator(value: (complete / 100).clamp(0.0, 1.0).toDouble(),
               minHeight: 5, backgroundColor: widget.muted.withOpacity(.14),
               valueColor: AlwaysStoppedAnimation<Color>(accent))),
           const SizedBox(height: 7),
