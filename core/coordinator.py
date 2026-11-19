@@ -1524,6 +1524,7 @@ class TradingCoordinator(SpotDemoMixin):
                     self._funnel_record("futures", None, error=True,
                                         reason="Analysis data error", cycle_id=cycle_id)
                     continue
+                processed += 1
                 if not isinstance(signal, dict):
                     reject("Missing Futures analysis", symbol)
                     continue
@@ -1550,8 +1551,6 @@ class TradingCoordinator(SpotDemoMixin):
                 errors[symbol] = str(error)
                 self._funnel_record("futures", "errors", error=True,
                                     reason="Symbol analysis exception", cycle_id=cycle_id)
-            finally:
-                processed += 1
         opportunities.sort(key=lambda item: (item["confidence"], item["quote_volume"]), reverse=True)
         if opportunities:
             self.last_signals["futures"] = opportunities[0]["signal"]
