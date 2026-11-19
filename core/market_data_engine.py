@@ -44,7 +44,8 @@ class MarketDataEngine:
 
         df = df.dropna(subset=required).reset_index(drop=True)
 
-        if len(df) < 60:
+        minimum_rows = 30 if str(timeframe).lower() == "4h" else 60
+        if len(df) < minimum_rows:
             raise ValueError(
                 f"{symbol} {timeframe}: only {len(df)} valid candles"
             )
