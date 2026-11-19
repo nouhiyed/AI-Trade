@@ -82,13 +82,17 @@ class SpotDemoMixin:
             try:
                 analysis = self.analyze_live(symbol, domains=["spot"])
                 signal = analysis.get("signals", {}).get("spot", {})
-                if not isinstance(signal, dict):
-                    reject(symbol, "Missing Spot analysis")
-                    continue
-                if signal.get("error") or analysis.get("data_errors"):
-                    errors[symbol] = str(signal.get("error") or analysis.get("data_errors"))
+                if analysis.get("data_errors") or (
+                    isinstance(signal, dict) and signal.get("error")
+                ):
+                    errors[symbol] = str(
+                        (signal.get("error") if isinstance(signal, dict) else None)
+                        or analysis.get("data_errors"))
                     self._funnel_record("spot", None, error=True,
                                         reason="Analysis data error", cycle_id=cycle_id)
+                    continue
+                if not isinstance(signal, dict):
+                    reject(symbol, "Missing Spot analysis")
                     continue
                 self._funnel_record("spot", "passed_filter", cycle_id=cycle_id)
                 if str(signal.get("direction", "")).upper() != "BUY":
