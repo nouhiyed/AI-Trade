@@ -73,6 +73,16 @@ class V3OnlyStrategyTests(unittest.TestCase):
         self.assertLess(result["take_profit"], result["entry"])
         self.assertGreaterEqual(result["net_reward_risk"], 1.5)
 
+    def test_explore_profile_relaxes_only_deep_four_hour_structure_veto(self):
+        data = frames()
+        data["4h"]["close"] = 90.0
+        data["1h"]["close"] = 90.0
+        data["profile"] = "explore"
+        result = SpotScalpingStrategyV3().analyze(data)
+        self.assertTrue(result["success"], result)
+        self.assertEqual(result["strategy_version"], "v3")
+        self.assertGreaterEqual(result["net_reward_risk"], 1.5)
+
     def test_spot_v3_blocks_deep_bearish_four_hour_context(self):
         data = frames()
         data["4h"]["close"] = 90.0
