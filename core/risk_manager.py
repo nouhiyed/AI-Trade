@@ -248,16 +248,27 @@ class RiskManager:
             if stop_distance <= 0:
                 return {"approved": False, "reason": "Invalid stop distance"}
 
+            requested_risk = risk_amount
             notional = risk_amount / stop_distance
-            margin = notional / leverage
-
-            if margin > self.get_available_balance():
+            available_balance = self.get_available_balance()
+            # Keep each DEMO position within 25% of the shared wallet. If the
+            # risk-sized order is larger, cap its notional instead of rejecting
+            # it, and persist the resulting (smaller) real risk amount.
+            margin_cap = min(available_balance, self.balance * 0.25)
+            if margin_cap <= 0:
                 return {
                     "approved": False,
-                    "reason": "Insufficient shared balance"
+                    "reason": "No available DEMO margin under the 25% per-trade cap"
                 }
-
+            requested_margin = notional / leverage
+            sizing_capped = requested_margin > margin_cap
+            if sizing_capped:
+                notional = margin_cap * leverage
+                risk_amount = notional * stop_distance
+            margin = notional / leverage
             quantity = notional / entry
+            if quantity <= 0 or not math.isfinite(quantity):
+                return {"approved": False, "reason": "Order quantity is below a valid size"}
 
             self.trade_counter += 1
 
@@ -276,6 +287,9 @@ class RiskManager:
                 "notional": notional,
                 "margin": margin,
                 "risk": risk_amount,
+                "requested_risk": requested_risk,
+                "sizing_capped": sizing_capped,
+                "margin_cap": margin_cap,
                 "leverage": leverage,
                 "status": "RESERVED"
             }
