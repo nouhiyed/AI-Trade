@@ -45,6 +45,15 @@ class TestFuturesMarketScanner(unittest.TestCase):
         self.assertNotIn("COIN34USDT", {item["symbol"] for item in result})
         self.assertTrue(all(item["symbol"].endswith("USDT") for item in result))
 
+    def test_explicit_request_above_30_is_hard_capped(self):
+        def request(_market, endpoint, _params):
+            return self.exchange if endpoint.endswith("exchangeInfo") else self.tickers
+
+        with patch.object(self.scanner.market, "_request", side_effect=request):
+            result = self.scanner.scan_universe(limit=250)
+
+        self.assertEqual(len(result), 30)
+
     def test_explicit_manual_limit_remains_supported(self):
         def request(_market, endpoint, _params):
             return self.exchange if endpoint.endswith("exchangeInfo") else self.tickers
