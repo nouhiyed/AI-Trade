@@ -23,12 +23,20 @@ class PipelineFunnel:
     def start(self, domain, expected=0, timeframe="5m"):
         domain = str(domain).lower()
         with self._lock:
+            now = time()
+            candle_open = int(now // 300) * 300 if timeframe == "5m" else int(now)
+            current = self._cycles.get(domain)
+            if current and current.get("candle_open") == candle_open:
+                current["expected"] = max(current["expected"], max(0, int(expected or 0)))
+                return current["cycle_id"]
             cycle = {
                 "cycle_id": uuid4().hex,
                 "domain": domain,
                 "timeframe": timeframe,
-                "started_at": time(),
+                "candle_open": candle_open,
+                "started_at": now,
                 "expected": max(0, int(expected or 0)),
+                "processed": 0,
                 "stages": {name: 0 for name in STAGES},
                 "errors": 0,
                 "fatal_errors": 0,
@@ -65,10 +73,11 @@ class PipelineFunnel:
             total = max(0, int(expected if expected is not None else cycle["expected"]))
             done = max(0, int(processed if processed is not None else
                                cycle["stages"]["events_received"]))
-            cycle["expected"] = total
-            cycle["processed"] = done
+            cycle["expected"] = max(cycle["expected"], total)
+            cycle["processed"] = cycle.get("processed", 0) + done
             cycle["completion_pct"] = round(
-                (done / total * 100.0) if total else 100.0, 2)
+                (min(cycle["processed"], cycle["expected"]) /
+                 cycle["expected"] * 100.0) if cycle["expected"] else 100.0, 2)
             if fatal:
                 cycle["fatal_errors"] = max(1, cycle["fatal_errors"])
             cycle["success"] = (
@@ -80,13 +89,19 @@ class PipelineFunnel:
                 {"reason": reason, "count": count}
                 for reason, count in cycle["rejections"].most_common(5)
             ]
-            cycle["rejections"] = dict(cycle["rejections"])
-            return dict(cycle)
+            return self._serialize(cycle)
+
+    @staticmethod
+    def _serialize(cycle):
+        result = dict(cycle)
+        result["rejections"] = dict(cycle["rejections"])
+        return result
 
     def snapshot(self, domain=None):
         with self._lock:
             if domain:
                 cycle = self._cycles.get(str(domain).lower())
-                return dict(cycle) if cycle else {
+                return self._serialize(cycle) if cycle else {
                     "domain": str(domain).lower(), "available": False}
-            return {key: dict(value) for key, value in self._cycles.items()}
+            return {key: self._serialize(value)
+                    for key, value in self._cycles.items()}
