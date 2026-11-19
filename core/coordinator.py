@@ -1265,7 +1265,8 @@ class TradingCoordinator(SpotDemoMixin):
     def get_agent_controls(self):
         return {d: {"enabled": self._agent_enabled(d)} for d in self.agents}
 
-    def analyze_live(self, symbol, preferred_timeframe=None, domains=None):
+    def analyze_live(self, symbol, preferred_timeframe=None, domains=None,
+                     profile="standard"):
         symbol = str(symbol).strip().upper()
 
         if not symbol:
@@ -1303,9 +1304,11 @@ class TradingCoordinator(SpotDemoMixin):
                     live_data, domain
                 )
 
+                agent_data["profile"] = str(profile or "standard").lower()
                 signal = agent.analyze(agent_data)
                 if isinstance(signal, dict):
                     signal["_signal_created_at"] = time.time()
+                    signal["profile"] = str(profile or "standard").lower()
                 direction = str(signal.get("direction", "WAIT")).upper() if isinstance(signal, dict) else "WAIT"
                 # V3 is the sole strategy. Its own cost-adjusted plan is authoritative;
                 # never fall back to the retired structural planner or legacy agent rules.
@@ -1525,7 +1528,7 @@ class TradingCoordinator(SpotDemoMixin):
             "proposed_levels": {k: str(v) for k, v in proposed.items()},
         }
 
-    def scan_futures(self, limit=None, min_quote_volume=None):
+    def scan_futures(self, limit=None, min_quote_volume=None, profile="standard"):
         """Scan Futures and retain per-stage funnel counts for this cycle."""
         if self.market_universes.get("futures") and not self.market_data_ready:
             return {"success": False, "reason": "Binance candle cache warmup is incomplete",
@@ -1563,7 +1566,8 @@ class TradingCoordinator(SpotDemoMixin):
             symbol = item["symbol"]
             self._funnel_record("futures", "events_received", cycle_id=cycle_id)
             try:
-                analysis = self.analyze_live(symbol, domains=["futures"])
+                analysis = self.analyze_live(
+                    symbol, domains=["futures"], profile=profile)
                 signal = analysis.get("signals", {}).get("futures", {})
                 if analysis.get("data_errors") or (
                     isinstance(signal, dict) and signal.get("error")
