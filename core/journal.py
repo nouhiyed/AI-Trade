@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS trades (
     net_pnl     REAL,
     r_multiple  REAL,
     context     TEXT,
+    profile     TEXT NOT NULL DEFAULT 'standard',
     status      TEXT NOT NULL DEFAULT 'OPEN'
 );
 CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status);
@@ -50,6 +51,11 @@ class TradeJournal:
         self._lock = threading.RLock()
         with self._connect() as db:
             db.executescript(SCHEMA)
+            columns = {row["name"] for row in db.execute(
+                "PRAGMA table_info(trades)").fetchall()}
+            if "profile" not in columns:
+                db.execute(
+                    "ALTER TABLE trades ADD COLUMN profile TEXT NOT NULL DEFAULT 'standard'")
 
     @contextmanager
     def _connect(self):
@@ -68,18 +74,18 @@ class TradeJournal:
 
     def record_open(self, trade_id, domain, symbol, direction, setup_key,
                     confidence, entry, stop_loss, take_profit,
-                    risk_amount=None, context=None):
+                    risk_amount=None, context=None, profile="standard"):
         with self._lock, self._connect() as db:
             db.execute(
                 """INSERT OR REPLACE INTO trades
                    (trade_id, domain, symbol, direction, setup_key, confidence,
                     opened_at, entry, stop_loss, take_profit, risk_amount,
-                    context, status)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'OPEN')""",
+                    context, profile, status)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?, 'OPEN')""",
                 (str(trade_id), domain, symbol, direction, setup_key,
                  _num(confidence), int(time.time() * 1000), _num(entry),
                  _num(stop_loss), _num(take_profit), _num(risk_amount),
-                 json.dumps(context or {}, default=str)),
+                 json.dumps(context or {}, default=str), str(profile or "standard")),
             )
 
     def record_close(self, trade_id, net_pnl, exit_price=None, reason=None):
@@ -124,8 +130,8 @@ class TradeJournal:
                    (trade_id, domain, symbol, direction, setup_key, confidence,
                     opened_at, closed_at, entry, stop_loss, take_profit,
                     risk_amount, exit_price, close_reason, net_pnl, r_multiple,
-                    context, status)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'CLOSED')
+                    context, profile, status)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'CLOSED')
                    ON CONFLICT(trade_id) DO UPDATE SET
                     domain=CASE WHEN trades.domain IS NULL OR trades.domain='' THEN excluded.domain ELSE trades.domain END,
                     symbol=CASE WHEN trades.symbol IS NULL OR trades.symbol='' THEN excluded.symbol ELSE trades.symbol END,
@@ -143,6 +149,7 @@ class TradeJournal:
                     net_pnl=excluded.net_pnl,
                     r_multiple=excluded.r_multiple,
                     status='CLOSED',
+                    profile=COALESCE(excluded.profile, trades.profile),
                     context=CASE WHEN trades.context IS NULL OR trades.context='' OR trades.context='{}'
                                  THEN excluded.context ELSE trades.context END""",
                 (
@@ -156,6 +163,7 @@ class TradeJournal:
                     _num(risk), _num(exit_price),
                     str(reason or record.get("close_reason") or "CLOSED"),
                     pnl, r_mult, json.dumps(context, default=str),
+                    str(record.get("profile") or "standard"),
                 ),
             )
         return True
