@@ -42,9 +42,11 @@ class TestBinanceCandleCache(unittest.TestCase):
             "open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0,
             "volume": 1.0, "is_closed": True,
         }])
-        open_kline = {"t": 0, "T": 299999, "o": "100", "h": "102",
-                      "l": "99", "c": "101", "v": "2", "q": "200",
-                      "n": 4, "V": "1", "Q": "100", "x": False, "i": "5m"}
+        base_ms = int(pd.Timestamp("2026-11-19T00:00:00Z").timestamp() * 1000)
+        open_kline = {"t": base_ms, "T": base_ms + 299999, "o": "100",
+                      "h": "102", "l": "99", "c": "101", "v": "2",
+                      "q": "200", "n": 4, "V": "1", "Q": "100",
+                      "x": False, "i": "5m"}
         self.cache._store_kline("spot", "ETHUSDT", "5m", open_kline)
         self.assertEqual(len(self.cache.get_frame("spot", "ETHUSDT", "5m")), 1)
         open_kline["x"] = True
