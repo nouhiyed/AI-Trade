@@ -33,6 +33,8 @@ class TradingCoordinator(SpotDemoMixin):
         self.market_feed = BinanceMarketData(timeout=6, total_timeout=6)
         self.market_engine = MarketDataEngine(timeout=6)
         self.market_scanner = FuturesMarketScanner(timeout=6)
+        self.market_universes = {"futures": [], "spot": []}
+        self.market_data_ready = False
         # Injected by the API runtime; kept optional for offline/unit-test use.
         self.market_context = None
 
@@ -287,9 +289,41 @@ class TradingCoordinator(SpotDemoMixin):
     def get_pipeline_funnel(self, domain=None):
         return self.pipeline_funnel.snapshot(domain)
 
-    def _demo_market_price(self, symbol, market="futures"):
-        quote = self.market_feed.fetch_book_ticker(market, symbol)
-        price = Decimal(str(quote["mid_price"]))
+    def start_market_data(self):
+        """Warm top-30 liquid universes once, then keep them live via WebSockets."""
+        futures = self.market_scanner.scan_universe(limit=30)
+        tickers = self.market_feed._request("spot", "/api/v3/ticker/24hr", {})
+        eligible = set(self.market_feed.fetch_symbols("spot"))
+        by_symbol = {str(item.get("symbol", "")).upper(): item for item in tickers}
+        spot = []
+        for symbol in eligible:
+            item = by_symbol.get(symbol, {})
+            try:
+                volume, price = float(item.get("quoteVolume", 0)), float(item.get("lastPrice", 0))
+            except (TypeError, ValueError):
+                continue
+            if price > 0:
+                spot.append({"symbol": symbol, "quote_volume": volume,
+                             "last_price": price})
+        spot.sort(key=lambda item: item["quote_volume"], reverse=True)
+        spot = spot[:30]
+        self.market_universes = {"futures": futures, "spot": spot}
+        warmed = self.market_engine.start_live_streams({
+            "futures": [item["symbol"] for item in futures],
+            "spot": [item["symbol"] for item in spot],
+        })
+        requested = len(futures) + len(spot)
+        self.market_data_ready = warmed.get("warmed_symbols", 0) > 0
+        return {**warmed, "success": self.market_data_ready,
+                "universe": {"futures": len(futures), "spot": len(spot)},
+                "requested_symbols": requested}
+
+    def _demo_market_price(self, symbol, market="futures", side=None):
+        quote = self.market_engine.get_book_ticker(market, symbol)
+        selected = ("ask" if str(side).upper() in ("BUY", "LONG")
+                    else "bid" if str(side).upper() in ("SELL", "SHORT")
+                    else "mid_price")
+        price = Decimal(str(quote[selected]))
         if not price.is_finite() or price <= 0:
             raise ValueError("Invalid live market price")
         market_type = "SPOT" if str(market).lower() == "spot" else "FUTURES"
@@ -1066,7 +1100,8 @@ class TradingCoordinator(SpotDemoMixin):
             trade_id = reservation["trade_id"]
             self.risk.update_reservation_status(trade_id, "DEMO_PENDING")
 
-            market_price = self._demo_market_price(symbol)
+            market_price = self._demo_market_price(
+                symbol, side="BUY" if direction == "LONG" else "SELL")
             valid_entry, entry_reason = self._validate_demo_entry_price(
                 plan, direction, market_price, min_net_rr=1.5, market="futures",
                 signal_created_at=signal.get("_signal_created_at"),
@@ -1485,8 +1520,13 @@ class TradingCoordinator(SpotDemoMixin):
         if not self._agent_enabled("futures"):
             return {"success": False, "reason": "Futures agent is stopped", "opportunities": []}
         try:
-            universe = self.market_scanner.scan_universe(
-                limit=limit, min_quote_volume=min_quote_volume)
+            universe = list(self.market_universes.get("futures") or
+                            self.market_scanner.scan_universe(limit=30))
+            if limit is not None:
+                universe = universe[:max(1, int(limit))]
+            if min_quote_volume is not None:
+                universe = [item for item in universe
+                            if float(item.get("quote_volume", 0)) >= float(min_quote_volume)]
         except Exception as error:
             cycle_id = self.pipeline_funnel.start("futures", 0)
             self._funnel_record("futures", "events_received", reason=str(error),
@@ -1497,9 +1537,6 @@ class TradingCoordinator(SpotDemoMixin):
                     "error_count": 1, "fatal_errors": 1, "funnel": funnel}
         scan_meta = {"universe_total": len(universe), "batch_size": len(universe),
                      "cycle": 0, "cycle_complete": True}
-        if limit is None:
-            from core.scan_rotation import next_scan_batch
-            universe, scan_meta = next_scan_batch("futures", universe, batch_size=20)
         cycle_id = self.pipeline_funnel.start("futures", len(universe), "5m")
         opportunities, errors, rejections, rejection_samples = [], {}, {}, []
         def reject(reason, symbol):
