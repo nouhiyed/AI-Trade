@@ -129,7 +129,7 @@ class TestSpot(Base):
         self.assertTrue(self.c.request_demo_spot_trade("ETHUSDT", "spot")["approved"])
         self.assertFalse(self.c.request_demo_spot_trade("ETHUSDT", "spot")["approved"])
 
-    def test_spot_scan_covers_full_universe_without_volume_floor_or_30_cap(self):
+    def test_spot_scan_uses_top_30_by_quote_volume(self):
         tickers = [
             {"symbol": f"COIN{i:03d}USDT", "quoteVolume": str(i + 1),
              "lastPrice": "1.0"}
@@ -147,16 +147,15 @@ class TestSpot(Base):
             }}}
 
         self.c.analyze_live = analyze
-        results = [self.c.scan_spot() for _ in range(3)]
+        result = self.c.scan_spot()
 
-        self.assertTrue(all(result["success"] for result in results), results)
-        self.assertEqual([result["scanned"] for result in results], [20, 20, 5])
-        self.assertEqual(sum(result["scanned"] for result in results), 45)
-        self.assertEqual(len(analyzed), 45)
-        self.assertEqual(len(set(analyzed)), 45)
+        self.assertTrue(result["success"], result)
+        self.assertEqual(result["scanned"], 30)
+        self.assertEqual(len(analyzed), 30)
+        self.assertEqual(len(set(analyzed)), 30)
         self.assertEqual(analyzed[0], "COIN044USDT")
-        self.assertTrue(results[-1]["scan"]["cycle_complete"])
-        self.assertTrue(all(result["actionable"] == 0 for result in results))
+        self.assertNotIn("COIN014USDT", analyzed)
+        self.assertEqual(result["actionable"], 0)
 
 
 class TestAutopilotMarkets(Base):
