@@ -315,6 +315,12 @@ class APIHandler(BaseHTTPRequestHandler):
                     })
                 limit = min(max(int(params.get("limit", ["50"])[0]), 1), 500)
                 return self.send_json({"trades": coordinator.journal.recent(limit)})
+            if path == "/funnel":
+                domain = params.get("domain", [None])[0]
+                return self.send_json({
+                    "success": True,
+                    "cycles": coordinator.get_pipeline_funnel(domain),
+                })
             if path == "/learning":
                 return self.send_json(coordinator.learning.report())
             if path == "/autopilot":
