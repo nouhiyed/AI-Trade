@@ -69,8 +69,12 @@ class LearningEngine:
             (x["expectancy"] or 0)), reverse=True)
 
     def report(self):
-        trades = self.journal.closed_trades()
-        stats = performance.compute(trades)
+        all_trades = self.journal.closed_trades()
+        trades = [t for t in all_trades
+                  if str(t.get("profile") or "standard").lower() != "explore"]
+        explore = [t for t in all_trades
+                   if str(t.get("profile") or "standard").lower() == "explore"]
+        stats = performance.compute(all_trades)
         disabled = self.journal.disabled_setups()
         setups = []
         for key, item in stats["by_setup"].items():
@@ -82,10 +86,14 @@ class LearningEngine:
         suggestions = []
         if len(trades) < self.min_samples:
             suggestions.append(
-                f"Only {len(trades)} closed trades: collect {self.min_samples} before changing strategy.")
+                f"Only {len(trades)} Standard closed trades: collect {self.min_samples} before changing strategy.")
+        if len(trades) < 150:
+            suggestions.append(
+                f"Profitability assessment requires at least 150 Standard trades and a random baseline comparison; Explore trades are excluded.")
         return {
             "min_samples": self.min_samples, "closed_trades": len(trades),
+            "explore_closed_trades": len(explore),
             "setups": setups, "features": self._feature_groups(trades),
             "disabled": disabled, "suggestions": suggestions,
-            "learning_policy": "Observe first 20 closed trades; rank features by net expectancy; no automatic indicator deletion.",
+            "learning_policy": "Standard trades only; Explore is a separate data-collection sample; no automatic indicator deletion.",
         }
