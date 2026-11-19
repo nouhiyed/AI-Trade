@@ -35,98 +35,84 @@ class SpotDemoMixin:
         if not self._agent_enabled("spot"):
             return {"success": False, "reason": "Spot agent is stopped",
                     "opportunities": []}
-        # Volume ranks the universe but does not exclude eligible USDT pairs.
-        # A volume floor is applied only when explicitly requested by a caller.
-        minimum = (float(min_quote_volume)
-                   if min_quote_volume is not None else None)
+        minimum = float(min_quote_volume) if min_quote_volume is not None else None
         try:
-            tickers = self.market_feed._request(
-                "spot", "/api/v3/ticker/24hr", {}
-            )
-            if limit is None:
-                # Automatic scans use exchangeInfo as the authoritative,
-                # complete list of eligible Spot USDT symbols.
-                symbols = self.market_feed.fetch_symbols("spot")
-            else:
-                # A user-requested limited scan can use the live Spot ticker
-                # response directly, avoiding a second exchangeInfo request.
-                symbols = sorted({
-                    str(item.get("symbol", "")).strip().upper()
-                    for item in tickers
-                    if str(item.get("symbol", "")).strip().upper().endswith("USDT")
-                })
+            tickers = self.market_feed._request("spot", "/api/v3/ticker/24hr", {})
+            symbols = (self.market_feed.fetch_symbols("spot") if limit is None else
+                sorted({str(x.get("symbol", "")).strip().upper() for x in tickers
+                        if str(x.get("symbol", "")).strip().upper().endswith("USDT")}))
         except Exception as error:
-            return {
-                "success": False,
-                "reason": "Spot universe scan failed: " + str(error),
-                "opportunities": [],
-            }
-
-        ticker_by_symbol = {
-            str(item.get("symbol", "")).strip().upper(): item for item in tickers
-        }
+            cycle_id = self.pipeline_funnel.start("spot", 0)
+            self._funnel_record("spot", None, reason=str(error), error=True,
+                                fatal=True, cycle_id=cycle_id)
+            funnel = self.pipeline_funnel.finish("spot", 0, 0, fatal=True)
+            return {"success": False, "reason": "Spot universe scan failed: " + str(error),
+                    "opportunities": [], "errors": {"__universe__": str(error)},
+                    "error_count": 1, "fatal_errors": 1, "funnel": funnel}
+        ticker_by_symbol = {str(x.get("symbol", "")).strip().upper(): x for x in tickers}
         ranked = []
         for symbol in symbols:
             item = ticker_by_symbol.get(symbol, {})
             try:
-                volume = float(item.get("quoteVolume", 0))
-                price = float(item.get("lastPrice", 0))
+                volume, price = float(item.get("quoteVolume", 0)), float(item.get("lastPrice", 0))
             except (TypeError, ValueError):
                 volume, price = 0.0, 0.0
-
             if minimum is not None and volume < minimum:
                 continue
-
-            ranked.append({
-                "symbol": symbol,
-                "quote_volume": volume,
-                "last_price": price,
-            })
-
+            ranked.append({"symbol": symbol, "quote_volume": volume, "last_price": price})
         ranked.sort(key=lambda item: item["quote_volume"], reverse=True)
         universe = ranked if limit is None else ranked[:max(1, int(limit))]
-
-        scan_meta = {
-            "universe_total": len(universe),
-            "batch_size": len(universe),
-            "cycle": 0,
-            "cycle_complete": True,
-        }
+        scan_meta = {"universe_total": len(universe), "batch_size": len(universe),
+                     "cycle": 0, "cycle_complete": True}
         if limit is None:
             from core.scan_rotation import next_scan_batch
-            universe, scan_meta = next_scan_batch(
-                "spot", universe, batch_size=20
-            )
-
-        opportunities, errors = [], {}
-        rejections, rejection_samples = {}, []
-
+            universe, scan_meta = next_scan_batch("spot", universe, batch_size=20)
+        cycle_id = self.pipeline_funnel.start("spot", len(universe), "5m")
+        opportunities, errors, rejections, rejection_samples = [], {}, {}, []
         def reject(symbol, reason):
-            reason = str(reason or "No actionable signal")
-            rejections[reason] = rejections.get(reason, 0) + 1
+            key = str(reason or "No actionable signal")
+            rejections[key] = rejections.get(key, 0) + 1
+            self._funnel_record("spot", None, reason=key, cycle_id=cycle_id)
             if len(rejection_samples) < 10:
-                rejection_samples.append({"symbol": symbol, "reason": reason})
-
+                rejection_samples.append({"symbol": symbol, "reason": key})
+        processed = 0
         for item in universe:
             symbol = item["symbol"]
+            self._funnel_record("spot", "events_received", cycle_id=cycle_id)
             try:
                 analysis = self.analyze_live(symbol, domains=["spot"])
                 signal = analysis.get("signals", {}).get("spot", {})
+                if not isinstance(signal, dict):
+                    reject(symbol, "Missing Spot analysis")
+                    continue
+                if signal.get("error") or analysis.get("data_errors"):
+                    errors[symbol] = str(signal.get("error") or analysis.get("data_errors"))
+                    self._funnel_record("spot", None, error=True,
+                                        reason="Analysis data error", cycle_id=cycle_id)
+                    continue
+                self._funnel_record("spot", "passed_filter", cycle_id=cycle_id)
+                if str(signal.get("direction", "")).upper() != "BUY":
+                    reject(symbol, signal.get("reason") or "Spot signal is not BUY")
+                    continue
+                self._funnel_record("spot", "strategy_accepted", cycle_id=cycle_id)
                 opp = self._as_opportunity(item, signal, "spot")
                 if opp:
+                    self._funnel_record("spot", "valid_plan", cycle_id=cycle_id)
+                    signal["_funnel_cycle_id"] = cycle_id
+                    opp["scan_cycle_id"] = cycle_id
                     opportunities.append(opp)
-                elif not isinstance(signal, dict):
-                    reject(symbol, "Missing Spot analysis")
-                elif str(signal.get("direction", "")).upper() != "BUY":
-                    reject(symbol, signal.get("reason") or "Spot signal is not BUY")
                 else:
                     plan = signal.get("trade_plan") or {}
                     reject(symbol, plan.get("reason") or "Trade plan rejected")
             except Exception as error:
                 errors[symbol] = str(error)
-        result = self._finish_scan(
-            "spot", universe, opportunities, errors,
-            rejections=rejections, rejection_samples=rejection_samples)
+                self._funnel_record("spot", None, error=True,
+                                    reason="Symbol analysis exception", cycle_id=cycle_id)
+            finally:
+                processed += 1
+        result = self._finish_scan("spot", universe, opportunities, errors,
+            rejections=rejections, rejection_samples=rejection_samples,
+            cycle_id=cycle_id, processed=processed)
         result["scan"] = scan_meta
         return result
 
@@ -145,17 +131,22 @@ class SpotDemoMixin:
                 "trade_plan": plan, "signal": signal, "domain": domain}
 
     def _finish_scan(self, domain, universe, opportunities, errors,
-                     rejections=None, rejection_samples=None):
+                     rejections=None, rejection_samples=None,
+                     cycle_id=None, processed=None):
         opportunities.sort(key=lambda o: (o["confidence"],
                                           o.get("quote_volume", 0)), reverse=True)
         if opportunities:
             self.last_signals[domain] = opportunities[0]["signal"]
-        return {"success": True, "scanned": len(universe),
+        funnel = self.pipeline_funnel.finish(
+            domain, processed=processed, expected=len(universe))
+        return {"success": bool(funnel["success"]), "scanned": len(universe),
                 "actionable": len(opportunities),
                 "selected": opportunities[0]["symbol"] if opportunities else None,
                 "opportunities": opportunities, "errors": errors,
+                "error_count": len(errors), "fatal_errors": funnel["fatal_errors"],
                 "rejections": rejections or {},
-                "rejection_samples": rejection_samples or []}
+                "rejection_samples": rejection_samples or [],
+                "funnel": funnel}
 
     # ---- open --------------------------------------------------------------------
 
