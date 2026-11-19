@@ -101,7 +101,7 @@ class Autopilot:
             cfg = dict(self.config)
             result = {"status": "RUNNING", "phase": "starting",
                       "opened": [], "skipped": [], "scanned": 0,
-                      "actionable": 0}
+                      "actionable": 0, "errors": 0, "cycle_success": True}
             self.last_run = int(self.clock())
             self.last_result = dict(result)
 
@@ -144,12 +144,21 @@ class Autopilot:
                             raise TypeError("Scanner returned an invalid response")
                         result["scanned"] += scan.get("scanned") or 0
                         result["actionable"] += scan.get("actionable") or 0
+                        result["errors"] += scan.get("error_count") or 0
+                        result["cycle_success"] = (
+                            result["cycle_success"] and scan.get("success") is True
+                        )
                         if scan.get("rejections"):
                             result.setdefault("rejections", {})[domain] = scan["rejections"]
                         if scan.get("rejection_samples"):
                             result.setdefault("rejection_samples", []).extend(
                                 scan["rejection_samples"][:8])
-                        if not scan.get("success"):
+                        # Per-symbol errors are reported separately. A partial
+                        # cycle may still execute its valid opportunities; only a
+                        # fatal universe/feed failure blocks the whole domain.
+                        if scan.get("fatal_errors", 0) > 0 or (
+                            not scan.get("success") and not scan.get("opportunities")
+                        ):
                             result["skipped"].append({
                                 "domain": domain,
                                 "reason": scan.get("reason", "Scan failed"),
