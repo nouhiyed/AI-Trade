@@ -227,6 +227,7 @@ class Autopilot:
                     skip(fresh_plan.get("reason") or
                          "Fresh V3 confirmation failed; waiting for a better entry")
                     continue
+                fresh_signal["_funnel_cycle_id"] = signal.get("_funnel_cycle_id")
                 signal, plan = fresh_signal, fresh_plan
                 confidence = float(signal.get("confidence") or 0)
 
