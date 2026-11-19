@@ -1515,13 +1515,17 @@ class TradingCoordinator(SpotDemoMixin):
             try:
                 analysis = self.analyze_live(symbol, domains=["futures"])
                 signal = analysis.get("signals", {}).get("futures", {})
+                if analysis.get("data_errors") or (
+                    isinstance(signal, dict) and signal.get("error")
+                ):
+                    errors[symbol] = str(
+                        (signal.get("error") if isinstance(signal, dict) else None)
+                        or analysis.get("data_errors"))
+                    self._funnel_record("futures", None, error=True,
+                                        reason="Analysis data error", cycle_id=cycle_id)
+                    continue
                 if not isinstance(signal, dict):
                     reject("Missing Futures analysis", symbol)
-                    continue
-                if signal.get("error") or analysis.get("data_errors"):
-                    errors[symbol] = str(signal.get("error") or analysis.get("data_errors"))
-                    self._funnel_record("futures", "errors", error=True,
-                                        reason="Analysis data error", cycle_id=cycle_id)
                     continue
                 self._funnel_record("futures", "passed_filter", cycle_id=cycle_id)
                 direction = str(signal.get("direction", "WAIT")).upper()
