@@ -97,6 +97,10 @@ class PipelineFunnel:
     def _serialize(cycle):
         result = dict(cycle)
         result["rejections"] = dict(cycle["rejections"])
+        result["top_rejections"] = [
+            {"reason": reason, "count": count}
+            for reason, count in cycle["rejections"].most_common(5)
+        ]
         return result
 
     def snapshot(self, domain=None):
