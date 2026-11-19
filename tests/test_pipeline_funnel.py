@@ -1,4 +1,6 @@
+import tempfile
 import unittest
+from pathlib import Path
 
 from core.pipeline_funnel import PipelineFunnel
 
@@ -46,6 +48,20 @@ class TestPipelineFunnel(unittest.TestCase):
         self.assertEqual(len(snapshot["history"]), 1)
         self.assertEqual(snapshot["history"][0]["cycle_id"], first)
         self.assertTrue(snapshot["history"][0]["success"])
+
+    def test_funnel_history_survives_backend_restart(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_file = Path(directory) / "funnel_history.json"
+            funnel = PipelineFunnel(state_file=state_file)
+            first = funnel.start("spot", expected=10)
+            funnel.finish("spot", processed=10, expected=10)
+            funnel._cycles["spot"]["candle_open"] -= 300
+            funnel.start("spot", expected=10)
+
+            restored = PipelineFunnel(state_file=state_file)
+            snapshot = restored.snapshot("spot")
+            self.assertEqual(snapshot["history"][0]["cycle_id"], first)
+            self.assertTrue(snapshot["history"][0]["success"])
 
     def test_cycles_are_aggregated_within_the_same_five_minute_candle(self):
         funnel = PipelineFunnel()
