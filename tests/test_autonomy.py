@@ -170,6 +170,21 @@ class TestAutopilot(Base):
         self.assertEqual(out["opened"], [])
         self.assertIn("disabled by learning", out["skipped"][0]["reason"])
 
+    def test_explore_profile_uses_small_risk_tags_trade_and_ignores_learning_disable(self):
+        self._scan([("BTCUSDT", 80)])
+        key = setup_key("LONG", 80, 2.0, "futures", "v3_micro_pullback")
+        self.c.journal.set_setup_disabled(key, True, "standard profile sample")
+        ap = Autopilot(self.c, config_path="config/ap-explore.json")
+        ap.update({"enabled": True, "profile": "explore", "risk_pct": 0.8})
+        self.assertEqual(ap.config["risk_pct"], 0.25)
+        out = ap.tick()
+        self.assertEqual(len(out["opened"]), 1, out)
+        trade = self.c.demo_positions[out["opened"][0]["trade_id"]]
+        self.assertEqual(trade["profile"], "explore")
+        row = self.c.journal.recent()[0]
+        self.assertEqual(row["profile"], "explore")
+        self.assertEqual(out["profile"], "explore")
+
     def test_context_veto_blocks_trade(self):
         class Ctx:
             def assess(self, symbol, direction):
