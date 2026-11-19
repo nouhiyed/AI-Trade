@@ -225,34 +225,17 @@ class Autopilot:
                     skip("Cooldown after a recent trade")
                     continue
 
-                # Rebuild analysis from fresh, closed Binance candles immediately
-                # before execution. Scanner opportunities may be stale by the time
-                # the autopilot reaches them.
-                fresh = self.c.analyze_live(symbol, domains=[domain])
-                fresh_signal = (fresh.get("signals") or {}).get(domain)
-                if not isinstance(fresh_signal, dict):
-                    skip("Fresh pre-entry analysis is unavailable")
-                    continue
-                fresh_direction = str(fresh_signal.get("direction", "WAIT")).upper()
-                normalized_direction = "LONG" if fresh_direction == "BUY" else fresh_direction
-                if normalized_direction != direction:
-                    skip("Direction changed during pre-entry confirmation")
-                    continue
-                fresh_plan = fresh_signal.get("trade_plan")
-                if fresh_signal.get("strategy_version") != "v3" or not isinstance(fresh_plan, dict) or fresh_plan.get("strategy_version") != "v3":
-                    skip("Fresh analysis is not an approved V3 signal and plan")
-                    continue
-                if fresh_plan.get("success") is not True:
-                    skip(fresh_plan.get("reason") or
-                         "Fresh V3 confirmation failed; waiting for a better entry")
-                    continue
-                fresh_signal["_funnel_cycle_id"] = signal.get("_funnel_cycle_id")
-                signal, plan = fresh_signal, fresh_plan
-                confidence = float(signal.get("confidence") or 0)
-
-                if confidence < float(cfg["min_confidence"]):
-                    skip("Fresh confidence below minimum")
-                    continue
+                # Execute the already-approved scan opportunity immediately.
+                # Freshness and price drift are checked against the streamed
+                # bid/ask at the execution boundary (90s / 0.3 ATR); re-running
+                # the full strategy here used to invalidate otherwise valid
+                # signals and introduced a second REST analysis request.
+                signal = dict(signal)
+                if not signal.get("_signal_created_at"):
+                    signal["_signal_created_at"] = self.clock()
+                signal["_funnel_cycle_id"] = (
+                    signal.get("_funnel_cycle_id") or opp.get("scan_cycle_id"))
+                confidence = float(signal.get("confidence") or confidence)
 
                 if confidence < float(cfg["min_confidence"]):
                     skip("Confidence below minimum")
@@ -312,10 +295,13 @@ class Autopilot:
                     skip(trade.get("reason", "Rejected"))
             except Exception as error:
                 # Isolate malformed opportunities and transient agent errors.
+                reason = "Opportunity processing error: " + str(error)
                 result["skipped"].append({
-                    "domain": domain, "symbol": symbol,
-                    "reason": "Opportunity processing error: " + str(error),
+                    "domain": domain, "symbol": symbol, "reason": reason,
                 })
+                self.c._funnel_record(
+                    domain, None, reason=reason,
+                    cycle_id=(opp.get("signal") or {}).get("_funnel_cycle_id"))
         return slots
 
     def run_forever(self, stop_event=None):
