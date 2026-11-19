@@ -74,7 +74,7 @@ class BinanceCandleCache:
         grouped.attrs["source"] = "binance_websocket_cache"
         return grouped
 
-    def _fetch_history(self, market, symbol, interval, count):
+    def _fetch_history(self, market, symbol, interval, count, minimum_rows=None):
         batches = []
         remaining = int(count)
         end_time = None
@@ -96,8 +96,11 @@ class BinanceCandleCache:
         result = pd.concat(reversed(batches), ignore_index=True)
         result = result.drop_duplicates("open_time").sort_values("open_time")
         result = result.tail(count).reset_index(drop=True)
-        if len(result) < min(count, 200):
-            raise RuntimeError(f"Insufficient {interval} history for {symbol}: {len(result)}")
+        required = (minimum_rows if minimum_rows is not None else
+                    (30 if interval == "4h" else min(count, 200)))
+        if len(result) < required:
+            raise RuntimeError(
+                f"Insufficient {interval} history for {symbol}: {len(result)} / {required}")
         result.attrs.update({
             "market": market, "symbol": symbol,
             "interval": interval, "source": "binance_rest_warmup",
@@ -109,16 +112,25 @@ class BinanceCandleCache:
         key5 = self._key(market, symbol, "5m")
         key4 = self._key(market, symbol, "4h")
         try:
-            one, five = self._fetch_history(
-                market, symbol, "1m", self.ONE_MINUTE_HISTORY), self._fetch_history(
-                market, symbol, "5m", self.FIVE_MINUTE_HISTORY)
+            five_count = self.FIVE_MINUTE_HISTORY if market == "spot" else 800
+            one = self._fetch_history(
+                market, symbol, "1m", self.ONE_MINUTE_HISTORY)
+            five = self._fetch_history(
+                market, symbol, "5m", five_count,
+                minimum_rows=five_count if market == "spot" else 200)
             with self._lock:
                 self._candles[key1] = one
                 self._candles[key5] = five
-                if market == "spot":
-                    self._candles[key4] = self._fetch_history(
-                        market, symbol, "4h", self.FOUR_HOUR_HISTORY)
                 self._errors.pop(f"{market}:{symbol}", None)
+            if market == "spot":
+                try:
+                    four = self._fetch_history(
+                        market, symbol, "4h", self.FOUR_HOUR_HISTORY,
+                        minimum_rows=30)
+                    with self._lock:
+                        self._candles[key4] = four
+                except Exception as error:
+                    self._set_error(f"spot:{symbol}:4h", error)
             return True
         except Exception as error:
             with self._lock:
