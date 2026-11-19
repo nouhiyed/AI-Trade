@@ -353,10 +353,29 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
   Widget _metricsCard() {
     final o = _map(_perf['overall']);
     final net = double.tryParse('${o['net_pnl']}') ?? 0;
+    final standardTrades = int.tryParse('${_perf['standard_trades'] ?? o['trades'] ?? 0}') ?? 0;
+    final exploreTrades = int.tryParse('${_perf['explore_trades'] ?? 0}') ?? 0;
     return _card(Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _title(t('الأداء', 'Performance')),
+        Text(
+          t('مؤشرات الربحية تعرض Standard فقط. صفقات Explore منفصلة ولا تدخل في الحكم على الأداء.',
+            'Profitability metrics show Standard only. Explore trades are separate and excluded from performance judgments.'),
+          style: TextStyle(color: widget.muted, fontSize: 10),
+        ),
+        const SizedBox(height: 5),
+        Text(
+          '${t('Standard', 'Standard')}: $standardTrades / 150   •   Explore: $exploreTrades',
+          style: TextStyle(color: widget.muted, fontSize: 10, fontWeight: FontWeight.w700),
+        ),
+        if (standardTrades < 150)
+          Text(
+            t('لا تحكم على الربحية قبل 150 صفقة Standard ومقارنة بخط أساس عشوائي.',
+              'Do not assess profitability before 150 Standard trades and a random baseline comparison.'),
+            style: const TextStyle(color: Colors.orange, fontSize: 10),
+          ),
+        const SizedBox(height: 8),
         Wrap(
           runSpacing: 12,
           spacing: 6,
