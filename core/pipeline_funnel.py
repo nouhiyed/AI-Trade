@@ -19,6 +19,7 @@ class PipelineFunnel:
     def __init__(self):
         self._lock = RLock()
         self._cycles = {}
+        self._history = {}
 
     def start(self, domain, expected=0, timeframe="5m"):
         domain = str(domain).lower()
@@ -31,6 +32,10 @@ class PipelineFunnel:
                 current["success"] = False
                 current.pop("finished_at", None)
                 return current["cycle_id"]
+            if current:
+                history = self._history.setdefault(domain, [])
+                history.append(self._serialize(current))
+                self._history[domain] = history[-100:]
             cycle = {
                 "cycle_id": uuid4().hex,
                 "domain": domain,
@@ -91,23 +96,25 @@ class PipelineFunnel:
                 {"reason": reason, "count": count}
                 for reason, count in cycle["rejections"].most_common(5)
             ]
-            return self._serialize(cycle)
+            return self._serialize(cycle, self._history.get(domain, []))
 
     @staticmethod
-    def _serialize(cycle):
+    def _serialize(cycle, history=None):
         result = dict(cycle)
         result["rejections"] = dict(cycle["rejections"])
         result["top_rejections"] = [
             {"reason": reason, "count": count}
             for reason, count in cycle["rejections"].most_common(5)
         ]
+        result["history"] = list(history or [])
         return result
 
     def snapshot(self, domain=None):
         with self._lock:
             if domain:
-                cycle = self._cycles.get(str(domain).lower())
-                return self._serialize(cycle) if cycle else {
-                    "domain": str(domain).lower(), "available": False}
-            return {key: self._serialize(value)
+                key = str(domain).lower()
+                cycle = self._cycles.get(key)
+                return self._serialize(cycle, self._history.get(key, [])) if cycle else {
+                    "domain": key, "available": False, "history": list(self._history.get(key, []))}
+            return {key: self._serialize(value, self._history.get(key, []))
                     for key, value in self._cycles.items()}
