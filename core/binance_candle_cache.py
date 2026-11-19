@@ -111,6 +111,9 @@ class BinanceCandleCache:
         key1 = self._key(market, symbol, "1m")
         key5 = self._key(market, symbol, "5m")
         key4 = self._key(market, symbol, "4h")
+        with self._lock:
+            if key1 in self._candles and key5 in self._candles:
+                return True
         try:
             five_count = self.FIVE_MINUTE_HISTORY if market == "spot" else 800
             one = self._fetch_history(
@@ -264,18 +267,29 @@ class BinanceCandleCache:
                     self._set_error(f"spot:{symbol}:4h", error)
 
     def start(self, symbols_by_market):
-        if self._started:
-            return {"started": True, "already_started": True}
-        self._started = True
-        warmed = self.warmup(symbols_by_market)
-        for market, symbols in self._symbols.items():
-            if symbols:
-                self._stream_worker(market, symbols)
-        refresh = threading.Thread(target=self._refresh_spot_4h,
-                                   name="spot-4h-refresh", daemon=True)
-        refresh.start()
-        self._threads.append(refresh)
-        return {"started": True, "warmed_symbols": warmed,
+        if not self._started:
+            self._symbols = {
+                market: list(dict.fromkeys(
+                    str(value).strip().upper()
+                    for value in symbols_by_market.get(market, []) if str(value).strip()
+                ))[:30]
+                for market in ("spot", "futures")
+            }
+            self._started = True
+            first_start = True
+        else:
+            first_start = False
+        warmed = self.warmup(self._symbols)
+        if first_start:
+            for market, symbols in self._symbols.items():
+                if symbols:
+                    self._stream_worker(market, symbols)
+            refresh = threading.Thread(target=self._refresh_spot_4h,
+                                       name="spot-4h-refresh", daemon=True)
+            refresh.start()
+            self._threads.append(refresh)
+        return {"started": True, "already_started": not first_start,
+                "warmed_symbols": warmed,
                 "requested_symbols": sum(map(len, self._symbols.values())),
                 "errors": self.status()["errors"]}
 
