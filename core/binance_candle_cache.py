@@ -283,10 +283,15 @@ class BinanceCandleCache:
                 frame = self._candles.get(self._key(market, symbol, timeframe))
             return frame.copy() if frame is not None else None
 
-    def get_quote(self, market, symbol):
+    def get_quote(self, market, symbol, max_age_seconds=10):
         with self._lock:
             quote = self._quotes.get((str(market).lower(), str(symbol).upper()))
-            return dict(quote) if quote else None
+            if not quote:
+                return None
+            age = self.clock() - float(quote.get("received_at", 0))
+            if age < 0 or age > float(max_age_seconds):
+                return None
+            return dict(quote)
 
     def get_orderbook(self, market, symbol):
         with self._lock:
