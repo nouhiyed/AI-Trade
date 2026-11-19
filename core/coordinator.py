@@ -1056,6 +1056,8 @@ class TradingCoordinator(SpotDemoMixin):
             )
             if not reservation.get("approved"):
                 return reservation
+            self._funnel_record("futures", "risk_approved",
+                                cycle_id=signal.get("_funnel_cycle_id"))
 
             trade_id = reservation["trade_id"]
             self.risk.update_reservation_status(trade_id, "DEMO_PENDING")
@@ -1143,6 +1145,8 @@ class TradingCoordinator(SpotDemoMixin):
                 protection_verified=False,
                 execution_source="INTERNAL_DEMO",
             )
+            self._funnel_record("futures", "trade_opened",
+                                cycle_id=signal.get("_funnel_cycle_id"))
             return {"approved": True, "mode": "DEMO", **record}
 
         except Exception as error:
@@ -1497,7 +1501,7 @@ class TradingCoordinator(SpotDemoMixin):
         def reject(reason, symbol):
             key = str(reason or "No actionable signal")
             rejections[key] = rejections.get(key, 0) + 1
-            self._funnel_record("futures", "events_received", reason=key, cycle_id=cycle_id)
+            self._funnel_record("futures", None, reason=key, cycle_id=cycle_id)
             if len(rejection_samples) < 12:
                 rejection_samples.append({"symbol": symbol, "reason": key})
         processed = 0
