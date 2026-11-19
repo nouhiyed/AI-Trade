@@ -70,7 +70,8 @@ class SpotDemoMixin:
             if minimum is not None:
                 ranked = [item for item in ranked
                           if float(item.get("quote_volume", 0)) >= minimum]
-            universe = ranked[:(max(1, int(limit)) if limit is not None else 30)]
+            requested = 30 if limit is None else max(1, min(30, int(limit)))
+            universe = ranked[:requested]
         except Exception as error:
             cycle_id = self.pipeline_funnel.start("spot", 0)
             self._funnel_record("spot", None, reason=str(error), error=True,
