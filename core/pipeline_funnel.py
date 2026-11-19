@@ -1,5 +1,7 @@
 """Thread-safe per-domain scan funnel for the latest 5m scan cycle."""
+import json
 from collections import Counter
+from pathlib import Path
 from threading import RLock
 from time import time
 from uuid import uuid4
@@ -16,10 +18,44 @@ STAGES = (
 
 
 class PipelineFunnel:
-    def __init__(self):
+    def __init__(self, state_file=None):
         self._lock = RLock()
+        self.state_file = Path(state_file) if state_file else None
         self._cycles = {}
         self._history = {}
+        self._load()
+
+    def _load(self):
+        if self.state_file is None or not self.state_file.exists():
+            return
+        try:
+            payload = json.loads(self.state_file.read_text(encoding="utf-8"))
+            self._history = payload.get("history", {}) if isinstance(payload, dict) else {}
+            raw_cycles = payload.get("cycles", {}) if isinstance(payload, dict) else {}
+            for domain, cycle in raw_cycles.items():
+                if not isinstance(cycle, dict):
+                    continue
+                cycle["rejections"] = Counter(cycle.get("rejections", {}))
+                self._cycles[str(domain).lower()] = cycle
+        except (OSError, ValueError, TypeError):
+            self._cycles, self._history = {}, {}
+
+    def _save_locked(self):
+        if self.state_file is None:
+            return
+        try:
+            self.state_file.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "cycles": {key: self._serialize(value) for key, value in self._cycles.items()},
+                "history": self._history,
+            }
+            temporary = self.state_file.with_suffix(self.state_file.suffix + ".tmp")
+            temporary.write_text(json.dumps(payload, indent=2, default=str),
+                                 encoding="utf-8")
+            temporary.replace(self.state_file)
+        except OSError:
+            # Funnel metrics must never stop the scan or DEMO execution.
+            return
 
     def start(self, domain, expected=0, timeframe="5m"):
         domain = str(domain).lower()
@@ -52,6 +88,7 @@ class PipelineFunnel:
                 "success": False,
             }
             self._cycles[domain] = cycle
+            self._save_locked()
             return cycle["cycle_id"]
 
     def record(self, domain, stage, count=1, reason=None, error=False,
@@ -96,6 +133,7 @@ class PipelineFunnel:
                 {"reason": reason, "count": count}
                 for reason, count in cycle["rejections"].most_common(5)
             ]
+            self._save_locked()
             return self._serialize(cycle, self._history.get(domain, []))
 
     @staticmethod
