@@ -540,11 +540,15 @@ class APIHandler(BaseHTTPRequestHandler):
         print("[API]", format % args)
 
 def market_data_warmup_worker():
-    try:
-        result = coordinator.start_market_data()
-        print("[MARKET DATA] startup warmup:", result)
-    except Exception as error:
-        print("[MARKET DATA] startup warmup failed:", error)
+    while True:
+        try:
+            result = coordinator.start_market_data()
+            print("[MARKET DATA] startup warmup:", result)
+            if result.get("success"):
+                return
+        except Exception as error:
+            print("[MARKET DATA] startup warmup failed:", error)
+        time.sleep(30)
 
 
 def demo_monitor_worker():
