@@ -1510,7 +1510,7 @@ class _TradeShellState extends State<TradeShell>
             Text(tr('أكثر أسباب الرفض', 'Top rejection reasons'),
               style: TextStyle(color: widget.text, fontSize: 10,
                 fontWeight: FontWeight.w800)),
-            ...rejects.take(3).map((item) {
+            ...rejects.take(5).map((item) {
               if (item is! Map) return const SizedBox.shrink();
               return Text('• ${item['reason'] ?? ''} (${item['count'] ?? 0})',
                 maxLines: 1, overflow: TextOverflow.ellipsis,
