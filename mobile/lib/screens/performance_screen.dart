@@ -290,8 +290,8 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
             'max_concurrent', asInt: true),
         if (explore)
           Text(
-            t('وضع جمع بيانات فقط: المخاطرة 0.10–0.25%، ولا تُستخدم صفقاته للحكم على الربحية.',
-              'Data collection only: 0.10–0.25% risk. Do not use Explore trades to judge profitability.'),
+            t('وضع جمع بيانات فقط: المخاطرة 0.10–0.25%، يخفف فيتو 4h/1h ونافذة الدخول؛ تبقى خطة V3 والوقف والهدف إلزامية.',
+              'Data collection only: 0.10–0.25% risk; relaxes the 4h/1h context veto and entry window. V3 plan, stop and target remain mandatory.'),
             style: const TextStyle(color: Colors.orange, fontSize: 10),
           ),
         slider(t('المخاطرة لكل صفقة %', 'Risk per trade %'), risk, 0.1,
