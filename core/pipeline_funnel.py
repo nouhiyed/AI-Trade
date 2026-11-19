@@ -30,7 +30,8 @@ class PipelineFunnel:
             return
         try:
             payload = json.loads(self.state_file.read_text(encoding="utf-8"))
-            self._history = payload.get("history", {}) if isinstance(payload, dict) else {}
+            raw_history = payload.get("history", {}) if isinstance(payload, dict) else {}
+            self._history = raw_history if isinstance(raw_history, dict) else {}
             raw_cycles = payload.get("cycles", {}) if isinstance(payload, dict) else {}
             for domain, cycle in raw_cycles.items():
                 if not isinstance(cycle, dict):
