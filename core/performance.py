@@ -43,16 +43,23 @@ def summarize(trades):
 
 
 def compute(trades):
-    """Overall metrics, split by agent domain, by setup and by close reason."""
-    trades = [t for t in trades if t.get("status", "CLOSED") == "CLOSED"]
+    """Standard performance excludes Explore; Explore remains separately visible."""
+    closed = [t for t in trades if t.get("status", "CLOSED") == "CLOSED"]
+    standard = [t for t in closed if str(t.get("profile") or "standard").lower() != "explore"]
+    explore = [t for t in closed if str(t.get("profile") or "standard").lower() == "explore"]
     curve, equity = [], 0.0
-    for trade in trades:
+    for trade in standard:
         equity += float(trade.get("net_pnl") or 0.0)
         curve.append(round(equity, 4))
     return {
-        "overall": summarize(trades),
-        "by_domain": {k: summarize(v) for k, v in _group(trades, "domain").items()},
-        "by_setup": {k: summarize(v) for k, v in _group(trades, "setup_key").items()},
-        "by_reason": {k: summarize(v) for k, v in _group(trades, "close_reason").items()},
+        "overall": summarize(standard),
+        "by_domain": {k: summarize(v) for k, v in _group(standard, "domain").items()},
+        "by_setup": {k: summarize(v) for k, v in _group(standard, "setup_key").items()},
+        "by_reason": {k: summarize(v) for k, v in _group(standard, "close_reason").items()},
         "equity_curve": curve[-200:],
+        "standard_trades": len(standard),
+        "explore_trades": len(explore),
+        "explore": summarize(explore),
+        "profitability_evaluation_ready": len(standard) >= 150,
+        "random_baseline_required": True,
     }
