@@ -509,6 +509,10 @@ class TradingCoordinator(SpotDemoMixin):
             record["setup_key"] = key
             record["confidence"] = confidence
             record["risk_amount"] = reservation.get("risk")
+            record["requested_risk_amount"] = reservation.get(
+                "requested_risk", reservation.get("risk"))
+            record["position_size_capped"] = bool(reservation.get("sizing_capped"))
+            record["reserved_margin"] = reservation.get("margin")
             record["context"] = context
             self.journal.record_open(
                 record["trade_id"], record.get("domain", "futures"),
