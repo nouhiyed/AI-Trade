@@ -53,7 +53,7 @@ class TradingCoordinator(SpotDemoMixin):
         self._demo_position_locks = {}
         self._demo_position_locks_guard = threading.Lock()
         self.mode = "DEMO"
-        self.pipeline_funnel = PipelineFunnel()
+        self.pipeline_funnel = PipelineFunnel(state_file="data/funnel_history.json")
         self.demo_state_path = Path("config/demo_state.json")
         self.demo_positions = self._load_demo_state()
 
